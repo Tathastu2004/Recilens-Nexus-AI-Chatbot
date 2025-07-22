@@ -134,3 +134,54 @@ export const loginUser = async (req, res) => {
 export const logoutUser = async (req, res) => {
   res.status(200).json({ message: 'Sign out successful (handled on client)' });
 };
+
+// 📌 Send Password Reset OTP
+ export const sendPasswordResetOtp = async (req, res) => {
+  const { email } = req.body;
+  try {
+    const user = await User.findOne({ email });
+    if (!user || !user.isVerified) {
+      return res.status(404).json({ message: 'No verified account found with this email' });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    user.otp = otp;
+    user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
+    await user.save();
+
+    await transporter.sendMail({
+      from: process.env.EMAIL,
+      to: email,
+      subject: 'Reset Your Password - Nexus AI Chatbot',
+      text: `Your OTP for password reset is ${otp}. It is valid for 10 minutes.`,
+    });
+
+    res.status(200).json({ message: 'OTP sent to your email for password reset' });
+
+  } catch (error) {
+    console.error('Send Reset OTP Error:', error.message);
+    res.status(500).json({ message: 'Server error during password reset request' });
+  }
+};
+// 📌 Reset Password using OTP
+export const resetPasswordWithOtp = async (req, res) => {
+  const { email, otp, newPassword } = req.body;
+  try {
+    const user = await User.findOne({ email });
+
+    if (!user || user.otp !== otp || user.otpExpires < Date.now()) {
+      return res.status(400).json({ message: 'Invalid or expired OTP' });
+    }
+
+    user.password = await bcryptjs.hash(newPassword, 10);
+    user.otp = null;
+    user.otpExpires = null;
+    await user.save();
+
+    res.status(200).json({ message: 'Password reset successfully' });
+
+  } catch (error) {
+    console.error('Reset Password Error:', error.message);
+    res.status(500).json({ message: 'Server error during password reset' });
+  }
+};
