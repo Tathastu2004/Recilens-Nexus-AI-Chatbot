@@ -5,12 +5,19 @@ import transporter from '../config/nodemailer.js';
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
+// 🔐 Whitelisted emails allowed to register as admin
+const allowedAdminEmails = ['apurvsrivastava1510@gmail.com'];
+
 // 📌 Register new user & send OTP
 export const registerUser = async (req, res) => {
   const { email, password, role } = req.body;
   try {
-    const existingUser = await User.findOne({ email });
+    // ❌ Block unauthorized admin registrations
+    if (role === 'admin' && !allowedAdminEmails.includes(email)) {
+      return res.status(403).json({ message: 'You are not authorized to register as admin' });
+    }
 
+    const existingUser = await User.findOne({ email });
     if (existingUser && existingUser.isVerified) {
       return res.status(400).json({ message: 'User already registered and verified' });
     }
@@ -21,7 +28,7 @@ export const registerUser = async (req, res) => {
     let user = existingUser || new User({ email, role: role || 'client' });
     user.password = hashedPassword;
     user.otp = otp;
-    user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
+    user.otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
     user.isVerified = false;
 
     await user.save();
@@ -37,7 +44,7 @@ export const registerUser = async (req, res) => {
 
   } catch (error) {
     console.error('Register Error:', error.message);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error during registration' });
   }
 };
 
@@ -60,7 +67,7 @@ export const verifyOtp = async (req, res) => {
 
   } catch (error) {
     console.error('OTP Verification Error:', error.message);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error during OTP verification' });
   }
 };
 
@@ -88,7 +95,7 @@ export const resendOtp = async (req, res) => {
 
   } catch (error) {
     console.error('Resend OTP Error:', error.message);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error during OTP resend' });
   }
 };
 
@@ -111,15 +118,19 @@ export const loginUser = async (req, res) => {
       { expiresIn: '1d' }
     );
 
-    res.status(200).json({ message: 'Login successful', token, role: user.role });
+    res.status(200).json({
+      message: 'Login successful',
+      token,
+      role: user.role
+    });
 
   } catch (error) {
     console.error('Login Error:', error.message);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error during login' });
   }
 };
 
-// 📌 Sign Out (Frontend should handle token removal)
+// 📌 Sign Out (frontend responsibility)
 export const logoutUser = async (req, res) => {
   res.status(200).json({ message: 'Sign out successful (handled on client)' });
 };

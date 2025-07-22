@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 import connectDB from './config/mongodb.js';
 import authRoutes from './routes/authRoutes.js';
+import adminRoutes from './admin/adminRoutes.js';
 
 
 
@@ -30,6 +31,7 @@ app.get('/', (req, res) => {
 
 // Auth routes
 app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
