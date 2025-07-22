@@ -1,0 +1,9 @@
+// filepath: /Users/apurv79/F/NexusChatBot/Recilens-Nexus-AI-Chatbot/frontend/jsconfig.json
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}

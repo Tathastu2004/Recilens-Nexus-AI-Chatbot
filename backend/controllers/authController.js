@@ -10,7 +10,8 @@ const allowedAdminEmails = ['apurvsrivastava1510@gmail.com'];
 
 // 📌 Register new user & send OTP
 export const registerUser = async (req, res) => {
-  const { email, password, role } = req.body;
+  console.log('Registering user:', req.body);
+  const { name, email, password, role } = req.body;
   try {
     // ❌ Block unauthorized admin registrations
     if (role === 'admin' && !allowedAdminEmails.includes(email)) {
@@ -25,7 +26,8 @@ export const registerUser = async (req, res) => {
     const hashedPassword = await bcryptjs.hash(password, 10);
     const otp = generateOTP();
 
-    let user = existingUser || new User({ email, role: role || 'client' });
+    let user = existingUser || new User({ name, email, role: role || 'client' });
+    user.name = name;
     user.password = hashedPassword;
     user.otp = otp;
     user.otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
@@ -101,6 +103,13 @@ export const resendOtp = async (req, res) => {
 
 // 📌 Login with JWT
 export const loginUser = async (req, res) => {
+  //  console.log('Headers:', req.headers);
+  console.log('Raw req.body:', req.body);
+
+   if (!req.body || typeof req.body !== 'object') {
+    return res.status(400).json({ message: 'Missing or malformed request body' });
+  }
+
   const { email, password } = req.body;
   try {
     const user = await User.findOne({ email });

@@ -5,6 +5,7 @@ dotenv.config();
 import connectDB from './config/mongodb.js';
 import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './admin/adminRoutes.js';
+import userRoutes from './routes/userRoutes.js';
 
 
 
@@ -20,6 +21,7 @@ if (!process.env.MONGO_URI) {
 connectDB();
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 
 
@@ -32,6 +34,7 @@ app.get('/', (req, res) => {
 // Auth routes
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/user', userRoutes); // Ensure userRoutes is imported from the correct file
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
