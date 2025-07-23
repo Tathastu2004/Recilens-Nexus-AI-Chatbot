@@ -1,5 +1,6 @@
 "use client";
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Sidebar, SidebarBody, SidebarLink } from "./ui/sidebar.jsx";
 import {
   IconArrowLeft,
@@ -9,9 +10,27 @@ import {
 } from "@tabler/icons-react";
 import { motion } from "motion/react";
 import { cn } from "../lib/utils.js";
+import { useUser } from "../context/UserContext.jsx";
 
 const SideBar = () => {
   const [chats, setChats] = useState([]); // State for previous chats
+  const { user, logoutUser } = useUser(); // Get user data and logout function
+  const navigate = useNavigate();
+
+  // Handle logout
+  const handleLogout = async () => {
+    try {
+      const result = await logoutUser();
+      console.log('Logout result:', result);
+      
+      // Always redirect to signup after logout, regardless of success/failure
+      navigate('/signup');
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Still redirect to signup even if there's an error
+      navigate('/signup');
+    }
+  };
 
   const links = [
     {
@@ -41,10 +60,12 @@ const SideBar = () => {
       icon: (
         <IconArrowLeft className="h-5 w-5 shrink-0 text-neutral-700 dark:text-neutral-200" />
       ),
+      onClick: handleLogout, // Add onClick handler for logout
     },
   ];
 
   const [open, setOpen] = useState(true);
+  
   return (
     <div className="h-screen w-full">
       <Sidebar open={open} setOpen={setOpen} animate={true}>
@@ -80,7 +101,11 @@ const SideBar = () => {
             {/* Bottom Navigation */}
             <div className="mt-auto pt-4 border-t border-border">
               {links.slice(1).map((link, idx) => (
-                <SidebarLink key={idx} link={link} />
+                <SidebarLink 
+                  key={idx} 
+                  link={link}
+                  onClick={link.onClick} // Pass onClick handler if it exists
+                />
               ))}
             </div>
           </div>
@@ -89,11 +114,11 @@ const SideBar = () => {
           <div>
             <SidebarLink
               link={{
-                label: "User Name",
+                label: user?.name || "User Name", // Use actual user name from context
                 href: "#",
                 icon: (
                   <img
-                    src="https://assets.aceternity.com/manu.png"
+                    src={user?.profilePicture || "https://assets.aceternity.com/manu.png"}
                     className="h-7 w-7 shrink-0 rounded-full"
                     width={50}
                     height={50}

@@ -42,11 +42,17 @@ export const registerUser = async (req, res) => {
       text: `Your OTP code is ${otp}. It is valid for 10 minutes.`,
     });
 
-    res.status(201).json({ message: 'OTP sent. Please verify your email.' });
+    res.status(201).json({ 
+      success: true, // Add this
+      message: 'OTP sent. Please verify your email.' 
+    });
 
   } catch (error) {
     console.error('Register Error:', error.message);
-    res.status(500).json({ message: 'Server error during registration' });
+    res.status(500).json({ 
+      success: false, // Add this
+      message: 'Server error during registration' 
+    });
   }
 };
 
@@ -65,11 +71,17 @@ export const verifyOtp = async (req, res) => {
     user.otpExpires = null;
     await user.save();
 
-    res.status(200).json({ message: 'Email verified successfully' });
+    res.status(200).json({ 
+      success: true, // Add this
+      message: 'Email verified successfully' 
+    });
 
   } catch (error) {
     console.error('OTP Verification Error:', error.message);
-    res.status(500).json({ message: 'Server error during OTP verification' });
+    res.status(500).json({ 
+      success: false, // Add this
+      message: 'Server error during OTP verification' 
+    });
   }
 };
 
@@ -93,11 +105,17 @@ export const resendOtp = async (req, res) => {
       text: `Your new OTP code is ${otp}. It is valid for 10 minutes.`,
     });
 
-    res.status(200).json({ message: 'OTP resent successfully' });
+    res.status(200).json({ 
+      success: true, // Add this
+      message: 'OTP resent successfully' 
+    });
 
   } catch (error) {
     console.error('Resend OTP Error:', error.message);
-    res.status(500).json({ message: 'Server error during OTP resend' });
+    res.status(500).json({ 
+      success: false, // Add this
+      message: 'Server error during OTP resend' 
+    });
   }
 };
 
@@ -118,7 +136,7 @@ export const loginUser = async (req, res) => {
       return res.status(400).json({ message: 'Email not verified or user not found' });
     }
 
-    const isMatch = await bcryptjs.compare(password, user.password);
+    const isMatch = bcryptjs.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });
 
     const token = jwt.sign(
@@ -165,11 +183,17 @@ export const logoutUser = async (req, res) => {
       text: `Your OTP for password reset is ${otp}. It is valid for 10 minutes.`,
     });
 
-    res.status(200).json({ message: 'OTP sent to your email for password reset' });
+    res.status(200).json({ 
+      success: true, // Add this
+      message: 'OTP sent to your email for password reset' 
+    });
 
   } catch (error) {
     console.error('Send Reset OTP Error:', error.message);
-    res.status(500).json({ message: 'Server error during password reset request' });
+    res.status(500).json({ 
+      success: false, // Add this
+      message: 'Server error during password reset request' 
+    });
   }
 };
 // 📌 Reset Password using OTP
@@ -187,10 +211,57 @@ export const resetPasswordWithOtp = async (req, res) => {
     user.otpExpires = null;
     await user.save();
 
-    res.status(200).json({ message: 'Password reset successfully' });
+    res.status(200).json({ 
+      success: true,
+      message: 'Password reset successfully' });
 
   } catch (error) {
     console.error('Reset Password Error:', error.message);
-    res.status(500).json({ message: 'Server error during password reset' });
+    res.status(500).json({ success: false, message: 'Server error during password reset' });
   }
 };
+// 📌 Get User Profil
+export const getUserProfile = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    res.status(200).json({
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      profilePicture: user.profilePicture
+    });
+
+  } catch (error) {
+    console.error('Get Profile Error:', error.message);
+    res.status(500).json({ message: 'Server error while fetching profile' });
+  }
+};
+//upadte user profile
+export const updateUserProfile = async (req, res) => {
+  const { name, email } = req.body;
+  try {
+    const user = req.user;
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    user.name = name || user.name;
+    user.email = email || user.email;
+
+    await user.save();
+
+    res.status(200).json({
+      message: 'Profile updated successfully',
+      user: {
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        profilePicture: user.profilePicture
+      }
+    });
+
+  } catch (error) {
+    console.error('Update Profile Error:', error.message);
+    res.status(500).json({ message: 'Server error while updating profile' });
+  }
+}

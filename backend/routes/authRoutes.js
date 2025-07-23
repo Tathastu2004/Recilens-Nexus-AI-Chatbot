@@ -6,7 +6,9 @@ import {
   loginUser,
   logoutUser,
   sendPasswordResetOtp,
-  resetPasswordWithOtp
+  resetPasswordWithOtp,
+  getUserProfile,
+  updateUserProfile
 } from '../controllers/authController.js';
 import { verifyToken } from '../middleware/authMiddleware.js';
 import { uploadProfilePic } from '../middleware/uploadMiddleware.js';
@@ -23,6 +25,8 @@ router.post('/verify-otp', verifyOtp);
 router.post('/resend-otp', resendOtp);
 router.post('/login', loginUser);
 router.post('/logout', logoutUser);
+router.get('/getprofile', verifyToken, getUserProfile);
+router.put('/updateprofile', verifyToken, uploadProfilePic.single('photo'), updateUserProfile);
 router.post('/forgot-password', sendPasswordResetOtp);
 router.post('/reset-password', resetPasswordWithOtp);
 

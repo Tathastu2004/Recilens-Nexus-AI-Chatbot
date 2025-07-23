@@ -130,12 +130,17 @@ export const MobileSidebar = ({
   );
 };
 
-export const SidebarLink = ({
-  link,
-  className,
-  ...props
-}) => {
+// Update the SidebarLink component to handle onClick events
+export const SidebarLink = ({ link, className, onClick, ...props }) => {
   const { open, animate } = useSidebar();
+
+  const handleClick = (e) => {
+    if (onClick) {
+      e.preventDefault();
+      onClick();
+    }
+  };
+
   return (
     <a
       href={link.href}
@@ -143,10 +148,10 @@ export const SidebarLink = ({
         "flex items-center justify-start gap-2  group/sidebar py-2",
         className
       )}
+      onClick={handleClick}
       {...props}
     >
       {link.icon}
-
       <motion.span
         animate={{
           display: animate ? (open ? "inline-block" : "none") : "inline-block",
