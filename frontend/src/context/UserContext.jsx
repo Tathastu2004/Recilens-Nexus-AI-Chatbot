@@ -23,15 +23,29 @@ export const UserProvider = ({ children }) => {
 
   // Check if user is logged in on component mount
   useEffect(() => {
+    console.log('🔄 UserProvider mounted, checking auth status...');
     checkAuthStatus();
   }, []);
 
+  // Add useEffect to debug user state changes
+  useEffect(() => {
+    console.log('👤 User state changed:', {
+      user,
+      isAuthenticated,
+      loading,
+      hasToken: !!localStorage.getItem('token')
+    });
+  }, [user, isAuthenticated, loading]);
+
   // Update the checkAuthStatus function
   const checkAuthStatus = async () => {
+    console.log('🔍 Checking auth status...');
     try {
       const token = localStorage.getItem('token');
+      console.log('🔑 Token from localStorage:', token ? `${token.substring(0, 20)}...` : 'None');
       
       if (!token) {
+        console.log('❌ No token found, setting unauthenticated');
         setLoading(false);
         setIsAuthenticated(false);
         return;
@@ -39,54 +53,65 @@ export const UserProvider = ({ children }) => {
 
       // If we have a token, assume user is authenticated until proven otherwise
       setIsAuthenticated(true);
+      console.log('✅ Token found, setting authenticated to true');
       
       try {
+        console.log('📡 Fetching user profile...');
         const response = await axios.get(`${API_BASE_URL}/api/auth/getprofile`, {
           headers: {
             'Authorization': `Bearer ${token}`,
           },
-          timeout: 10000, // 10 second timeout
+          timeout: 10000,
+        });
+
+        console.log('📊 Profile response:', {
+          status: response.status,
+          data: response.data,
+          success: response.data?.success
         });
 
         if (response.data.success || response.status === 200) {
-          setUser(response.data.user || response.data);
+          const userData = response.data.user || response.data;
+          console.log('👤 Setting user data:', userData);
+          setUser(userData);
           setIsAuthenticated(true);
         } else {
+          console.log('❌ Profile fetch unsuccessful:', response.data);
           throw new Error('Profile fetch failed');
         }
       } catch (profileError) {
-        console.error('Profile fetch error:', profileError);
+        console.error('❌ Profile fetch error:', profileError);
         
         // Only clear auth on authentication errors (401, 403)
         if (profileError.response?.status === 401 || 
             profileError.response?.status === 403) {
-          console.log('Authentication error, clearing session');
+          console.log('🔐 Authentication error, clearing session');
           localStorage.removeItem('token');
           setUser(null);
           setIsAuthenticated(false);
         } else {
-          // For network errors, timeout, etc., keep the user logged in
-          console.log('Network/server error, keeping user logged in');
-          // Keep isAuthenticated as true, just don't update user data
+          console.log('🌐 Network/server error, keeping user logged in');
         }
       }
       
     } catch (error) {
-      console.error('Auth check failed:', error);
-      // Only clear on critical errors
+      console.error('💥 Auth check failed:', error);
       localStorage.removeItem('token');
       setUser(null);
       setIsAuthenticated(false);
     } finally {
+      console.log('✅ Auth check complete, setting loading to false');
       setLoading(false);
     }
   };
 
   // Register User - POST /api/auth/register
   const registerUser = async (userData) => {
+    console.log('📝 Registering user:', userData);
     try {
       setLoading(true);
       const response = await axios.post(`${API_BASE_URL}/api/auth/register`, userData);
+      console.log('📝 Registration response:', response.data);
       
       return {
         success: response.data.success,
@@ -94,7 +119,7 @@ export const UserProvider = ({ children }) => {
         data: response.data
       };
     } catch (error) {
-      console.error('Registration error:', error);
+      console.error('❌ Registration error:', error);
       return {
         success: false,
         message: error.response?.data?.message || 'Registration failed'
@@ -106,12 +131,14 @@ export const UserProvider = ({ children }) => {
 
   // Verify OTP - POST /api/auth/verify-otp
   const verifyOtp = async (email, otp) => {
+    console.log('🔐 Verifying OTP for:', email);
     try {
       setLoading(true);
       const response = await axios.post(`${API_BASE_URL}/api/auth/verify-otp`, {
         email,
         otp
       });
+      console.log('🔐 OTP verification response:', response.data);
       
       return {
         success: response.data.success,
@@ -119,7 +146,7 @@ export const UserProvider = ({ children }) => {
         data: response.data
       };
     } catch (error) {
-      console.error('OTP verification error:', error);
+      console.error('❌ OTP verification error:', error);
       return {
         success: false,
         message: error.response?.data?.message || 'OTP verification failed'
@@ -131,11 +158,13 @@ export const UserProvider = ({ children }) => {
 
   // Resend OTP - POST /api/auth/resend-otp
   const resendOtp = async (email) => {
+    console.log('🔄 Resending OTP for:', email);
     try {
       setLoading(true);
       const response = await axios.post(`${API_BASE_URL}/api/auth/resend-otp`, {
         email
       });
+      console.log('🔄 Resend OTP response:', response.data);
       
       return {
         success: response.data.success,
@@ -143,7 +172,7 @@ export const UserProvider = ({ children }) => {
         data: response.data
       };
     } catch (error) {
-      console.error('Resend OTP error:', error);
+      console.error('❌ Resend OTP error:', error);
       return {
         success: false,
         message: error.response?.data?.message || 'Failed to resend OTP'
@@ -155,40 +184,56 @@ export const UserProvider = ({ children }) => {
 
   // Login User - POST /api/auth/login
   const loginUser = async (credentials) => {
-  try {
-    setLoading(true);
-    console.log('Sending login request with:', credentials);
-    
-    const response = await axios.post(`${API_BASE_URL}/api/auth/login`, credentials, {
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
+    console.log('🔑 Logging in user:', credentials);
+    try {
+      setLoading(true);
+      
+      const response = await axios.post(`${API_BASE_URL}/api/auth/login`, credentials, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
 
-    const { token, role, user } = response.data;
-    localStorage.setItem('token', token);
-    setUser({ token, role, ...user });
-    setIsAuthenticated(true);
-    
-    return {
-      success: true,
-      message: response.data.message || 'Login successful',
-      role: role, // Make sure role is available in the response
-      data: response.data
-    };
-  } catch (error) {
-    console.error('Login error:', error);
-    return {
-      success: false,
-      message: error.response?.data?.message || 'Login failed'
-    };
-  } finally {
-    setLoading(false);
-  }
-};
+      console.log('🔑 Login response:', response.data);
+
+      const { token, role, user: userData } = response.data;
+      
+      if (token) {
+        localStorage.setItem('token', token);
+        console.log('💾 Token saved to localStorage');
+      }
+
+      // Fix: Set the complete user data properly
+      const completeUserData = {
+        ...userData,
+        token,
+        role
+      };
+      
+      console.log('👤 Setting complete user data:', completeUserData);
+      setUser(completeUserData);
+      setIsAuthenticated(true);
+      
+      return {
+        success: true,
+        message: response.data.message || 'Login successful',
+        role: role,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('❌ Login error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Login failed'
+      };
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Logout User - POST /api/auth/logout
   const logoutUser = async () => {
+    console.log('🚪 Logging out user...');
     try {
       const token = localStorage.getItem('token');
       if (token) {
@@ -197,6 +242,7 @@ export const UserProvider = ({ children }) => {
             'Authorization': `Bearer ${token}`,
           },
         });
+        console.log('✅ Logout API call successful');
       }
       
       return {
@@ -204,22 +250,22 @@ export const UserProvider = ({ children }) => {
         message: 'Logged out successfully'
       };
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error('❌ Logout error:', error);
       return {
         success: false,
         message: 'Logout failed but local session cleared'
       };
     } finally {
+      console.log('🧹 Clearing local session data');
       localStorage.removeItem('token');
       setUser(null);
       setIsAuthenticated(false);
-      // Remove automatic navigation - let components handle it
-      // navigate('/signup');
     }
   };
 
   // Get User Profile - GET /api/auth/getprofile
   const getUserProfile = async () => {
+    console.log('👤 Getting user profile...');
     try {
       const token = localStorage.getItem('token');
       const response = await axios.get(`${API_BASE_URL}/api/auth/getprofile`, {
@@ -228,21 +274,25 @@ export const UserProvider = ({ children }) => {
         },
       });
 
+      console.log('👤 Get profile response:', response.data);
+
       if (response.data.success) {
-        setUser(response.data.user);
+        const userData = response.data.user;
+        console.log('👤 Setting user data from profile:', userData);
+        setUser(userData);
         setIsAuthenticated(true);
         return {
           success: true,
-          user: response.data.user
+          user: userData
         };
       } else {
         throw new Error('Failed to fetch user profile');
       }
     } catch (error) {
-      console.error('Error fetching user:', error);
+      console.error('❌ Error fetching user:', error);
       
-      // Only clear auth state if it's a 401 (unauthorized) error
       if (error.response?.status === 401) {
+        console.log('🔐 Unauthorized, clearing session');
         localStorage.removeItem('token');
         setUser(null);
         setIsAuthenticated(false);
@@ -257,41 +307,64 @@ export const UserProvider = ({ children }) => {
 
   // Update User Profile - PUT /api/auth/updateprofile
   const updateUserProfile = async (profileData, photoFile = null) => {
+    console.log('✏️ Updating user profile:', profileData);
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
       
-      // Create FormData for multipart/form-data
-      const formData = new FormData();
-      
-      // Add profile data
-      Object.keys(profileData).forEach(key => {
-        formData.append(key, profileData[key]);
-      });
-      
-      // Add photo if provided
-      if (photoFile) {
-        formData.append('photo', photoFile);
-      }
+      // For simple updates (name, email), use JSON
+      if (!photoFile) {
+        const response = await axios.put(`${API_BASE_URL}/api/auth/updateprofile`, profileData, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
 
-      const response = await axios.put(`${API_BASE_URL}/api/auth/updateprofile`, formData, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+        console.log('✏️ Update profile response:', response.data);
 
-      if (response.data.success) {
-        setUser(response.data.user);
+        if (response.data.success && response.data.user) {
+          console.log('👤 Updating user data in context:', response.data.user);
+          setUser(response.data.user);
+        }
+        
+        return {
+          success: response.data.success,
+          message: response.data.message,
+          user: response.data.user
+        };
+      } else {
+        // For file uploads, use FormData
+        const formData = new FormData();
+        Object.keys(profileData).forEach(key => {
+          formData.append(key, profileData[key]);
+        });
+        if (photoFile) {
+          formData.append('photo', photoFile);
+        }
+
+        const response = await axios.put(`${API_BASE_URL}/api/auth/updateprofile`, formData, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data',
+          },
+        });
+
+        console.log('✏️ Update profile with photo response:', response.data);
+
+        if (response.data.success && response.data.user) {
+          console.log('👤 Updating user data in context:', response.data.user);
+          setUser(response.data.user);
+        }
+        
+        return {
+          success: response.data.success,
+          message: response.data.message,
+          user: response.data.user
+        };
       }
-      
-      return {
-        success: response.data.success,
-        message: response.data.message,
-        user: response.data.user
-      };
     } catch (error) {
-      console.error('Update profile error:', error);
+      console.error('❌ Update profile error:', error);
       return {
         success: false,
         message: error.response?.data?.message || 'Failed to update profile'
@@ -303,10 +376,12 @@ export const UserProvider = ({ children }) => {
 
   // Send Password Reset OTP - POST /api/auth/forgot-password
   const sendPasswordResetOtp = async (email) => {
+    console.log('🔄 Sending password reset OTP for:', email);
     try {
       const response = await axios.post(`${API_BASE_URL}/api/auth/forgot-password`, {
         email
       });
+      console.log('🔄 Password reset OTP response:', response.data);
       
       return {
         success: response.data.success,
@@ -314,7 +389,7 @@ export const UserProvider = ({ children }) => {
         data: response.data
       };
     } catch (error) {
-      console.error('Password reset OTP error:', error);
+      console.error('❌ Password reset OTP error:', error);
       return {
         success: false,
         message: error.response?.data?.message || 'Failed to send reset OTP'
@@ -324,13 +399,14 @@ export const UserProvider = ({ children }) => {
 
   // Reset Password with OTP - POST /api/auth/reset-password
   const resetPasswordWithOtp = async (email, otp, newPassword) => {
+    console.log('🔐 Resetting password for:', email);
     try {
       const response = await axios.post(`${API_BASE_URL}/api/auth/reset-password`, {
         email,
         otp,
         newPassword
       });
-      
+      console.log('🔐 Password reset response:', response.data);
 
       return {
         success: response.data.success,
@@ -338,7 +414,7 @@ export const UserProvider = ({ children }) => {
         data: response.data
       };
     } catch (error) {
-      console.error('Password reset error:', error);
+      console.error('❌ Password reset error:', error);
       return {
         success: false,
         message: error.response?.data?.message || 'Password reset failed'
@@ -346,42 +422,209 @@ export const UserProvider = ({ children }) => {
     }
   };
 
-  // Helper functions
+  // Upload Profile Photo - POST /api/user/profile/photo
+  const uploadProfilePhoto = async (photoFile) => {
+    console.log('📸 Uploading profile photo:', photoFile);
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('token');
+      
+      if (!photoFile) {
+        return {
+          success: false,
+          message: 'No photo file provided'
+        };
+      }
+
+      const formData = new FormData();
+      formData.append('photo', photoFile);
+
+      const response = await axios.post(`${API_BASE_URL}/api/user/profile/photo`, formData, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      console.log('📸 Upload photo response:', response.data);
+
+      // Update user profile picture in context
+      if (response.data.success && (response.data.imageUrl || response.data.user)) {
+        setUser(prevUser => {
+          const updatedUser = {
+            ...prevUser,
+            profilePicture: response.data.imageUrl || response.data.user.profilePicture
+          };
+          console.log('👤 Updated user with new photo:', updatedUser);
+          return updatedUser;
+        });
+        
+        // Force re-authentication to get fresh user data
+        setTimeout(() => {
+          getUserProfile();
+        }, 500);
+      }
+
+      return {
+        success: true,
+        message: response.data.message || 'Profile photo uploaded successfully',
+        imageUrl: response.data.imageUrl,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('❌ Upload profile photo error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to upload profile photo'
+      };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Get Profile Photo - GET /api/user/profile/photo
+  const getProfilePhoto = async () => {
+    console.log('📸 Getting profile photo...');
+    try {
+      const token = localStorage.getItem('token');
+      
+      const response = await axios.get(`${API_BASE_URL}/api/user/profile/photo`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      console.log('📸 Get photo response:', response.data);
+
+      return {
+        success: true,
+        message: 'Profile photo retrieved successfully',
+        imageUrl: response.data.imageUrl,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('❌ Get profile photo error:', error);
+      
+      if (error.response?.status === 404) {
+        return {
+          success: false,
+          message: 'No profile photo found',
+          imageUrl: null
+        };
+      }
+      
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to get profile photo'
+      };
+    }
+  };
+
+  // Delete Profile Photo - DELETE /api/user/profile/photo
+  const deleteProfilePhoto = async () => {
+    console.log('🗑️ Deleting profile photo...');
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('token');
+      
+      const response = await axios.delete(`${API_BASE_URL}/api/user/profile/photo`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      console.log('🗑️ Delete photo response:', response.data);
+
+      // Update user profile picture in context
+      setUser(prevUser => {
+        const updatedUser = {
+          ...prevUser,
+          profilePicture: null
+        };
+        console.log('👤 Updated user after photo deletion:', updatedUser);
+        return updatedUser;
+      });
+
+      return {
+        success: true,
+        message: response.data.message || 'Profile photo deleted successfully',
+        data: response.data
+      };
+    } catch (error) {
+      console.error('❌ Delete profile photo error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to delete profile photo'
+      };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Helper functions with debug
   const isEmailVerified = () => {
-    return user?.isVerified || false;
+    const verified = user?.isVerified || false;
+    console.log('🔍 isEmailVerified:', verified, 'user.isVerified:', user?.isVerified);
+    return verified;
   };
 
   const isAdmin = () => {
-    return user?.role === 'admin';
+    const admin = user?.role === 'admin';
+    console.log('🔍 isAdmin:', admin, 'user.role:', user?.role);
+    return admin;
   };
 
   const isClient = () => {
-    return user?.role === 'client';
+    const client = user?.role === 'client';
+    console.log('🔍 isClient:', client, 'user.role:', user?.role);
+    return client;
   };
 
   const getUserName = () => {
-    return user?.name || '';
+    const name = user?.name || '';
+    console.log('🔍 getUserName:', name, 'user.name:', user?.name);
+    return name;
   };
 
   const getUserEmail = () => {
-    return user?.email || '';
+    const email = user?.email || '';
+    console.log('🔍 getUserEmail:', email, 'user.email:', user?.email);
+    return email;
   };
 
   const getUserRole = () => {
-    return user?.role || '';
+    const role = user?.role || '';
+    console.log('🔍 getUserRole:', role, 'user.role:', user?.role);
+    return role;
   };
 
   const getUserProfilePicture = () => {
-    return user?.profilePicture || '';
+    const picture = user?.profilePicture || '';
+    console.log('🔍 getUserProfilePicture:', picture, 'user.profilePicture:', user?.profilePicture);
+    return picture;
   };
 
-  // Make sure your context value includes loading
+  // Debug the complete user object
+  useEffect(() => {
+    if (user) {
+      console.log('🐛 Complete user object:', {
+        user,
+        keys: Object.keys(user),
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isVerified: user.isVerified,
+        profilePicture: user.profilePicture
+      });
+    }
+  }, [user]);
+
   const value = {
     user,
     setUser,
     isAuthenticated,
     setIsAuthenticated,
-    loading,  // Make sure this is included
+    loading,
     registerUser,
     loginUser,
     logoutUser,
@@ -391,6 +634,11 @@ export const UserProvider = ({ children }) => {
     resetPasswordWithOtp,
     getUserProfile,
     updateUserProfile,
+    
+    // Profile photo functions
+    uploadProfilePhoto,
+    getProfilePhoto,
+    deleteProfilePhoto,
     
     // Helper functions
     isEmailVerified,

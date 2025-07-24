@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sidebar, SidebarBody, SidebarLink } from "./ui/sidebar.jsx";
 import {
@@ -14,8 +14,19 @@ import { useUser } from "../context/UserContext.jsx";
 
 const SideBar = () => {
   const [chats, setChats] = useState([]); // State for previous chats
-  const { user, logoutUser } = useUser(); // Get user data and logout function
+  const { user, logoutUser, loading } = useUser(); // Get user data and logout function
   const navigate = useNavigate();
+  const [open, setOpen] = useState(true);
+
+  // Debug user data
+  useEffect(() => {
+    console.log('🐛 SideBar - User data:', {
+      user,
+      loading,
+      profilePicture: user?.profilePicture,
+      name: user?.name
+    });
+  }, [user, loading]);
 
   // Handle logout
   const handleLogout = async () => {
@@ -64,7 +75,23 @@ const SideBar = () => {
     },
   ];
 
-  const [open, setOpen] = useState(true);
+  // Get profile picture URL with proper fallback
+  const getProfilePictureUrl = () => {
+    if (!user?.profilePicture) {
+      return "https://assets.aceternity.com/manu.png";
+    }
+
+    // If it's already a full URL, return as is
+    if (user.profilePicture.startsWith('http')) {
+      return user.profilePicture;
+    }
+
+    // Otherwise, construct the full URL
+    const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+    const profileUrl = `${baseUrl}${user.profilePicture}`;
+    console.log('🖼️ Constructed profile URL:', profileUrl);
+    return profileUrl;
+  };
   
   return (
     <div className="h-screen w-full">
@@ -81,21 +108,25 @@ const SideBar = () => {
               />
             </div>
 
-            {/* Previous Chats Section */}
+            {/* Previous Chats Section - Only show when sidebar is open */}
             <div className="flex-1 overflow-y-auto">
-              <div className="text-sm text-muted-foreground px-2 mb-2">
-                Previous Chats
-              </div>
-              <div className="space-y-2">
-                {chats.map((chat, idx) => (
-                  <div
-                    key={idx}
-                    className="px-2 py-1 text-sm hover:bg-primary/10 rounded-md cursor-pointer"
-                  >
-                    {chat.title}
+              {open && (
+                <>
+                  <div className="text-sm text-muted-foreground px-2 mb-2">
+                    Previous Chats
                   </div>
-                ))}
-              </div>
+                  <div className="space-y-2">
+                    {chats.map((chat, idx) => (
+                      <div
+                        key={idx}
+                        className="px-2 py-1 text-sm hover:bg-primary/10 rounded-md cursor-pointer"
+                      >
+                        {chat.title}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Bottom Navigation */}
@@ -115,15 +146,26 @@ const SideBar = () => {
             <SidebarLink
               link={{
                 label: user?.name || "User Name", // Use actual user name from context
-                href: "#",
+                href: "/profile", // Make it clickable to go to profile
                 icon: (
-                  <img
-                    src={user?.profilePicture || "https://assets.aceternity.com/manu.png"}
-                    className="h-7 w-7 shrink-0 rounded-full"
-                    width={50}
-                    height={50}
-                    alt="Avatar"
-                  />
+                  <div className="relative">
+                    <img
+                      src={getProfilePictureUrl()}
+                      className="h-7 w-7 shrink-0 rounded-full object-cover border border-gray-200"
+                      width={28}
+                      height={28}
+                      alt="Avatar"
+                      onError={(e) => {
+                        console.log('🖼️ Image load error, falling back to default');
+                        e.target.src = "https://assets.aceternity.com/manu.png";
+                      }}
+                      onLoad={() => {
+                        console.log('🖼️ Image loaded successfully:', getProfilePictureUrl());
+                      }}
+                    />
+                    {/* Online status indicator */}
+                    <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border border-white"></div>
+                  </div>
                 ),
               }}
             />
