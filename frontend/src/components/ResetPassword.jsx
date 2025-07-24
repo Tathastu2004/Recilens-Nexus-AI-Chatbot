@@ -164,27 +164,26 @@ const ResetPassword = ({ onBack }) => {
     setError('');
 
     try {
-  console.log('Calling resetPasswordWithOtp...'); // Add this
-  const result = await resetPasswordWithOtp(email, otpCode, newPassword);
-  console.log('Result received:', result); // Add this
-  
-  if (result.success) {
-    console.log('Password reset successful, navigating...'); // This should run now
-    setSuccess('Password reset successfully! Redirecting to sign in...');
-    
-    setTimeout(() => {
-      console.log('Navigating to signup...'); // Add this
-      navigate('/signup', { state: { mode: 'signin' } });
-    }, 2000);
-  } else {
-    console.log('Password reset failed:', result.message); // Add this
-    setError(result.message || 'Failed to reset password');
-  }
-} catch (error) {
-  console.error('Error in handleResetPassword:', error); // Add this
-  setError('An error occurred. Please try again.');
-}
- finally {
+      console.log('Calling resetPasswordWithOtp...');
+      const result = await resetPasswordWithOtp(email, otpCode, newPassword);
+      console.log('Result received:', result);
+      
+      if (result.success) {
+        console.log('Password reset successful, navigating...');
+        setSuccess('Password reset successfully! Redirecting to sign in...');
+        
+        setTimeout(() => {
+          console.log('Navigating to signup...');
+          navigate('/signup', { state: { mode: 'signin' } });
+        }, 2000);
+      } else {
+        console.log('Password reset failed:', result.message);
+        setError(result.message || 'Failed to reset password');
+      }
+    } catch (error) {
+      console.error('Error in handleResetPassword:', error);
+      setError('An error occurred. Please try again.');
+    } finally {
       setLoading(false);
     }
   };
@@ -200,8 +199,12 @@ const ResetPassword = ({ onBack }) => {
       setStep(step - 1);
       setError('');
       setSuccess('');
+      setOtp(['', '', '', '', '', '']);
+      setNewPassword('');
+      setConfirmPassword('');
     } else {
-      onBack?.();
+      // Navigate back to signup page when in step 1
+      navigate('/signup');
     }
   };
 
@@ -282,39 +285,6 @@ const ResetPassword = ({ onBack }) => {
                 'Send Reset Code'
               )}
             </button>
-
-            {/* Custom Test Button - Remove this in production */}
-            <button
-              type="button"
-              onClick={() => {
-                console.log('Manual step change to 2');
-                if (!email.trim()) {
-                  setError('Please enter email first');
-                  return;
-                }
-                setStep(2);
-                setTimer(60);
-                setCanResend(false);
-                setError('');
-                setSuccess('Moved to step 2 manually (test mode)');
-                setTimeout(() => setSuccess(''), 3000);
-              }}
-              className="w-full flex justify-center py-2 px-4 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-gray-50 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
-            >
-              🧪 Test: Skip to Step 2 (Manual)
-            </button>
-
-            {/* Debug Info */}
-            <div className="text-center p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-              <p className="text-xs text-yellow-700">
-                <strong>Debug Info:</strong><br/>
-                Current Step: {step}<br/>
-                Email: {email || 'Empty'}<br/>
-                Loading: {loading.toString()}<br/>
-                Success: {success || 'None'}<br/>
-                Error: {error || 'None'}
-              </p>
-            </div>
           </form>
         )}
 
@@ -456,23 +426,6 @@ const ResetPassword = ({ onBack }) => {
               </div>
             )}
 
-            {/* Test Button to go back to Step 1 */}
-            <button
-              type="button"
-              onClick={() => {
-                console.log('Manual step change back to 1');
-                setStep(1);
-                setOtp(['', '', '', '', '', '']);
-                setNewPassword('');
-                setConfirmPassword('');
-                setError('');
-                setSuccess('');
-              }}
-              className="w-full flex justify-center py-2 px-4 border border-yellow-300 text-sm font-medium rounded-md text-yellow-700 bg-yellow-50 hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
-            >
-              🧪 Test: Go Back to Step 1
-            </button>
-
             <button
               type="submit"
               disabled={loading || otp.some(digit => !digit) || !newPassword || !confirmPassword}
@@ -487,18 +440,6 @@ const ResetPassword = ({ onBack }) => {
                 'Reset Password'
               )}
             </button>
-
-            {/* Debug Info for Step 2 */}
-            <div className="text-center p-3 bg-blue-50 rounded-lg border border-blue-200">
-              <p className="text-xs text-blue-700">
-                <strong>Step 2 Debug:</strong><br/>
-                OTP: {otp.join('') || 'Empty'}<br/>
-                New Password: {newPassword ? '•'.repeat(newPassword.length) : 'Empty'}<br/>
-                Confirm Password: {confirmPassword ? '•'.repeat(confirmPassword.length) : 'Empty'}<br/>
-                Timer: {timer}s<br/>
-                Can Resend: {canResend.toString()}
-              </p>
-            </div>
           </form>
         )}
 

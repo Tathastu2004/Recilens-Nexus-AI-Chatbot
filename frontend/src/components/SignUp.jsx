@@ -5,7 +5,7 @@ import VerifyMail from './verfiyMail';
 import { useUser } from '../context/UserContext';
 
 const SignUp = () => {
-  const [isSignUp, setIsSignUp] = useState(true);
+  const [isSignUp, setIsSignUp] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
