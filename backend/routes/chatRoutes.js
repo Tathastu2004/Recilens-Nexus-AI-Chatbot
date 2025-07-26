@@ -6,6 +6,8 @@ import {
   createChatSession,
   getUserChatSessions,
   getSessionMessages,
+  updateSessionTitle,
+  deleteChatSession,
   uploadFileHandler
 } from '../controllers/chatController.js';
 
@@ -20,8 +22,13 @@ router.get('/sessions', verifyToken, getUserChatSessions);
 // 🔹 Get messages of a session
 router.get('/messages/:sessionId', verifyToken, getSessionMessages);
 
+// 🔹 Update session title
+router.patch('/session/:sessionId', verifyToken, updateSessionTitle);
+
+// 🔹 Delete chat session
+router.delete('/session/:sessionId', verifyToken, deleteChatSession);
+
 // 🔹 Upload file (image/doc) to Cloudinary for chat
 router.post('/upload', verifyToken, uploadChatFile.single('file'), uploadFileHandler);
 
 export default router;
- 

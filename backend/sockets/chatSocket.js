@@ -4,6 +4,8 @@ import Message from '../models/Message.js';
 export const setupChatSocket = (io) => {
   io.on('connection', (socket) => {
     console.log(`⚡ [SOCKET CONNECTED] ID: ${socket.id} at ${new Date().toLocaleTimeString()}`);
+    console.log(`[SOCKET CONNECTED] ID: ${socket.id}`)
+
 
     // Handle session joining
     socket.on('join-session', (sessionId) => {
@@ -53,6 +55,12 @@ export const setupChatSocket = (io) => {
         console.error('❌ [SOCKET ERROR]: Error processing send-message', err);
         socket.emit('error', { message: 'Message send failed', error: err.message });
       }
+    });
+
+    // Handle session title updates
+    socket.on('session-title-updated', (updatedSession) => {
+      // Broadcast to all clients in the user's room
+      socket.broadcast.emit('session-updated', updatedSession);
     });
 
     // Handle disconnects
