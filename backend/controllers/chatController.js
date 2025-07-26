@@ -81,32 +81,62 @@ export const deleteChatSession = async (req, res) => {
     const { sessionId } = req.params;
     const userId = req.user._id;
 
-    console.log('🗑️ [Chat] Deleting session:', { sessionId, userId });
+    console.log("🗑️ [Chat] Deleting session:", { sessionId, userId });
 
-    // First, delete all messages in this session
+    // Step 1: Find all messages with fileUrls
+    const messages = await Message.find({ session: sessionId });
+
+    const publicIds = [];
+    const deletedFileUrls = [];
+
+    for (const msg of messages) {
+      if (msg.fileUrl) {
+        deletedFileUrls.push(msg.fileUrl);
+
+        const match = msg.fileUrl.match(/\/upload\/(?:v\d+\/)?(.+)\.\w+$/);
+        if (match && match[1]) {
+          publicIds.push(match[1]);
+        }
+      }
+    }
+
+    // Step 2: Delete files from Cloudinary
+    if (publicIds.length > 0) {
+      await cloudinary.api.delete_resources(publicIds);
+      console.log("🧹 Deleted the following file URLs from Cloudinary:");
+      deletedFileUrls.forEach((url, i) => {
+        console.log(`   ${i + 1}. ${url}`);
+      });
+    } else {
+      console.log("ℹ️ No files to delete from Cloudinary.");
+    }
+
+    // Step 3: Delete messages
     const deletedMessages = await Message.deleteMany({ session: sessionId });
     console.log(`🗑️ Deleted ${deletedMessages.deletedCount} messages from session`);
 
-    // Then delete the session itself
+    // Step 4: Delete chat session
     const deletedSession = await ChatSession.findOneAndDelete({
       _id: sessionId,
-      user: userId
+      user: userId,
     });
 
     if (!deletedSession) {
-      console.warn('⚠️ Session not found or user unauthorized:', { sessionId, userId });
-      return res.status(404).json({ message: 'Session not found or unauthorized' });
+      console.warn("⚠️ Session not found or user unauthorized:", { sessionId, userId });
+      return res.status(404).json({ message: "Session not found or unauthorized" });
     }
 
-    console.log('✅ Session deleted successfully:', deletedSession.title);
-    res.json({ 
-      success: true, 
-      message: 'Session deleted successfully',
-      deletedSession: deletedSession
+    console.log(`✅ Session "${deletedSession.title}" deleted successfully`);
+
+    res.json({
+      success: true,
+      message: "Session and files deleted successfully",
+      deletedSession,
+      deletedFileUrls,
     });
   } catch (error) {
-    console.error('❌ [Chat] Error deleting session:', error);
-    res.status(500).json({ message: 'Failed to delete session' });
+    console.error("❌ [Chat] Error deleting session:", error);
+    res.status(500).json({ message: "Failed to delete session" });
   }
 };
 
