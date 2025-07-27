@@ -6,10 +6,8 @@ const ChatSessionList = ({ onSelect }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Define backend URL consistently
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
 
-  // Fetch chat sessions from backend
   useEffect(() => {
     const fetchSessions = async () => {
       try {
@@ -17,47 +15,37 @@ const ChatSessionList = ({ onSelect }) => {
         setError(null);
         
         const token = localStorage.getItem("token");
-        
         if (!token) {
           throw new Error("No authentication token found");
         }
 
-        console.log("📤 [ChatSessionList] Fetching sessions from:", `${backendUrl}/api/chat/sessions`);
+        // ✅ FASTER FETCH WITH OPTIMIZED REQUEST
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
 
-        // Fixed: Use full backend URL instead of relative path
         const res = await fetch(`${backendUrl}/api/chat/sessions`, {
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
+          signal: controller.signal
         });
 
-        console.log("📥 [ChatSessionList] Response status:", res.status);
+        clearTimeout(timeoutId);
 
         if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
+          throw new Error(`Failed to load chats (${res.status})`);
         }
 
         const data = await res.json();
-        console.log("📦 [ChatSessionList] Fetched sessions:", {
-          count: data.length,
-          sessions: data
-        });
-
-        // Ensure data is an array
-        if (Array.isArray(data)) {
-          setSessions(data);
-        } else {
-          console.warn("⚠️ [ChatSessionList] Response is not an array:", data);
-          setSessions([]);
-        }
+        setSessions(Array.isArray(data) ? data : []);
         
       } catch (err) {
-        console.error("❌ [ChatSessionList] Failed to fetch sessions:", {
-          error: err.message,
-          stack: err.stack
-        });
-        setError(err.message);
+        if (err.name === 'AbortError') {
+          setError('Request timed out. Please try again.');
+        } else {
+          setError('Failed to load chats');
+        }
         setSessions([]);
       } finally {
         setLoading(false);
@@ -67,20 +55,15 @@ const ChatSessionList = ({ onSelect }) => {
     fetchSessions();
   }, [backendUrl]);
 
-  // Format session title for display
   const formatSessionTitle = (session) => {
-    if (session.title) {
-      return session.title.length > 30 
-        ? `${session.title.substring(0, 30)}...` 
-        : session.title;
+    if (session.title && session.title !== 'New Chat') {
+      return session.title.length > 30 ? `${session.title.substring(0, 30)}...` : session.title;
     }
-    // Fallback if no title
-    return `Chat ${new Date(session.createdAt || Date.now()).toLocaleDateString()}`;
+    return `Chat ${new Date(session.createdAt).toLocaleDateString()}`;
   };
 
-  // Format session timestamp
   const formatSessionTime = (session) => {
-    const date = new Date(session.updatedAt || session.createdAt || Date.now());
+    const date = new Date(session.updatedAt || session.createdAt);
     const now = new Date();
     const diffMs = now - date;
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
@@ -101,17 +84,17 @@ const ChatSessionList = ({ onSelect }) => {
       {loading ? (
         <div className="flex items-center justify-center py-4">
           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-          <span className="ml-2 text-sm text-gray-500">Loading chats...</span>
+          <span className="ml-2 text-sm text-gray-500">Loading...</span>
         </div>
       ) : error ? (
         <div className="text-sm text-red-500 p-2 bg-red-50 rounded-md">
-          <div className="font-medium">Failed to load chats</div>
+          <div className="font-medium">Error</div>
           <div className="text-xs mt-1">{error}</div>
         </div>
       ) : sessions.length === 0 ? (
         <div className="text-sm text-gray-500 p-2 text-center">
           <div className="mb-1">No previous chats</div>
-          <div className="text-xs">Start a new conversation to begin</div>
+          <div className="text-xs">Start a conversation to begin</div>
         </div>
       ) : (
         <div className="space-y-1">
@@ -119,12 +102,14 @@ const ChatSessionList = ({ onSelect }) => {
             <div
               key={session._id}
               onClick={() => {
-                console.log("🖱️ [ChatSessionList] Selected Session:", {
-                  id: session._id,
-                  title: session.title,
-                  session: session
-                });
-                onSelect(session);
+                console.log('📋 [SESSION LIST] Session clicked:', session._id);
+                
+                // ✅ VALIDATE SESSION ID BEFORE SELECTING
+                if (session._id && typeof session._id === 'string' && session._id.length === 24) {
+                  onSelect(session._id);
+                } else {
+                  console.error('❌ [SESSION LIST] Invalid session ID:', session._id);
+                }
               }}
               className="px-3 py-2 text-sm hover:bg-blue-50 rounded-md cursor-pointer border border-transparent hover:border-blue-200 transition-all duration-150"
             >
