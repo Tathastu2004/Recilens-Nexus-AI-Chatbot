@@ -2,15 +2,54 @@
 import mongoose from 'mongoose';
 
 const messageSchema = new mongoose.Schema({
-  session: { type: mongoose.Schema.Types.ObjectId, ref: 'ChatSession' },
-  sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  message: { type: String },
-  type: { type: String, enum: ['text', 'image', 'document'], default: 'text' },
-  fileUrl: { type: String }, // For file/image messages
-  fileType: { type: String }, // image/png, application/pdf, etc.
-  createdAt: { type: Date, default: Date.now },
-}, { timestamps: true });
+  session: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ChatSession',
+    required: true
+  },
+  sender: {
+    // Use Mixed to allow both ObjectId and String
+    type: mongoose.Schema.Types.Mixed,
+    required: true,
+    validate: {
+      validator: function(v) {
+        // Allow "AI" string or valid ObjectId
+        return v === "AI" || mongoose.Types.ObjectId.isValid(v);
+      },
+      message: 'Sender must be "AI" or a valid ObjectId'
+    }
+  },
+  message: {
+    type: String,
+    required: true
+  },
+  type: {
+    type: String,
+    enum: ['text', 'image', 'document'],
+    default: 'text'
+  },
+  fileUrl: {
+    type: String,
+    default: null
+  },
+  fileType: {
+    type: String,
+    default: null
+  },
+  timestamp: {
+    type: Date,
+    default: Date.now
+  }
+}, {
+  timestamps: true
+});
 
-messageSchema.index({ createdAt: 1 }, { expireAfterSeconds: 2592000 }); // 30 days
+// Indexes for performance
+messageSchema.index({ session: 1, timestamp: 1 });
+messageSchema.index({ sender: 1 });
 
-export default mongoose.model('Message', messageSchema);
+console.log('📄 [MESSAGE MODEL] Message schema defined with Mixed sender type');
+
+const Message = mongoose.model('Message', messageSchema);
+
+export default Message;

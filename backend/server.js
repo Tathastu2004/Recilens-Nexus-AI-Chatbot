@@ -5,19 +5,37 @@ import http from 'http';
 import { Server } from 'socket.io';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
+
+// Import Cloudinary config EARLY
+import './config/cloudinary.js';
 
 import connectDB from './config/mongodb.js';
 import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './admin/adminRoutes.js';
 import userRoutes from './routes/userRoutes.js';
-import { setupChatSocket } from './sockets/chatSocket.js';
+import { registerChatSocket} from './sockets/chatSocket.js';
 import chatRoutes from './routes/chatRoutes.js';
 
 dotenv.config();
 
+console.log('🚀 [SERVER] Starting server initialization...');
+console.log('🔑 [ENV CHECK] Environment variables status:', {
+  MONGO_URI: process.env.MONGO_URI ? 'Set' : 'Missing',
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY ? 'Set' : 'Missing',
+  CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME ? 'Set' : 'Missing',
+  CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY ? 'Set' : 'Missing',
+  CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET ? 'Set' : 'Missing'
+});
+
 // Resolve __dirname in ES Module
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Ensure temp directory exists
+if (!fs.existsSync('/tmp')) {
+  fs.mkdirSync('/tmp', { recursive: true });
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -64,7 +82,7 @@ app.use('/api/user', userRoutes);
 app.use('/api/chat', chatRoutes);
 
 // ✅ Start Socket.IO listeners
-setupChatSocket(io);
+registerChatSocket(io);
 
 // ✅ Launch server (IMPORTANT: use server.listen)
 server.listen(PORT, () => {

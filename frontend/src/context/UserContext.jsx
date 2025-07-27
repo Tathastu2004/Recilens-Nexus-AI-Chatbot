@@ -42,7 +42,10 @@ export const UserProvider = ({ children }) => {
     console.log('🔍 Checking auth status...');
     try {
       const token = localStorage.getItem('token');
+      const storedUser = localStorage.getItem('user');
+      
       console.log('🔑 Token from localStorage:', token ? `${token.substring(0, 20)}...` : 'None');
+      console.log('👤 User from localStorage:', storedUser ? 'Found' : 'None');
       
       if (!token) {
         console.log('❌ No token found, setting unauthenticated');
@@ -51,12 +54,25 @@ export const UserProvider = ({ children }) => {
         return;
       }
 
+      // ✅ If we have stored user data, use it immediately
+      if (storedUser) {
+        try {
+          const parsedUser = JSON.parse(storedUser);
+          console.log('👤 Setting user from localStorage:', parsedUser);
+          setUser(parsedUser);
+          setIsAuthenticated(true);
+        } catch (parseError) {
+          console.error('❌ Error parsing stored user data:', parseError);
+          localStorage.removeItem('user');
+        }
+      }
+
       // If we have a token, assume user is authenticated until proven otherwise
       setIsAuthenticated(true);
       console.log('✅ Token found, setting authenticated to true');
       
       try {
-        console.log('📡 Fetching user profile...');
+        console.log('📡 Fetching fresh user profile...');
         const response = await axios.get(`${API_BASE_URL}/api/auth/getprofile`, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -72,8 +88,16 @@ export const UserProvider = ({ children }) => {
 
         if (response.data.success || response.status === 200) {
           const userData = response.data.user || response.data;
-          console.log('👤 Setting user data:', userData);
-          setUser(userData);
+          console.log('👤 Fresh user data from server:', userData);
+          
+          // ✅ Update localStorage with fresh data
+          const completeUserData = {
+            ...userData,
+            token
+          };
+          localStorage.setItem('user', JSON.stringify(completeUserData));
+          
+          setUser(completeUserData);
           setIsAuthenticated(true);
         } else {
           console.log('❌ Profile fetch unsuccessful:', response.data);
@@ -87,16 +111,19 @@ export const UserProvider = ({ children }) => {
             profileError.response?.status === 403) {
           console.log('🔐 Authentication error, clearing session');
           localStorage.removeItem('token');
+          localStorage.removeItem('user');
           setUser(null);
           setIsAuthenticated(false);
         } else {
-          console.log('🌐 Network/server error, keeping user logged in');
+          console.log('🌐 Network/server error, keeping user logged in with stored data');
+          // Keep the user data from localStorage if it exists
         }
       }
       
     } catch (error) {
       console.error('💥 Auth check failed:', error);
       localStorage.removeItem('token');
+      localStorage.removeItem('user');
       setUser(null);
       setIsAuthenticated(false);
     } finally {
@@ -203,14 +230,19 @@ export const UserProvider = ({ children }) => {
         console.log('💾 Token saved to localStorage');
       }
 
-      // Fix: Set the complete user data properly
+      // ✅ FIX: Store complete user data in localStorage
       const completeUserData = {
         ...userData,
         token,
         role
       };
       
-      console.log('👤 Setting complete user data:', completeUserData);
+      console.log('👤 Complete user data to store:', completeUserData);
+      
+      // ✅ Store user data in localStorage for persistence
+      localStorage.setItem('user', JSON.stringify(completeUserData));
+      console.log('💾 User data saved to localStorage');
+      
       setUser(completeUserData);
       setIsAuthenticated(true);
       
@@ -258,6 +290,7 @@ export const UserProvider = ({ children }) => {
     } finally {
       console.log('🧹 Clearing local session data');
       localStorage.removeItem('token');
+      localStorage.removeItem('user'); // ✅ Clear user data
       setUser(null);
       setIsAuthenticated(false);
     }
