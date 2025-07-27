@@ -8,52 +8,62 @@ const ChatSessionList = ({ onSelect }) => {
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
 
-  useEffect(() => {
-    const fetchSessions = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        const token = localStorage.getItem("token");
-        if (!token) {
-          throw new Error("No authentication token found");
-        }
-
-        // ✅ FASTER FETCH WITH OPTIMIZED REQUEST
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-
-        const res = await fetch(`${backendUrl}/api/chat/sessions`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!res.ok) {
-          throw new Error(`Failed to load chats (${res.status})`);
-        }
-
-        const data = await res.json();
-        setSessions(Array.isArray(data) ? data : []);
-        
-      } catch (err) {
-        if (err.name === 'AbortError') {
-          setError('Request timed out. Please try again.');
-        } else {
-          setError('Failed to load chats');
-        }
-        setSessions([]);
-      } finally {
-        setLoading(false);
+  const fetchSessions = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error("No authentication token found");
       }
-    };
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+      const res = await fetch(`${backendUrl}/api/chat/sessions`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        throw new Error(`Failed to load chats (${res.status})`);
+      }
+
+      const data = await res.json();
+      setSessions(Array.isArray(data) ? data : []);
+      
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        setError('Request timed out. Please try again.');
+      } else {
+        setError('Failed to load chats');
+      }
+      setSessions([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchSessions();
   }, [backendUrl]);
+
+  // ✅ LISTEN FOR SESSION UPDATES
+  useEffect(() => {
+    const handleSessionUpdate = (event) => {
+      console.log('🔄 [SESSION LIST] Session updated, refreshing list:', event.detail);
+      fetchSessions();
+    };
+
+    window.addEventListener('sessionUpdated', handleSessionUpdate);
+    return () => window.removeEventListener('sessionUpdated', handleSessionUpdate);
+  }, []);
 
   const formatSessionTitle = (session) => {
     if (session.title && session.title !== 'New Chat') {

@@ -7,6 +7,16 @@ const ChatInterface = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
+  const [sessionSelectionTimeout, setSessionSelectionTimeout] = useState(null); // ✅ ADD MISSING STATE
+
+  // ✅ CLEANUP TIMEOUT ON UNMOUNT
+  useEffect(() => {
+    return () => {
+      if (sessionSelectionTimeout) {
+        clearTimeout(sessionSelectionTimeout);
+      }
+    };
+  }, [sessionSelectionTimeout]);
 
   // ✅ PERSIST SELECTED SESSION ON REFRESH
   useEffect(() => {
@@ -43,7 +53,7 @@ const ChatInterface = () => {
         lastSession.trim() !== '') {
       
       // ✅ VALIDATE SESSION ID FORMAT
-      if (lastSession.startsWith('new-') || lastSession.match(/^[0-9a-fA-F]{24}$/)) {
+      if (lastSession.startsWith('new-') || lastSession.startsWith('temp-') || lastSession.match(/^[0-9a-fA-F]{24}$/)) {
         setSelectedSession(lastSession);
       } else {
         console.log('⚠️ [CHAT INTERFACE] Invalid session format, clearing:', lastSession);
@@ -54,7 +64,7 @@ const ChatInterface = () => {
     setIsLoading(false);
   }, []);
 
-  // ✅ SAVE SELECTED SESSION TO LOCALSTORAGE WITH VALIDATION
+  // ✅ IMPROVED SESSION SELECTION WITH PROPER CLEANUP
   const handleSessionSelect = (sessionId) => {
     console.log('🎯 [CHAT INTERFACE] Session selected:', sessionId);
     
@@ -71,11 +81,14 @@ const ChatInterface = () => {
       return;
     }
     
-    // ✅ DEBOUNCE SELECTION TO PREVENT RAPID FIRING
+    // ✅ IMMEDIATE UPDATE FOR BETTER UX
+    setSelectedSession(sessionId);
+    localStorage.setItem('lastSelectedSession', sessionId);
+    
+    // ✅ DEBOUNCE FOR BACKEND CALLS ONLY
     const timeout = setTimeout(() => {
-      setSelectedSession(sessionId);
-      localStorage.setItem('lastSelectedSession', sessionId);
-    }, 100); // 100ms debounce
+      console.log('🔄 [CHAT INTERFACE] Debounced session update completed for:', sessionId);
+    }, 100);
     
     setSessionSelectionTimeout(timeout);
   };
@@ -85,15 +98,53 @@ const ChatInterface = () => {
   };
 
   const handleSessionUpdate = (updatedSession) => {
-    // Handle session updates if needed
+    console.log('📝 [CHAT INTERFACE] Session updated:', updatedSession);
+    
+    // ✅ TRIGGER SESSION LIST REFRESH
+    window.dispatchEvent(new CustomEvent('sessionUpdated', { 
+      detail: updatedSession 
+    }));
   };
 
   const handleNewChat = () => {
-    const tempSessionId = `new-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`; // ✅ ENSURE UNIQUE ID
+    const tempSessionId = `new-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     console.log('🆕 [CHAT INTERFACE] Creating new chat with ID:', tempSessionId);
     setSelectedSession(tempSessionId);
     localStorage.setItem('lastSelectedSession', tempSessionId);
   };
+
+  // ✅ ADD SESSION DELETION HANDLER
+  const handleSessionDelete = (deletedSessionId) => {
+    console.log('🗑️ [CHAT INTERFACE] Session deleted:', deletedSessionId);
+    
+    // ✅ CLEAR SELECTED SESSION IF IT WAS DELETED
+    if (selectedSession === deletedSessionId) {
+      setSelectedSession(null);
+      localStorage.removeItem('lastSelectedSession');
+    }
+    
+    // ✅ TRIGGER SESSION LIST REFRESH
+    window.dispatchEvent(new CustomEvent('sessionUpdated', { 
+      detail: { _id: deletedSessionId, deleted: true }
+    }));
+  };
+
+  // ✅ ADD THIS INSIDE ChatInterface useEffect
+  useEffect(() => {
+    // ✅ LISTEN FOR SESSION CREATION TO UPDATE SELECTED SESSION
+    const handleSessionCreated = (event) => {
+      const { oldId, newId, session } = event.detail;
+      console.log('🎉 [CHAT INTERFACE] Session created:', { oldId, newId });
+      
+      if (selectedSession === oldId) {
+        setSelectedSession(newId);
+        localStorage.setItem('lastSelectedSession', newId);
+      }
+    };
+
+    window.addEventListener('sessionCreated', handleSessionCreated);
+    return () => window.removeEventListener('sessionCreated', handleSessionCreated);
+  }, [selectedSession]);
 
   if (isLoading) {
     return (
@@ -135,6 +186,7 @@ const ChatInterface = () => {
         <SideBar
           onSelectSession={handleSessionSelect}
           onToggle={handleSidebarToggle}
+          onSessionDelete={handleSessionDelete} // ✅ ADD DELETE HANDLER
           selectedSessionId={selectedSession}
         />
       </div>
@@ -145,7 +197,8 @@ const ChatInterface = () => {
           <ChatDashBoard
             selectedSession={selectedSession}
             onSessionUpdate={handleSessionUpdate}
-            key={selectedSession}
+            onSessionDelete={handleSessionDelete} // ✅ ADD DELETE HANDLER
+            key={`${selectedSession}-${Date.now()}`} // ✅ FORCE REMOUNT ON SESSION CHANGE
           />
         ) : (
           <div className="flex items-center justify-center h-full">

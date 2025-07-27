@@ -65,33 +65,42 @@ export const ChatProvider = ({ children }) => {
         return;
       }
 
-      // Optimized state update for real-time performance
       setMessages((prev) => {
         const sessionMessages = prev[msg.session] || [];
         
-        // Check for duplicate messages (prevent double rendering)
+        // ✅ CHECK FOR OPTIMISTIC MESSAGE TO REPLACE
+        const optimisticIndex = sessionMessages.findIndex(m => 
+          m.optimistic && m.message === msg.message && m.sender === msg.sender
+        );
+
+        if (optimisticIndex !== -1) {
+          // ✅ REPLACE OPTIMISTIC MESSAGE WITH REAL ONE
+          const updatedMessages = [...sessionMessages];
+          updatedMessages[optimisticIndex] = {
+            ...msg,
+            optimistic: false,
+            status: 'confirmed'
+          };
+          
+          return {
+            ...prev,
+            [msg.session]: updatedMessages,
+          };
+        }
+
+        // ✅ CHECK FOR DUPLICATE REAL MESSAGES
         const isDuplicate = sessionMessages.some(existingMsg => 
-          existingMsg._id === msg._id || 
-          (existingMsg.message === msg.message && 
-           existingMsg.sender === msg.sender && 
-           Math.abs(new Date(existingMsg.timestamp).getTime() - new Date(msg.timestamp).getTime()) < 1000)
+          existingMsg._id === msg._id && !existingMsg.optimistic
         );
 
         if (isDuplicate) {
-          console.log('⚠️ [SOCKET] Duplicate message detected, skipping:', msg._id);
           return prev;
         }
 
-        const updatedMessages = [...sessionMessages, msg];
-        console.log('✅ [SOCKET] Message added to session', msg.session, ':', {
-          totalMessages: updatedMessages.length,
-          newMessageIndex: updatedMessages.length - 1,
-          sessionId: msg.session
-        });
-
+        // ✅ ADD NEW MESSAGE
         return {
           ...prev,
-          [msg.session]: updatedMessages,
+          [msg.session]: [...sessionMessages, msg],
         };
       });
     };
@@ -158,59 +167,40 @@ export const ChatProvider = ({ children }) => {
     }));
   }, []);
 
-  // Send message with real-time optimization
+  // ✅ OPTIMIZED SEND MESSAGE WITH IMMEDIATE RESPONSE
   const sendMessage = useCallback(async (messageData) => {
     const startTime = Date.now();
     
-    // ✅ ADD DEBUG BEFORE PROCESSING
-    console.log('🔍 [CHAT CONTEXT] Debugging auth before send:');
-    const authState = debugAuth();
-    
-    // ✅ Better senderId retrieval with validation
+    console.log('📤 [CHAT CONTEXT] Instant message send:', {
+      sessionId: messageData.sessionId,
+      tempId: messageData.tempId
+    });
+
     if (!messageData.senderId) {
       try {
         const storedUser = localStorage.getItem("user");
         if (storedUser) {
           const user = JSON.parse(storedUser);
           messageData.senderId = user._id;
-          console.log('👤 [CHAT CONTEXT] SenderId from localStorage:', messageData.senderId);
         }
       } catch (parseError) {
-        console.error('❌ [CHAT CONTEXT] Error parsing user from localStorage:', parseError);
+        console.error('❌ [CHAT CONTEXT] Error parsing user:', parseError);
       }
     }
 
-    console.log('📤 [CHAT CONTEXT] Sending message:', {
-      sessionId: messageData.sessionId,
-      senderId: messageData.senderId,
-      senderIdExists: !!messageData.senderId,
-      messageLength: messageData.message?.length || 0,
-      hasFile: !!messageData.fileUrl,
-      type: messageData.type || 'text',
-      timestamp: startTime
-    });
-
-    // ✅ Enhanced validation with debug info
     if (!messageData.senderId) {
-      console.error('❌ [CHAT CONTEXT] No senderId provided and no valid user in localStorage');
-      console.error('❌ [CHAT CONTEXT] Auth debug state:', authState);
-      console.error('❌ [CHAT CONTEXT] localStorage contents:', {
-        token: localStorage.getItem('token') ? 'Present' : 'Missing',
-        user: localStorage.getItem('user') ? 'Present' : 'Missing',
-        userContent: localStorage.getItem('user')
-      });
       return { success: false, error: 'User authentication required. Please log in again.' };
     }
 
     try {
-      // Emit message via socket for real-time delivery
+      // ✅ EMIT SOCKET MESSAGE FOR INSTANT DELIVERY
       socket.emit("send-message", {
         ...messageData,
         timestamp: new Date().toISOString()
       });
 
       const latency = Date.now() - startTime;
-      console.log('✅ [CHAT CONTEXT] Message sent successfully in', latency, 'ms');
+      console.log('✅ [CHAT CONTEXT] Message sent instantly in', latency, 'ms');
       
       return { success: true, latency };
     } catch (error) {
