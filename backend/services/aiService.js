@@ -289,4 +289,58 @@ export const getSimpleAIResponse = async (message) => {
   }
 };
 
+// ✅ ADD RETRY LOGIC AND BETTER ERROR HANDLING
+const generateAIResponse = async (message, sessionId, retryCount = 0) => {
+  const maxRetries = 3;
+  const retryDelay = 1000 * (retryCount + 1); // Progressive delay
+  
+  console.log(`🤖 [AI SERVICE] Attempt ${retryCount + 1}/${maxRetries + 1} for session:`, sessionId);
+  
+  try {
+    // ✅ CHECK IF GEMINI IS AVAILABLE FIRST
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    
+    const result = await model.generateContent(message);
+    const response = await result.response;
+    const text = response.text();
+    
+    console.log('✅ [AI SERVICE] Response generated successfully');
+    return text;
+    
+  } catch (error) {
+    console.error(`❌ [AI SERVICE] Attempt ${retryCount + 1} failed:`, error.message);
+    
+    // ✅ HANDLE SPECIFIC ERROR TYPES
+    if (error.message.includes('503') || error.message.includes('overloaded')) {
+      if (retryCount < maxRetries) {
+        console.log(`⏳ [AI SERVICE] Retrying in ${retryDelay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        return generateAIResponse(message, sessionId, retryCount + 1);
+      } else {
+        // ✅ FALLBACK RESPONSE WHEN GEMINI IS OVERLOADED
+        console.log('🔄 [AI SERVICE] Max retries reached, using fallback response');
+        return getFallbackResponse(message);
+      }
+    }
+    
+    // ✅ OTHER ERRORS - USE FALLBACK
+    return getFallbackResponse(message);
+  }
+};
+
+// ✅ ADD FALLBACK RESPONSE FUNCTION
+const getFallbackResponse = (message) => {
+  const fallbackResponses = [
+    "I apologize, but I'm experiencing high demand right now. Could you please try again in a moment?",
+    "I'm currently having trouble processing your request due to high server load. Please retry shortly.",
+    "The AI service is temporarily overloaded. Your message is important - please try again in a few seconds.",
+    "I'm experiencing high traffic at the moment. Could you please resend your message?",
+  ];
+  
+  const randomResponse = fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)];
+  
+  console.log('🔄 [AI SERVICE] Using fallback response');
+  return `${randomResponse}\n\nYour message: "${message.substring(0, 100)}${message.length > 100 ? '...' : ''}"`;
+};
+
 console.log('✅ [AI SERVICE] AI Service initialization complete');

@@ -61,8 +61,39 @@ const ChatSessionList = ({ onSelect }) => {
       fetchSessions();
     };
 
+    // ✅ ADD IMMEDIATE TITLE UPDATE HANDLER
+    const handleTitleUpdate = (event) => {
+      const { sessionId, title } = event.detail;
+      console.log('📝 [SESSION LIST] Title updated immediately:', { sessionId, title });
+      
+      // ✅ UPDATE SESSION IN LOCAL STATE IMMEDIATELY
+      setSessions(prevSessions => 
+        prevSessions.map(session => 
+          session._id === sessionId 
+            ? { ...session, title, updatedAt: new Date().toISOString() }
+            : session
+        )
+      );
+    };
+
+    // ✅ ADD TITLE UPDATE FAILURE HANDLER
+    const handleTitleUpdateFailed = (event) => {
+      const { sessionId, error } = event.detail;
+      console.error('❌ [SESSION LIST] Title update failed:', { sessionId, error });
+      
+      // ✅ REVERT TO ORIGINAL TITLE OR FETCH FRESH DATA
+      fetchSessions();
+    };
+
     window.addEventListener('sessionUpdated', handleSessionUpdate);
-    return () => window.removeEventListener('sessionUpdated', handleSessionUpdate);
+    window.addEventListener('sessionTitleUpdated', handleTitleUpdate); // ✅ ADD THIS
+    window.addEventListener('sessionTitleUpdateFailed', handleTitleUpdateFailed); // ✅ ADD THIS
+    
+    return () => {
+      window.removeEventListener('sessionUpdated', handleSessionUpdate);
+      window.removeEventListener('sessionTitleUpdated', handleTitleUpdate); // ✅ ADD THIS
+      window.removeEventListener('sessionTitleUpdateFailed', handleTitleUpdateFailed); // ✅ ADD THIS
+    };
   }, []);
 
   const formatSessionTitle = (session) => {

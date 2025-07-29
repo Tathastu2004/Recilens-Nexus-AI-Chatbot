@@ -3,16 +3,18 @@ import React, { useState, useEffect, useRef } from "react";
 import { IconSend, IconRobot, IconUpload, IconMicrophone, IconCheck } from "@tabler/icons-react";
 import axios from "axios";
 import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
-import { useChat } from '../context/ChatContext'; // ✅ MAKE SURE THIS IMPORT IS CORRECT
+import { useChat } from '../context/ChatContext';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) => {
+  // 1. ✅ Constants and token
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
   const token = localStorage.getItem("token");
   const userId = JSON.parse(localStorage.getItem("user"))?._id;
 
+  // 2. ✅ State declarations
   const [input, setInput] = useState("");
   const [file, setFile] = useState(null);
   const [isTyping, setIsTyping] = useState(false);
@@ -22,6 +24,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const [isConnected, setIsConnected] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [lastProcessedSession, setLastProcessedSession] = useState(null);
+  const [aiServiceStatus, setAiServiceStatus] = useState('normal');
   const messagesEndRef = useRef(null);
 
   // ✅ SIMPLIFIED CHAT CONTEXT USAGE WITH BETTER ERROR HANDLING
@@ -50,7 +53,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     isConnected: contextIsConnected,
     connectionStatus,
     fetchSessionMessages,
-    isSessionStreaming // ✅ ADD THIS
+    isSessionStreaming
   } = chatContext || {};
 
   const actualCurrentSessionId = chatContextAvailable ? contextSessionId : currentSessionId;
@@ -69,122 +72,117 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     browserSupportsSpeechRecognition
   } = useSpeechRecognition();
 
-  // ✅ IMPROVED CONNECTION STATUS EFFECT
-  useEffect(() => {
-    if (chatContextAvailable) {
-      console.log('🔌 [CONNECTION STATUS] Context connection status:', {
-        contextIsConnected,
-        connectionStatus,
-        updating: contextIsConnected !== isConnected
-      });
-      
-      // ✅ ONLY UPDATE IF DIFFERENT TO AVOID LOOPS
-      if (contextIsConnected !== isConnected) {
-        setIsConnected(contextIsConnected ?? true);
-      }
-    } else {
-      // ✅ FALLBACK MODE - ASSUME CONNECTED IF NO CONTEXT
-      if (!isConnected) {
-        console.log('🔄 [CONNECTION STATUS] Fallback mode - setting connected');
-        setIsConnected(true);
-      }
-    }
-  }, [chatContextAvailable, contextIsConnected, connectionStatus]);
+  // ✅ ADD STATE TO TRACK IF USER IS MANUALLY EDITING
+  const [isManuallyEditing, setIsManuallyEditing] = useState(false);
+  const [hasStoppedListening, setHasStoppedListening] = useState(false);
 
-  // ✅ ADD INDEPENDENT CONNECTION CHECK FOR FALLBACK MODE
-  useEffect(() => {
-    if (!chatContextAvailable) {
-      const checkFallbackConnection = async () => {
-        try {
-          const response = await fetch(`${backendUrl}/api/health`, {
-            signal: AbortSignal.timeout(3000)
-          });
-          const connected = response.ok;
-          
-          if (connected !== isConnected) {
-            console.log('🔄 [FALLBACK CONNECTION] Status changed:', { from: isConnected, to: connected });
-            setIsConnected(connected);
-          }
-        } catch (error) {
-          console.log('⚠️ [FALLBACK CONNECTION] Check failed:', error.message);
-          if (isConnected) {
-            setIsConnected(false);
+  // 4. ✅ Function definitions
+  const createNewSession = async () => {
+    if (isCreatingSession) {
+      console.log('⚠️ [CREATE SESSION] Already creating a session, skipping...');
+      return;
+    }
+
+    try {
+      setIsCreatingSession(true);
+      console.log('🆕 [CREATE SESSION] Creating new chat session...');
+
+      const response = await axios.post(
+        `${backendUrl}/api/chat/session`,
+        {
+          title: 'New Chat',
+          userId: userId
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
           }
         }
-      };
+      );
 
-      // ✅ IMMEDIATE CHECK
-      checkFallbackConnection();
-      
-      // ✅ PERIODIC CHECK EVERY 15 SECONDS
-      const interval = setInterval(checkFallbackConnection, 15000);
-      return () => clearInterval(interval);
-    }
-  }, [chatContextAvailable, backendUrl, isConnected]);
+      if (response.data.success) {
+        const newSession = response.data.session;
+        console.log('✅ [CREATE SESSION] New session created:', newSession._id);
 
-  // ✅ SCROLL TO BOTTOM
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [actualMessages, isTyping]);
-
-  // ✅ SINGLE SESSION SELECTION LOGIC - REMOVE DUPLICATE useEffect
-  useEffect(() => {
-    console.log('🔄 [SESSION SELECTION] Effect triggered:', {
-      selectedSession,
-      lastProcessedSession,
-      actualCurrentSessionId
-    });
-
-    // ✅ GUARD: Prevent processing the same session multiple times
-    if (selectedSession === lastProcessedSession) {
-      return;
-    }
-
-    // ✅ GUARD: Handle empty or invalid sessions
-    if (!selectedSession || selectedSession === 'null' || selectedSession === 'undefined') {
-      console.log('🧹 [SESSION SELECTION] Clearing session');
-      setLastProcessedSession(selectedSession);
-      
-      // ✅ CLEAR CURRENT SESSION AND MESSAGES
-      if (chatContextAvailable && setSession) {
-        setSession(null);
-      } else {
-        setCurrentSessionId(null);
-        setMessages([]);
-      }
-      return;
-    }
-
-    // ✅ HANDLE EXISTING SESSION SWITCH ONLY
-    if (selectedSession !== actualCurrentSessionId) {
-      console.log('🔗 [SESSION SELECTION] Switching to session:', selectedSession);
-      
-      setLastProcessedSession(selectedSession);
-      
-      if (chatContextAvailable && setSession) {
-        setSession(selectedSession);
-      } else {
-        setCurrentSessionId(selectedSession);
-      }
-      
-      // ✅ ALWAYS FETCH MESSAGES FOR REAL SESSIONS
-      if (selectedSession.match(/^[0-9a-fA-F]{24}$/)) {
-        fetchMessages(selectedSession);
-      } else {
-        // Clear messages for invalid sessions
-        if (chatContextAvailable && setSessionMessages) {
-          setSessionMessages(selectedSession, []);
+        // Set the new session as current
+        if (chatContextAvailable && setSession) {
+          setSession(newSession._id);
         } else {
+          setCurrentSessionId(newSession._id);
           setMessages([]);
         }
-      }
-    } else {
-      setLastProcessedSession(selectedSession);
-    }
 
-  }, [selectedSession]); // ✅ ONLY selectedSession dependency
+        // Notify parent component to update sidebar
+        if (onSessionUpdate) {
+          onSessionUpdate(newSession);
+        }
+
+        return newSession;
+      } else {
+        throw new Error(response.data.message || 'Failed to create session');
+      }
+    } catch (error) {
+      console.error('❌ [CREATE SESSION] Failed:', error);
+      return null;
+    } finally {
+      setIsCreatingSession(false);
+    }
+  };
+
+  // ✅ FALLBACK SEND MESSAGE FUNCTION
+  const fallbackSendMessage = async (messagePayload) => {
+    try {
+      setIsTyping(true);
+      
+      const response = await axios.post(
+        `${backendUrl}/api/chat/message`,
+        messagePayload,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      if (response.data.success) {
+        // ✅ CHECK FOR AI SERVICE STATUS IN RESPONSE
+        if (response.data.aiServiceStatus) {
+          setAiServiceStatus(response.data.aiServiceStatus);
+        }
+
+        // Add AI response to messages
+        const aiMessage = {
+          _id: `ai-${Date.now()}`,
+          message: response.data.response || response.data.message,
+          sender: 'AI',
+          type: 'text',
+          timestamp: new Date().toISOString()
+        };
+
+        setMessages(prev => [...prev, aiMessage]);
+        return { success: true };
+      } else {
+        throw new Error(response.data.error || 'Failed to send message');
+      }
+    } catch (error) {
+      console.error('❌ [FALLBACK SEND] Error:', error);
+      
+      // ✅ UPDATE AI SERVICE STATUS ON ERROR
+      if (error.response?.data?.aiServiceStatus) {
+        setAiServiceStatus(error.response.data.aiServiceStatus);
+      } else if (error.message.includes('503') || error.message.includes('overloaded')) {
+        setAiServiceStatus('overloaded');
+      } else {
+        setAiServiceStatus('error');
+      }
+      
+      return { success: false, error: error.message };
+    } finally {
+      setIsTyping(false);
+    }
+  };
 
   // ✅ IMPROVED fetchMessages with proper error handling
   const fetchMessages = async (sessionId) => {
@@ -222,7 +220,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   };
 
-  // ✅ SIMPLIFIED SESSION TITLE UPDATE
+  // ✅ IMPROVED SESSION TITLE UPDATE WITH IMMEDIATE SIDEBAR REFRESH
   const updateSessionTitle = async (sessionId, firstMessage) => {
     // ✅ SKIP IF INVALID SESSION
     if (!sessionId || !sessionId.match(/^[0-9a-fA-F]{24}$/)) {
@@ -237,11 +235,17 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
 
       console.log('📝 [UPDATE TITLE] Updating session title immediately:', { sessionId, title });
 
+      // ✅ IMMEDIATE UI UPDATE - DISPATCH EVENT TO SIDEBAR
+      window.dispatchEvent(new CustomEvent('sessionTitleUpdated', {
+        detail: { sessionId, title, timestamp: new Date().toISOString() }
+      }));
+
       // ✅ IMMEDIATE SOCKET EMIT FOR REAL-TIME UPDATE
-      if (chatContextAvailable && socket) {
-        socket.emit('update-session-title', { sessionId, title });
+      if (chatContextAvailable && chatContext.socket) {
+        chatContext.socket.emit('update-session-title', { sessionId, title });
       }
 
+      // ✅ UPDATE BACKEND
       const res = await axios.patch(
         `${backendUrl}/api/chat/session/${sessionId}`,
         { title },
@@ -256,14 +260,20 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       const updatedSession = res.data.session;
       console.log('✅ [UPDATE TITLE] Session title updated in database:', updatedSession);
       
+      // ✅ DISPATCH ANOTHER EVENT FOR CONFIRMATION
+      window.dispatchEvent(new CustomEvent('sessionUpdated', {
+        detail: { session: updatedSession }
+      }));
+      
     } catch (err) {
       console.error('❌ [UPDATE TITLE] Failed to update session title:', err);
+      
+      // ✅ REVERT UI CHANGE IF BACKEND UPDATE FAILED
+      window.dispatchEvent(new CustomEvent('sessionTitleUpdateFailed', {
+        detail: { sessionId, error: err.message }
+      }));
     }
   };
-
-  // ✅ ADD STATE TO TRACK IF USER IS MANUALLY EDITING
-  const [isManuallyEditing, setIsManuallyEditing] = useState(false);
-  const [hasStoppedListening, setHasStoppedListening] = useState(false);
 
   // ✅ IMPROVED VOICE INPUT WITH PROPER CONTROL
   const handleVoiceInput = () => {
@@ -276,11 +286,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       console.log('🎤 [VOICE] Stopping voice input');
       SpeechRecognition.stopListening();
       setHasStoppedListening(true);
-      // ✅ DON'T AUTOMATICALLY SET INPUT - LET USER CONTROL IT
     } else {
       console.log('🎤 [VOICE] Starting voice input');
       resetTranscript();
-      setInput(""); // Clear input when starting to listen
+      setInput("");
       setIsManuallyEditing(false);
       setHasStoppedListening(false);
       SpeechRecognition.startListening({ 
@@ -310,7 +319,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     if (listening) {
       console.log('✏️ [INPUT] User manually editing while listening');
       setIsManuallyEditing(true);
-      // ✅ OPTIONALLY STOP LISTENING WHEN USER STARTS TYPING
       SpeechRecognition.stopListening();
       setHasStoppedListening(true);
     }
@@ -353,7 +361,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     // Clear form immediately
     setInput("");
     setFile(null);
-    resetTranscript(); // ✅ CLEAR TRANSCRIPT TOO
+    resetTranscript();
     const fileInput = document.getElementById("fileUpload");
     if (fileInput) fileInput.value = "";
 
@@ -403,7 +411,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       fileUrl,
       fileType,
       timestamp: new Date().toISOString(),
-      tempId: tempMessageId // ✅ Track optimistic message
+      tempId: tempMessageId
     };
 
     try {
@@ -430,7 +438,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           setMessages(updateMessage);
         }
 
-        // ✅ UPDATE SESSION TITLE IF FIRST MESSAGE (using the flag we set earlier)
+        // ✅ UPDATE SESSION TITLE IF FIRST MESSAGE
         if (isFirstMessage && originalInput.trim()) {
           console.log('🏷️ [HANDLE SUBMIT] Updating title for first message:', originalInput.trim());
           updateSessionTitle(actualCurrentSessionId, originalInput.trim());
@@ -455,57 +463,20 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   };
 
-  // ✅ INSTANT SESSION SWITCHING
-  useEffect(() => {
-    if (selectedSession === lastProcessedSession) return;
-    if (isCreatingSession) return;
-    if (!selectedSession || selectedSession === 'null' || selectedSession === 'undefined') {
-      setLastProcessedSession(selectedSession);
-      return;
-    }
-
-    console.log('⚡ [SESSION SELECTION] Instant switch to:', selectedSession);
-
-    if (selectedSession.startsWith('new-')) {
-      setLastProcessedSession(selectedSession);
-      createNewSession();
-      return;
-    }
-
-    // ✅ INSTANT SWITCH TO EXISTING SESSION
-    if (selectedSession !== actualCurrentSessionId) {
-      setLastProcessedSession(selectedSession);
-      
-      if (chatContextAvailable && setSession) {
-        setSession(selectedSession);
-      } else {
-        setCurrentSessionId(selectedSession);
-      }
-      
-      // ✅ LOAD MESSAGES ONLY IF NOT CACHED
-      const cachedMessages = chatContextAvailable ? 
-        (chatContext.allMessages && chatContext.allMessages[selectedSession] ? chatContext.allMessages[selectedSession] : []) : 
-        [];
-      
-      if (cachedMessages.length === 0) {
-        fetchMessages(selectedSession);
-      }
-    } else {
-      setLastProcessedSession(selectedSession);
-    }
-
-  }, [selectedSession]);
-
-  // ✅ REMOVE className FROM ReactMarkdown AND USE A WRAPPER DIV INSTEAD
-  const MessageRenderer = ({ message, isAI }) => {
+  // ✅ MESSAGE RENDERER
+  const MessageRenderer = ({ message, isAI, serviceStatus = 'normal' }) => {
     if (!isAI) {
-      // User messages - simple text
       return <div className="whitespace-pre-wrap break-words">{message}</div>;
     }
 
-    // AI messages - full markdown support
     return (
       <div className="prose prose-sm max-w-none">
+        {serviceStatus === 'overloaded' && (
+          <div className="mb-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800">
+            ⚠️ AI service is experiencing high demand. Response may be delayed.
+          </div>
+        )}
+        
         <ReactMarkdown
           components={{
             code({ node, inline, className, children, ...props }) {
@@ -567,7 +538,155 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     );
   };
 
-  // ✅ UPDATE THE HEADER TO SHOW MORE ACCURATE STATUS
+  // 5. ✅ useEffect hooks
+  useEffect(() => {
+    if (chatContextAvailable) {
+      console.log('🔌 [CONNECTION STATUS] Context connection status:', {
+        contextIsConnected,
+        connectionStatus,
+        updating: contextIsConnected !== isConnected
+      });
+      
+      if (contextIsConnected !== isConnected) {
+        setIsConnected(contextIsConnected ?? true);
+      }
+    } else {
+      if (!isConnected) {
+        console.log('🔄 [CONNECTION STATUS] Fallback mode - setting connected');
+        setIsConnected(true);
+      }
+    }
+  }, [chatContextAvailable, contextIsConnected, connectionStatus]);
+
+  useEffect(() => {
+    if (!chatContextAvailable) {
+      const checkFallbackConnection = async () => {
+        try {
+          const response = await fetch(`${backendUrl}/api/health`, {
+            signal: AbortSignal.timeout(3000)
+          });
+          const connected = response.ok;
+          
+          if (connected !== isConnected) {
+            console.log('🔄 [FALLBACK CONNECTION] Status changed:', { from: isConnected, to: connected });
+            setIsConnected(connected);
+          }
+        } catch (error) {
+          console.log('⚠️ [FALLBACK CONNECTION] Check failed:', error.message);
+          if (isConnected) {
+            setIsConnected(false);
+          }
+        }
+      };
+
+      checkFallbackConnection();
+      const interval = setInterval(checkFallbackConnection, 15000);
+      return () => clearInterval(interval);
+    }
+  }, [chatContextAvailable, backendUrl, isConnected]);
+
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [actualMessages, isTyping]);
+
+  useEffect(() => {
+    console.log('🔄 [SESSION SELECTION] Effect triggered:', {
+      selectedSession,
+      lastProcessedSession,
+      actualCurrentSessionId
+    });
+
+    if (selectedSession === lastProcessedSession) {
+      return;
+    }
+
+    if (!selectedSession || selectedSession === 'null' || selectedSession === 'undefined') {
+      console.log('🧹 [SESSION SELECTION] Clearing session - invalid or empty:', selectedSession);
+      setLastProcessedSession(selectedSession);
+      
+      if (chatContextAvailable && setSession) {
+        setSession(null);
+      } else {
+        setCurrentSessionId(null);
+        setMessages([]);
+      }
+      return;
+    }
+
+    if (selectedSession !== actualCurrentSessionId) {
+      console.log('🔗 [SESSION SELECTION] Switching to session:', selectedSession);
+      
+      setLastProcessedSession(selectedSession);
+      
+      if (chatContextAvailable && setSession) {
+        setSession(selectedSession);
+      } else {
+        setCurrentSessionId(selectedSession);
+      }
+      
+      if (selectedSession.match(/^[0-9a-fA-F]{24}$/)) {
+        fetchMessages(selectedSession);
+      } else {
+        if (chatContextAvailable && setSessionMessages) {
+          setSessionMessages(selectedSession, []);
+        } else {
+          setMessages([]);
+        }
+      }
+    } else {
+      setLastProcessedSession(selectedSession);
+    }
+
+  }, [selectedSession]);
+
+  // ✅ FIXED TRANSCRIPT UPDATE
+  useEffect(() => {
+    if (listening && transcript && !isManuallyEditing && !hasStoppedListening) {
+      setInput(transcript);
+    }
+  }, [transcript, listening, isManuallyEditing, hasStoppedListening]);
+
+  useEffect(() => {
+    if (selectedSession === lastProcessedSession) return;
+    if (isCreatingSession) return;
+    if (!selectedSession || selectedSession === 'null' || selectedSession === 'undefined') {
+      setLastProcessedSession(selectedSession);
+      return;
+    }
+
+    console.log('⚡ [SESSION SELECTION] Instant switch to:', selectedSession);
+
+    if (selectedSession.startsWith('new-')) {
+      setLastProcessedSession(selectedSession);
+      createNewSession();
+      return;
+    }
+
+    if (selectedSession !== actualCurrentSessionId) {
+      setLastProcessedSession(selectedSession);
+      
+      if (chatContextAvailable && setSession) {
+        setSession(selectedSession);
+      } else {
+        setCurrentSessionId(selectedSession);
+      }
+      
+      const cachedMessages = chatContextAvailable ? 
+        (chatContext.allMessages && chatContext.allMessages[selectedSession] ? chatContext.allMessages[selectedSession] : []) : 
+        [];
+      
+      if (cachedMessages.length === 0) {
+        fetchMessages(selectedSession);
+      }
+    } else {
+      setLastProcessedSession(selectedSession);
+    }
+
+  }, [selectedSession]);
+
+  // 6. ✅ Return statement
   return (
     <div className="flex flex-col h-screen bg-white">
       <div className="border-b border-gray-200 p-4">
@@ -585,7 +704,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             }`}>
               {actualIsConnected ? '🟢 Connected' : '🔴 Disconnected'}
             </div>
-            {/* ✅ ADD CONTEXT STATUS INDICATOR */}
             <div className={`text-xs px-2 py-1 rounded-full ${
               chatContextAvailable ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'
             }`}>
@@ -636,11 +754,11 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                     {msg.optimistic && <span className="text-gray-400">⏳</span>}
                   </div>
                   
-                  {/* ✅ USE NEW MESSAGE RENDERER */}
                   <div className="text-sm">
                     <MessageRenderer 
                       message={msg.message} 
-                      isAI={msg.sender === 'AI'} 
+                      isAI={msg.sender === 'AI'}
+                      serviceStatus={aiServiceStatus}
                     />
                   </div>
                   
@@ -749,7 +867,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           <input
             type="text"
             value={input}
-            onChange={handleInputChange} // ✅ USE NEW HANDLER
+            onChange={handleInputChange}
             placeholder={
               !actualIsConnected
                 ? "Connection lost - messages may not send..."
@@ -806,76 +924,14 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           </div>
         )}
 
-        {/* ✅ ADD VISUAL FEEDBACK FOR VOICE INPUT STATUS */}
         {listening && (
-          <div className="mt-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded flex items-center gap-2">
-            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-            🎤 Listening... (type to override)
+          <div className="mt-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded">
+            🎤 Listening... (Tap the microphone to stop)
           </div>
         )}
-
-        {/* {transcript && !listening && (
-          <div className="mt-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded">
-            ✅ Voice input captured: "{transcript.substring(0, 50)}{transcript.length > 50 ? '...' : ''}"
-          </div>
-        )} */}
       </div>
     </div>
   );
-};
-
-// ✅ ADD THE MISSING createNewSession FUNCTION
-const createNewSession = async () => {
-  if (isCreatingSession) {
-    console.log('⚠️ [CREATE SESSION] Already creating a session, skipping...');
-    return;
-  }
-
-  try {
-    setIsCreatingSession(true);
-    console.log('🆕 [CREATE SESSION] Creating new chat session...');
-
-    const response = await axios.post(
-      `${backendUrl}/api/chat/session`,
-      {
-        title: 'New Chat',
-        userId: userId
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-
-    if (response.data.success) {
-      const newSession = response.data.session;
-      console.log('✅ [CREATE SESSION] New session created:', newSession._id);
-
-      // Set the new session as current
-      if (chatContextAvailable && setSession) {
-        setSession(newSession._id);
-      } else {
-        setCurrentSessionId(newSession._id);
-        setMessages([]);
-      }
-
-      // Notify parent component to update sidebar
-      if (onSessionUpdate) {
-        onSessionUpdate(newSession);
-      }
-
-      return newSession;
-    } else {
-      throw new Error(response.data.message || 'Failed to create session');
-    }
-  } catch (error) {
-    console.error('❌ [CREATE SESSION] Failed:', error);
-    return null;
-  } finally {
-    setIsCreatingSession(false);
-  }
 };
 
 export default ChatDashBoard;
