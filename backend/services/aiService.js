@@ -6,24 +6,15 @@ import axios from 'axios';
 
 console.log('🚀 [AI SERVICE] Initializing AI Service...');
 
-// Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 console.log('🔑 [AI SERVICE] Gemini API Key status:', process.env.GEMINI_API_KEY ? 'Found' : 'Missing');
 
-// Helper function to download file from URL to local path
 const downloadFile = async (url, localPath) => {
   console.log('📥 [DOWNLOAD] Starting file download:', { url, localPath });
-  
   try {
-    const response = await axios({
-      method: 'GET',
-      url: url,
-      responseType: 'stream'
-    });
-
+    const response = await axios({ method: 'GET', url, responseType: 'stream' });
     const writer = fs.createWriteStream(localPath);
     response.data.pipe(writer);
-
     return new Promise((resolve, reject) => {
       writer.on('finish', () => {
         console.log('✅ [DOWNLOAD] File downloaded successfully:', localPath);
@@ -37,94 +28,55 @@ const downloadFile = async (url, localPath) => {
   }
 };
 
-// 🔁 Converts image to base64
 const imageToBase64 = async (filePath) => {
   console.log('🖼️ [IMAGE TO BASE64] Starting conversion for:', filePath);
-  
   try {
     let localPath = filePath;
-    
-    // If it's a URL, download it first
     if (filePath.startsWith('http')) {
       const tempPath = `/tmp/temp_image_${Date.now()}.jpg`;
       await downloadFile(filePath, tempPath);
       localPath = tempPath;
     }
-    
     if (!fs.existsSync(localPath)) {
       console.error(`❌ [IMAGE TO BASE64] Image file not found: ${localPath}`);
       return null;
     }
-    
     const buffer = fs.readFileSync(localPath);
     const base64 = buffer.toString('base64');
-    
-    // Clean up temp file if we downloaded it
-    if (filePath.startsWith('http') && fs.existsSync(localPath)) {
-      fs.unlinkSync(localPath);
-    }
-    
-    console.log('✅ [IMAGE TO BASE64] Conversion successful:', {
-      originalPath: filePath,
-      base64Length: base64.length
-    });
-    
+    if (filePath.startsWith('http') && fs.existsSync(localPath)) fs.unlinkSync(localPath);
+    console.log('✅ [IMAGE TO BASE64] Conversion successful:', { originalPath: filePath, base64Length: base64.length });
     return base64;
   } catch (error) {
-    console.error(`❌ [IMAGE TO BASE64] Error:`, {
-      filePath,
-      error: error.message
-    });
+    console.error(`❌ [IMAGE TO BASE64] Error:`, { filePath, error: error.message });
     return null;
   }
 };
 
-// 🔁 Extracts text from a PDF
 const extractTextFromPDF = async (pdfPath) => {
   console.log('📄 [PDF EXTRACT] Starting text extraction for:', pdfPath);
-  
   try {
     let localPath = pdfPath;
-    
-    // If it's a URL, download it first
     if (pdfPath.startsWith('http')) {
       const tempPath = `/tmp/temp_pdf_${Date.now()}.pdf`;
       await downloadFile(pdfPath, tempPath);
       localPath = tempPath;
     }
-    
     if (!fs.existsSync(localPath)) {
       console.error(`❌ [PDF EXTRACT] PDF file not found: ${localPath}`);
       return 'PDF file not found';
     }
-
-    // Dynamically import pdf-parse
     const pdfParse = (await import('pdf-parse')).default;
     const buffer = fs.readFileSync(localPath);
     const data = await pdfParse(buffer);
-    
-    // Clean up temp file if we downloaded it
-    if (pdfPath.startsWith('http') && fs.existsSync(localPath)) {
-      fs.unlinkSync(localPath);
-    }
-    
-    console.log('✅ [PDF EXTRACT] PDF parsing successful:', {
-      originalPath: pdfPath,
-      textLength: data.text.length,
-      pages: data.numpages
-    });
-    
+    if (pdfPath.startsWith('http') && fs.existsSync(localPath)) fs.unlinkSync(localPath);
+    console.log('✅ [PDF EXTRACT] PDF parsing successful:', { originalPath: pdfPath, textLength: data.text.length, pages: data.numpages });
     return data.text;
   } catch (error) {
-    console.error(`❌ [PDF EXTRACT] Error:`, {
-      pdfPath,
-      error: error.message
-    });
+    console.error(`❌ [PDF EXTRACT] Error:`, { pdfPath, error: error.message });
     return 'Error reading PDF file';
   }
 };
 
-// 🧠 Main AI responder
 export const getAIResponse = async (input) => {
   console.log('🚀 [AI SERVICE] Starting AI response generation...');
   console.log('📊 [DEBUG] Input analysis:', {
@@ -134,72 +86,42 @@ export const getAIResponse = async (input) => {
     stringLength: typeof input === 'string' ? input.length : null,
     inputPreview: typeof input === 'string' ? input.substring(0, 100) + '...' : JSON.stringify(input)
   });
-
   try {
-    // Use the correct model name: gemini-1.5-flash
-    console.log('🤖 [AI SERVICE] Using gemini-1.5-flash model...');
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-    // Handle simple string input
     if (typeof input === 'string') {
       console.log('📝 [AI SERVICE] Processing simple text input...');
-      
       const result = await model.generateContent(input);
       const response = await result.response;
       const text = response.text();
-      
-      console.log('✅ [AI SERVICE] Text response generated:', {
-        inputLength: input.length,
-        responseLength: text.length
-      });
-      
+      console.log('✅ [AI SERVICE] Text response generated:', { inputLength: input.length, responseLength: text.length });
       return text;
     }
 
-    // Handle complex object input with files
     if (typeof input === 'object' && input !== null) {
       console.log('🗂️ [AI SERVICE] Processing object input...');
       const parts = [];
-
-      // Add text content
       const textContent = input.prompt || input.message || "";
       if (textContent) {
         parts.push({ text: textContent });
         console.log('📝 [DEBUG] Added text part:', textContent.substring(0, 100));
       }
 
-      // Handle file input
       if (input.fileUrl && input.fileType) {
-        console.log(`📁 [AI SERVICE] Processing file:`, {
-          fileUrl: input.fileUrl,
-          fileType: input.fileType
-        });
-
+        console.log(`📁 [AI SERVICE] Processing file:`, { fileUrl: input.fileUrl, fileType: input.fileType });
         if (input.fileType === 'image') {
-          console.log('🖼️ [AI SERVICE] Processing image...');
-          
           const base64Image = await imageToBase64(input.fileUrl);
           if (base64Image) {
-            // Determine mime type from file extension or use default
             let mimeType = input.mimeType || 'image/jpeg';
             if (input.fileUrl.includes('.png')) mimeType = 'image/png';
             if (input.fileUrl.includes('.jpg') || input.fileUrl.includes('.jpeg')) mimeType = 'image/jpeg';
             if (input.fileUrl.includes('.gif')) mimeType = 'image/gif';
             if (input.fileUrl.includes('.webp')) mimeType = 'image/webp';
-            
-            parts.push({
-              inlineData: {
-                mimeType,
-                data: base64Image,
-              },
-            });
+            parts.push({ inlineData: { mimeType, data: base64Image } });
             console.log('✅ [AI SERVICE] Image part added');
           }
         }
-
         if (input.fileType === 'document' || input.fileUrl.includes('.pdf')) {
-          console.log('📄 [AI SERVICE] Processing document...');
-          
           const extractedText = await extractTextFromPDF(input.fileUrl);
           parts.push({ text: `Document content:\n${extractedText}` });
           console.log('✅ [AI SERVICE] Document part added');
@@ -215,40 +137,21 @@ export const getAIResponse = async (input) => {
       const result = await model.generateContent(parts);
       const response = await result.response;
       const text = response.text();
-      
-      console.log('✅ [AI SERVICE] Multimodal response generated:', {
-        partsCount: parts.length,
-        responseLength: text.length
-      });
-      
+      console.log('✅ [AI SERVICE] Multimodal response generated:', { partsCount: parts.length, responseLength: text.length });
       return text;
     }
 
     console.warn('⚠️ [AI SERVICE] Invalid input format:', typeof input);
     return 'Invalid input format provided.';
-
   } catch (err) {
-    console.error('❌ [AI SERVICE] Error occurred:', {
-      message: err.message,
-      inputType: typeof input
-    });
-    
-    // Better error handling
-    if (err.message.includes('API_KEY')) {
-      return 'AI service configuration error. Please check API key.';
-    }
-    if (err.message.includes('quota') || err.message.includes('429')) {
-      return 'AI service temporarily unavailable due to quota limits.';
-    }
-    if (err.message.includes('404')) {
-      return 'AI model temporarily unavailable. Please try again.';
-    }
-    
+    console.error('❌ [AI SERVICE] Error occurred:', { message: err.message, inputType: typeof input });
+    if (err.message.includes('API_KEY')) return 'AI service configuration error. Please check API key.';
+    if (err.message.includes('quota') || err.message.includes('429')) return 'AI service temporarily unavailable due to quota limits.';
+    if (err.message.includes('404')) return 'AI model temporarily unavailable. Please try again.';
     return 'I apologize, but I encountered an error while processing your request. Please try again.';
   }
 };
 
-// 🧠 Simple text-only AI response (backup function)
 export const getSimpleAIResponse = async (message) => {
   console.log('🚀 [SIMPLE AI] Starting simple AI response generation...');
   console.log('📊 [DEBUG] Message details:', {
@@ -257,27 +160,20 @@ export const getSimpleAIResponse = async (message) => {
     length: typeof message === 'string' ? message.length : null,
     preview: typeof message === 'string' ? message.substring(0, 100) + '...' : String(message)
   });
-  
   try {
     if (!message || typeof message !== 'string') {
       console.warn('⚠️ [SIMPLE AI] Invalid message provided:', typeof message);
       return 'Please provide a valid message.';
     }
-
-    console.log('🤖 [SIMPLE AI] Using gemini-1.5-flash model...');
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    
-    console.log('🔄 [SIMPLE AI] Generating content...');
     const result = await model.generateContent(message);
     const response = await result.response;
     const text = response.text();
-    
     console.log('✅ [SIMPLE AI] Response generated successfully:', {
       inputLength: message.length,
       responseLength: text.length,
       responsePreview: text.substring(0, 200) + (text.length > 200 ? '...' : '')
     });
-    
     return text;
   } catch (err) {
     console.error('❌ [SIMPLE AI] Error occurred:', {
@@ -287,60 +183,6 @@ export const getSimpleAIResponse = async (message) => {
     });
     return 'I apologize, but I encountered an error. Please try again.';
   }
-};
-
-// ✅ ADD RETRY LOGIC AND BETTER ERROR HANDLING
-const generateAIResponse = async (message, sessionId, retryCount = 0) => {
-  const maxRetries = 3;
-  const retryDelay = 1000 * (retryCount + 1); // Progressive delay
-  
-  console.log(`🤖 [AI SERVICE] Attempt ${retryCount + 1}/${maxRetries + 1} for session:`, sessionId);
-  
-  try {
-    // ✅ CHECK IF GEMINI IS AVAILABLE FIRST
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    
-    const result = await model.generateContent(message);
-    const response = await result.response;
-    const text = response.text();
-    
-    console.log('✅ [AI SERVICE] Response generated successfully');
-    return text;
-    
-  } catch (error) {
-    console.error(`❌ [AI SERVICE] Attempt ${retryCount + 1} failed:`, error.message);
-    
-    // ✅ HANDLE SPECIFIC ERROR TYPES
-    if (error.message.includes('503') || error.message.includes('overloaded')) {
-      if (retryCount < maxRetries) {
-        console.log(`⏳ [AI SERVICE] Retrying in ${retryDelay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, retryDelay));
-        return generateAIResponse(message, sessionId, retryCount + 1);
-      } else {
-        // ✅ FALLBACK RESPONSE WHEN GEMINI IS OVERLOADED
-        console.log('🔄 [AI SERVICE] Max retries reached, using fallback response');
-        return getFallbackResponse(message);
-      }
-    }
-    
-    // ✅ OTHER ERRORS - USE FALLBACK
-    return getFallbackResponse(message);
-  }
-};
-
-// ✅ ADD FALLBACK RESPONSE FUNCTION
-const getFallbackResponse = (message) => {
-  const fallbackResponses = [
-    "I apologize, but I'm experiencing high demand right now. Could you please try again in a moment?",
-    "I'm currently having trouble processing your request due to high server load. Please retry shortly.",
-    "The AI service is temporarily overloaded. Your message is important - please try again in a few seconds.",
-    "I'm experiencing high traffic at the moment. Could you please resend your message?",
-  ];
-  
-  const randomResponse = fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)];
-  
-  console.log('🔄 [AI SERVICE] Using fallback response');
-  return `${randomResponse}\n\nYour message: "${message.substring(0, 100)}${message.length > 100 ? '...' : ''}"`;
 };
 
 console.log('✅ [AI SERVICE] AI Service initialization complete');
