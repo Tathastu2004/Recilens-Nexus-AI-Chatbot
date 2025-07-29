@@ -135,125 +135,123 @@ const VerifyMail = ({ email, onVerificationSuccess, onBack }) => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        {/* Header */}
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="text-center">
+        <div className="flex justify-center mb-4">
+          <div className="bg-blue-100 p-3 rounded-full">
+            <IconMail className="h-8 w-8 text-blue-600" />
+          </div>
+        </div>
+        <h3 className="text-2xl font-bold text-gray-900">
+          Verify Your Email
+        </h3>
+        <p className="mt-2 text-sm text-gray-600">
+          We've sent a 6-digit verification code to
+        </p>
+        <p className="text-sm font-medium text-blue-600">
+          {email}
+        </p>
+      </div>
+
+      {/* OTP Input */}
+      <div>
+        <div className="flex justify-center space-x-3">
+          {otp.map((digit, index) => (
+            <input
+              key={index}
+              ref={el => inputRefs.current[index] = el}
+              type="text"
+              maxLength={1}
+              value={digit}
+              onChange={(e) => handleOtpChange(index, e.target.value)}
+              onKeyDown={(e) => handleKeyDown(index, e)}
+              onPaste={index === 0 ? handlePaste : undefined}
+              className={`w-12 h-12 text-center text-xl font-semibold border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                error ? 'border-red-300' : 'border-gray-300'
+              } ${digit ? 'border-blue-500 bg-blue-50' : ''}`}
+              disabled={loading}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Error/Success Messages */}
+      {error && (
         <div className="text-center">
-          <div className="flex justify-center mb-4">
-            <div className="bg-blue-100 p-3 rounded-full">
-              <IconMail className="h-8 w-8 text-blue-600" />
-            </div>
-          </div>
-          <h2 className="text-3xl font-extrabold text-gray-900">
-            Verify Your Email
-          </h2>
-          <p className="mt-2 text-sm text-gray-600">
-            We've sent a 6-digit verification code to
-          </p>
-          <p className="text-sm font-medium text-blue-600">
-            {email}
-          </p>
+          <p className="text-sm text-red-600">{error}</p>
         </div>
+      )}
 
-        {/* OTP Input */}
-        <div className="mt-8">
-          <div className="flex justify-center space-x-3">
-            {otp.map((digit, index) => (
-              <input
-                key={index}
-                ref={el => inputRefs.current[index] = el}
-                type="text"
-                maxLength={1}
-                value={digit}
-                onChange={(e) => handleOtpChange(index, e.target.value)}
-                onKeyDown={(e) => handleKeyDown(index, e)}
-                onPaste={index === 0 ? handlePaste : undefined}
-                className={`w-12 h-12 text-center text-xl font-semibold border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
-                  error ? 'border-red-300' : 'border-gray-300'
-                } ${digit ? 'border-blue-500 bg-blue-50' : ''}`}
-                disabled={loading}
-              />
-            ))}
+      {success && (
+        <div className="text-center">
+          <div className="flex items-center justify-center space-x-2">
+            <IconCheck className="h-5 w-5 text-green-600" />
+            <p className="text-sm text-green-600">{success}</p>
           </div>
         </div>
+      )}
 
-        {/* Error/Success Messages */}
-        {error && (
-          <div className="text-center">
-            <p className="text-sm text-red-600">{error}</p>
-          </div>
-        )}
-
-        {success && (
-          <div className="text-center">
-            <div className="flex items-center justify-center space-x-2">
-              <IconCheck className="h-5 w-5 text-green-600" />
-              <p className="text-sm text-green-600">{success}</p>
+      {/* Verify Button */}
+      <div>
+        <button
+          onClick={() => handleVerifyOtp()}
+          disabled={loading || otp.some(digit => !digit)}
+          className="w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {loading ? (
+            <div className="flex items-center space-x-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+              <span>Verifying...</span>
             </div>
-          </div>
-        )}
+          ) : (
+            'Verify Email'
+          )}
+        </button>
+      </div>
 
-        {/* Verify Button */}
-        <div>
+      {/* Resend Section */}
+      <div className="text-center space-y-4">
+        <p className="text-sm text-gray-600">
+          Didn't receive the code?
+        </p>
+        
+        {canResend ? (
           <button
-            onClick={() => handleVerifyOtp()}
-            disabled={loading || otp.some(digit => !digit)}
-            className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={handleResendOtp}
+            disabled={resendLoading}
+            className="inline-flex items-center space-x-2 text-sm font-medium text-blue-600 hover:text-blue-500 disabled:opacity-50"
           >
-            {loading ? (
-              <div className="flex items-center space-x-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                <span>Verifying...</span>
-              </div>
+            {resendLoading ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                <span>Sending...</span>
+              </>
             ) : (
-              'Verify Email'
+              <>
+                <IconRefresh className="h-4 w-4" />
+                <span>Resend Code</span>
+              </>
             )}
           </button>
-        </div>
-
-        {/* Resend Section */}
-        <div className="text-center space-y-4">
-          <p className="text-sm text-gray-600">
-            Didn't receive the code?
+        ) : (
+          <p className="text-sm text-gray-500">
+            Resend available in {formatTime(timer)}
           </p>
-          
-          {canResend ? (
-            <button
-              onClick={handleResendOtp}
-              disabled={resendLoading}
-              className="inline-flex items-center space-x-2 text-sm font-medium text-blue-600 hover:text-blue-500 disabled:opacity-50"
-            >
-              {resendLoading ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                  <span>Sending...</span>
-                </>
-              ) : (
-                <>
-                  <IconRefresh className="h-4 w-4" />
-                  <span>Resend Code</span>
-                </>
-              )}
-            </button>
-          ) : (
-            <p className="text-sm text-gray-500">
-              Resend available in {formatTime(timer)}
-            </p>
-          )}
-        </div>
-
-        {/* Back Button */}
-        {onBack && (
-          <div className="text-center">
-            <button
-              onClick={onBack}
-              className="text-sm text-gray-600 hover:text-gray-900"
-            >
-              ← Back to registration
-            </button>
-          </div>
         )}
       </div>
+
+      {/* Back Button */}
+      {onBack && (
+        <div className="text-center">
+          <button
+            onClick={onBack}
+            className="text-sm text-gray-600 hover:text-gray-900"
+          >
+            ← Back to registration
+          </button>
+        </div>
+      )}
     </div>
   );
 };

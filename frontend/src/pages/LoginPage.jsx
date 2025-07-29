@@ -2,15 +2,15 @@ import React from 'react';
 import SignUp from '../components/SignUp.jsx';
 import AuthLayout from '../components/AuthLayout.jsx';
 
-const SignUpPage = () => {
+const LoginPage = () => {
   return (
     <AuthLayout 
-      title="Welcome to NexusChat" 
-      subtitle="Join thousands of users already chatting with AI"
+      title="Welcome Back" 
+      subtitle="Sign in to continue your AI conversations"
     >
       <SignUp />
     </AuthLayout>
   );
 };
 
-export default SignUpPage;
+export default LoginPage;

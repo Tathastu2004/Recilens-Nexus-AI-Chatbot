@@ -6,7 +6,8 @@ import ProtectedRoute from './components/ProtectedRoute';
 
 // Pages & Components
 import SignUpPage from './pages/SignUpPage';
-import ResetPassword from './components/ResetPassword';
+import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
+import VerifyEmailPage from './pages/VerifyEmailPage.jsx';
 import ChatInterface from './pages/chatInterface';
 import Profile from './pages/Profile';
 
@@ -61,7 +62,8 @@ function App() {
                 {/* Public Routes (No ChatProvider needed) */}
                 <Route path="/" element={<Navigate to="/signup" replace />} />
                 <Route path="/signup" element={<SignUpPage />} />
-                <Route path="/reset-password" element={<ResetPassword />} />
+                <Route path="/reset-password" element={<ResetPasswordPage />} />
+                <Route path="/verify-email" element={<VerifyEmailPage />} />
 
                 {/* ✅ Chat Route with ChatProvider - This is your main chat interface */}
                 <Route
