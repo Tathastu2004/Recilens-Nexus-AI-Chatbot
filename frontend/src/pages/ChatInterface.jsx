@@ -317,9 +317,9 @@ const ChatInterface = () => {
                 </button>
                 
                 {/* ✅ ADDITIONAL HELPFUL ACTIONS */}
-                <div className="text-sm text-gray-400">
+                {/* <div className="text-sm text-gray-400">
                   Or press <kbd className="px-2 py-1 bg-gray-100 rounded text-xs font-mono">Ctrl + N</kbd> to create a new chat
-                </div>
+                </div> */}
               </div>
 
               {/* ✅ QUICK FEATURE HIGHLIGHTS */}

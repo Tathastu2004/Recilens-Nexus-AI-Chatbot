@@ -116,7 +116,7 @@
 
 /* Custom transition for gradient changes */
 .gradient-transition {
-  transition: background 1s ease-in-out;
+  transition: background 0.5s ease-in-out;
 }
 
 /* Smooth slide transitions */
