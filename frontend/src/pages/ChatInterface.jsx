@@ -175,6 +175,58 @@ const ChatInterface = () => {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
+  // ✅ ADD NEW CHAT CREATION FUNCTION
+  const createNewChat = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const user = JSON.parse(localStorage.getItem("user"));
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
+
+      if (!token || !user) {
+        console.error('❌ No authentication data found');
+        return;
+      }
+
+      console.log('🆕 [CHAT INTERFACE] Creating new chat session...');
+
+      const response = await fetch(`${backendUrl}/api/chat/session`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          title: 'New Chat',
+          userId: user._id
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success && data.session) {
+        const newSessionId = data.session._id;
+        console.log('✅ [CHAT INTERFACE] New session created:', newSessionId);
+        
+        // Select the new session
+        handleSessionSelect(newSessionId);
+        
+        // Dispatch event to update sidebar
+        window.dispatchEvent(new CustomEvent('newSessionCreated', {
+          detail: { sessionId: newSessionId, session: data.session }
+        }));
+      } else {
+        throw new Error(data.message || 'Failed to create session');
+      }
+    } catch (error) {
+      console.error('❌ [CHAT INTERFACE] Failed to create new chat:', error);
+      // You might want to show a toast notification here
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -231,13 +283,64 @@ const ChatInterface = () => {
           />
         ) : (
           <div className="flex items-center justify-center h-full">
-            <div className="text-center space-y-4">
-              <div className="text-6xl">💬</div>
-              <div className="text-xl font-semibold text-gray-700">
-                Welcome to Nexus AI
+            <div className="text-center space-y-6 max-w-lg mx-auto p-8">
+              <div className="text-6xl animate-pulse">💬</div>
+              <div className="space-y-3">
+                <div className="text-xl font-semibold text-gray-700">
+                  Welcome to Nexus AI
+                </div>
+                <div className="text-gray-500 max-w-md mx-auto leading-relaxed">
+                  Select a chat from the sidebar or start a new conversation by clicking the button below.
+                </div>
               </div>
-              <div className="text-gray-500 max-w-md">
-                Select a chat from the sidebar or start a new conversation by clicking "New Chat".
+              
+              {/* ✅ NEW CHAT BUTTON */}
+              <div className="space-y-4">
+                <button
+                  onClick={createNewChat}
+                  className="inline-flex items-center gap-3 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-all duration-200 transform hover:scale-105 hover:shadow-lg"
+                >
+                  <svg 
+                    className="w-5 h-5" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path 
+                      strokeLinecap="round" 
+                      strokeLinejoin="round" 
+                      strokeWidth={2} 
+                      d="M12 4v16m8-8H4" 
+                    />
+                  </svg>
+                  Start New Chat
+                </button>
+                
+                {/* ✅ ADDITIONAL HELPFUL ACTIONS */}
+                <div className="text-sm text-gray-400">
+                  Or press <kbd className="px-2 py-1 bg-gray-100 rounded text-xs font-mono">Ctrl + N</kbd> to create a new chat
+                </div>
+              </div>
+
+              {/* ✅ QUICK FEATURE HIGHLIGHTS */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8 text-sm">
+                <div className="flex flex-col items-center p-4 bg-gray-50 rounded-lg">
+                  <div className="text-2xl mb-2">🤖</div>
+                  <div className="font-medium text-gray-700">AI Assistant</div>
+                  <div className="text-gray-500 text-center">Get help with coding, writing, and more</div>
+                </div>
+                
+                <div className="flex flex-col items-center p-4 bg-gray-50 rounded-lg">
+                  <div className="text-2xl mb-2">📁</div>
+                  <div className="font-medium text-gray-700">File Support</div>
+                  <div className="text-gray-500 text-center">Upload images and documents</div>
+                </div>
+                
+                <div className="flex flex-col items-center p-4 bg-gray-50 rounded-lg">
+                  <div className="text-2xl mb-2">🎤</div>
+                  <div className="font-medium text-gray-700">Voice Input</div>
+                  <div className="text-gray-500 text-center">Speak to the AI assistant</div>
+                </div>
               </div>
             </div>
           </div>

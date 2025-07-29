@@ -261,7 +261,11 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   };
 
-  // ✅ IMPROVED VOICE INPUT WITH INSTANT VISUAL FEEDBACK
+  // ✅ ADD STATE TO TRACK IF USER IS MANUALLY EDITING
+  const [isManuallyEditing, setIsManuallyEditing] = useState(false);
+  const [hasStoppedListening, setHasStoppedListening] = useState(false);
+
+  // ✅ IMPROVED VOICE INPUT WITH PROPER CONTROL
   const handleVoiceInput = () => {
     if (!browserSupportsSpeechRecognition) {
       alert("Browser doesn't support speech recognition.");
@@ -269,14 +273,16 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
     
     if (listening) {
+      console.log('🎤 [VOICE] Stopping voice input');
       SpeechRecognition.stopListening();
-      // ✅ INSTANTLY SET INPUT FROM TRANSCRIPT
-      if (transcript) {
-        setInput(transcript);
-      }
+      setHasStoppedListening(true);
+      // ✅ DON'T AUTOMATICALLY SET INPUT - LET USER CONTROL IT
     } else {
+      console.log('🎤 [VOICE] Starting voice input');
       resetTranscript();
       setInput(""); // Clear input when starting to listen
+      setIsManuallyEditing(false);
+      setHasStoppedListening(false);
       SpeechRecognition.startListening({ 
         continuous: true,
         language: 'en-US'
@@ -284,18 +290,41 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   };
 
-  // ✅ REAL-TIME TRANSCRIPT UPDATE
+  // ✅ FIXED TRANSCRIPT UPDATE - ONLY WHEN ACTIVELY LISTENING AND NOT MANUALLY EDITING
   useEffect(() => {
-    if (listening && transcript) {
+    // Only update input from transcript if:
+    // 1. Currently listening
+    // 2. User hasn't manually edited the text
+    // 3. Haven't stopped listening yet
+    if (listening && transcript && !isManuallyEditing && !hasStoppedListening) {
       setInput(transcript);
     }
-  }, [transcript, listening]);
+  }, [transcript, listening, isManuallyEditing, hasStoppedListening]);
+
+  // ✅ IMPROVED INPUT CHANGE HANDLER
+  const handleInputChange = (e) => {
+    const newValue = e.target.value;
+    setInput(newValue);
+    
+    // ✅ MARK AS MANUALLY EDITING IF USER TYPES WHILE LISTENING
+    if (listening) {
+      console.log('✏️ [INPUT] User manually editing while listening');
+      setIsManuallyEditing(true);
+      // ✅ OPTIONALLY STOP LISTENING WHEN USER STARTS TYPING
+      SpeechRecognition.stopListening();
+      setHasStoppedListening(true);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim() && !file) return;
     if (!actualCurrentSessionId) return;
 
+    // ✅ RESET VOICE INPUT STATES
+    setIsManuallyEditing(false);
+    setHasStoppedListening(false);
+    
     const originalInput = input;
     const tempMessageId = `temp-${Date.now()}-${Math.random()}`;
     
@@ -324,7 +353,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     // Clear form immediately
     setInput("");
     setFile(null);
-    resetTranscript();
+    resetTranscript(); // ✅ CLEAR TRANSCRIPT TOO
     const fileInput = document.getElementById("fileUpload");
     if (fileInput) fileInput.value = "";
 
@@ -719,13 +748,13 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           {/* Text Input */}
           <input
             type="text"
-            value={input || transcript}
-            onChange={(e) => setInput(e.target.value)}
+            value={input}
+            onChange={handleInputChange} // ✅ USE NEW HANDLER
             placeholder={
               !actualIsConnected
                 ? "Connection lost - messages may not send..."
                 : listening 
-                  ? "Listening to your voice..." 
+                  ? "Listening to your voice... (or type to override)" 
                   : browserSupportsSpeechRecognition 
                     ? "Type a message or use voice input..."
                     : "Type a message..."
@@ -776,6 +805,20 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             Voice input not supported in this browser. Try Chrome or Edge.
           </div>
         )}
+
+        {/* ✅ ADD VISUAL FEEDBACK FOR VOICE INPUT STATUS */}
+        {listening && (
+          <div className="mt-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded flex items-center gap-2">
+            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+            🎤 Listening... (type to override)
+          </div>
+        )}
+
+        {/* {transcript && !listening && (
+          <div className="mt-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded">
+            ✅ Voice input captured: "{transcript.substring(0, 50)}{transcript.length > 50 ? '...' : ''}"
+          </div>
+        )} */}
       </div>
     </div>
   );
