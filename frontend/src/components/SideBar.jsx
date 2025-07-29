@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { io } from "socket.io-client";
@@ -17,98 +17,119 @@ import { useUser } from "../context/UserContext.jsx";
 
 const socket = io(import.meta.env.VITE_SOCKET_URL || "http://localhost:3000");
 
-const SideBar = ({ onSelectSession, onToggle, selectedSessionId }) => {
+const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete }) => {
   const [chats, setChats] = useState([]);
   const { user, logoutUser, loading } = useUser();
   const navigate = useNavigate();
   const [open, setOpen] = useState(true);
   const [hoveredChat, setHoveredChat] = useState(null);
   const [deletingChat, setDeletingChat] = useState(null);
+  const [creatingChat, setCreatingChat] = useState(false); // ✅ ADD STATE FOR CREATING
+  const operationInProgress = useRef(false); // ✅ PREVENT DUPLICATE OPERATIONS
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
 
-  // Fetch user's previous chats
-  useEffect(() => {
-    const fetchChats = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        
-        if (!token) {
-          console.warn("⚠️ No authentication token found");
-          setChats([]);
-          return;
-        }
+  // ✅ OPTIMIZED FETCH CHATS WITH CACHING
+  const fetchChats = async (useCache = true) => {
+    try {
+      const token = localStorage.getItem("token");
+      
+      if (!token) {
+        console.warn("⚠️ No authentication token found");
+        setChats([]);
+        return;
+      }
 
-        console.log("📤 [SideBar] Fetching sessions from:", `${backendUrl}/api/chat/sessions`);
+      console.log("📤 [SideBar] Fetching sessions...");
 
-        const res = await fetch(`${backendUrl}/api/chat/sessions`, {
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          },
-        });
+      const res = await fetch(`${backendUrl}/api/chat/sessions`, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        cache: useCache ? 'default' : 'no-cache'
+      });
 
-        console.log("📥 [SideBar] Response status:", res.status);
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
 
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
+      const data = await res.json();
+      console.log("📦 [SideBar] Chat sessions loaded:", data.length);
 
-        const data = await res.json();
-        console.log("📦 [SideBar] Chat sessions:", data);
-
-        if (Array.isArray(data)) {
-          setChats(data);
-        } else {
-          console.warn("⚠️ Chat sessions response is not an array:", data);
-          setChats([]);
-        }
-      } catch (error) {
-        console.error("❌ Failed to fetch chat sessions:", {
-          error: error.message,
-          stack: error.stack
-        });
+      if (Array.isArray(data)) {
+        setChats(data);
+      } else {
         setChats([]);
       }
-    };
+    } catch (error) {
+      console.error("❌ Failed to fetch chat sessions:", error.message);
+      setChats([]);
+    }
+  };
 
+  // ✅ INITIAL FETCH
+  useEffect(() => {
     fetchChats();
   }, [backendUrl]);
 
-  // Listen for real-time session updates
+  // ✅ OPTIMIZED SOCKET LISTENERS - PREVENT DUPLICATES
   useEffect(() => {
-    // Listen for session updates
-    socket.on("session-updated", (updatedSession) => {
+    // ✅ IMMEDIATE UI UPDATE FOR NEW SESSIONS
+    const handleNewSession = (newSession) => {
+      console.log("🆕 [SideBar] New session via socket:", newSession);
+      setChats((prevChats) => {
+        // ✅ PREVENT DUPLICATES
+        const exists = prevChats.some(chat => chat._id === newSession._id);
+        if (exists) return prevChats;
+        return [newSession, ...prevChats];
+      });
+    };
+
+    // ✅ IMMEDIATE UI UPDATE FOR SESSION UPDATES
+    const handleSessionUpdate = (updatedSession) => {
       console.log("📝 [SideBar] Session updated via socket:", updatedSession);
       setChats((prevChats) => {
-        const updatedChats = prevChats.map((chat) =>
-          chat._id === updatedSession._id ? updatedSession : chat
+        return prevChats.map((chat) =>
+          chat._id === updatedSession._id ? { ...chat, ...updatedSession } : chat
         );
-        return updatedChats;
       });
-    });
+    };
 
-    // Listen for new sessions
-    socket.on("new-session-created", (newSession) => {
-      console.log("🆕 [SideBar] New session created via socket:", newSession);
-      setChats((prevChats) => [newSession, ...prevChats]);
-    });
-
-    // Listen for session deletions
-    socket.on("session-deleted", (deletedSessionId) => {
+    // ✅ IMMEDIATE UI UPDATE FOR DELETIONS
+    const handleSessionDelete = (deletedSessionId) => {
       console.log("🗑️ [SideBar] Session deleted via socket:", deletedSessionId);
       setChats((prevChats) => prevChats.filter(chat => chat._id !== deletedSessionId));
-    });
+      
+      // ✅ NOTIFY PARENT IF SELECTED SESSION WAS DELETED
+      if (selectedSessionId === deletedSessionId && onSessionDelete) {
+        onSessionDelete(deletedSessionId);
+      }
+    };
+
+    socket.on("new-session-created", handleNewSession);
+    socket.on("session-updated", handleSessionUpdate);
+    socket.on("session-deleted", handleSessionDelete);
 
     return () => {
-      socket.off("session-updated");
-      socket.off("new-session-created");
-      socket.off("session-deleted");
+      socket.off("new-session-created", handleNewSession);
+      socket.off("session-updated", handleSessionUpdate);
+      socket.off("session-deleted", handleSessionDelete);
     };
-  }, []);
+  }, [selectedSessionId, onSessionDelete]);
 
+  // ✅ OPTIMIZED NEW CHAT CREATION
   const handleNewChat = async () => {
+    // ✅ PREVENT MULTIPLE CONCURRENT OPERATIONS
+    if (operationInProgress.current || creatingChat) {
+      console.log('⚠️ [SIDEBAR] Operation already in progress, skipping...');
+      return;
+    }
+
     try {
+      operationInProgress.current = true;
+      setCreatingChat(true);
+
       const token = localStorage.getItem("token");
       
       if (!token) {
@@ -125,40 +146,61 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId }) => {
           headers: { 
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json"
-          } 
+          },
+          timeout: 10000 // ✅ ADD TIMEOUT
         }
       );
 
-      console.log("✅ New chat session created:", res.data);
-      
       const newSession = res.data.session || res.data;
+      console.log("✅ [SideBar] New chat session created:", newSession._id);
       
-      // Add to local state
-      setChats((prev) => [newSession, ...prev]);
+      // ✅ IMMEDIATE UI UPDATE
+      setChats((prev) => {
+        // ✅ CHECK FOR DUPLICATES
+        const exists = prev.some(chat => chat._id === newSession._id);
+        if (exists) return prev;
+        return [newSession, ...prev];
+      });
       
-      // Emit socket event for other clients
+      // ✅ EMIT SOCKET EVENT FOR OTHER CLIENTS
       socket.emit("new-session-created", newSession);
       
-      // Select the new session
-      onSelectSession(newSession._id);
+      // ✅ NOTIFY PARENT TO SELECT NEW SESSION
+      if (onSelectSession) {
+        onSelectSession(newSession._id);
+      }
+
+      // ✅ NOTIFY CHAT INTERFACE
+      window.dispatchEvent(new CustomEvent('newSessionCreated', { 
+        detail: { sessionId: newSession._id, session: newSession }
+      }));
+      
     } catch (err) {
-      console.error("❌ Failed to create chat:", {
-        error: err.message,
-        response: err.response?.data,
-        status: err.response?.status
-      });
+      console.error("❌ Failed to create chat:", err.message);
+      alert("Failed to create new chat. Please try again.");
+    } finally {
+      operationInProgress.current = false;
+      setCreatingChat(false);
     }
   };
 
+  // ✅ OPTIMIZED DELETE CHAT
   const handleDeleteChat = async (e, chatId) => {
     e.stopPropagation();
+    
+    // ✅ PREVENT MULTIPLE OPERATIONS
+    if (operationInProgress.current || deletingChat) {
+      return;
+    }
     
     if (!confirm("Are you sure you want to delete this chat? This action cannot be undone.")) {
       return;
     }
 
     try {
+      operationInProgress.current = true;
       setDeletingChat(chatId);
+      
       const token = localStorage.getItem("token");
       
       if (!token) {
@@ -168,44 +210,50 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId }) => {
 
       console.log("🗑️ [SideBar] Deleting chat session:", chatId);
 
+      // ✅ IMMEDIATE UI UPDATE (OPTIMISTIC)
+      setChats((prev) => prev.filter(chat => chat._id !== chatId));
+      
+      // ✅ NOTIFY PARENT IMMEDIATELY
+      if (selectedSessionId === chatId && onSessionDelete) {
+        onSessionDelete(chatId);
+      }
+
       const res = await axios.delete(
         `${backendUrl}/api/chat/session/${chatId}`,
         { 
           headers: { 
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json"
-          } 
+          },
+          timeout: 10000
         }
       );
 
-      console.log("✅ Chat session deleted:", res.data);
+      console.log("✅ Chat session deleted successfully");
       
-      // Remove from local state
-      setChats((prev) => prev.filter(chat => chat._id !== chatId));
-      
-      // Emit socket event for other clients
+      // ✅ EMIT SOCKET EVENT FOR OTHER CLIENTS
       socket.emit("session-deleted", chatId);
       
-      // If this was the selected session, clear selection
-      if (selectedSessionId === chatId) {
-        onSelectSession(null);
-      }
-      
     } catch (err) {
-      console.error("❌ Failed to delete chat:", {
-        error: err.message,
-        response: err.response?.data,
-        status: err.response?.status
-      });
+      console.error("❌ Failed to delete chat:", err.message);
+      
+      // ✅ ROLLBACK ON ERROR
+      fetchChats(false); // Force refresh from server
       alert("Failed to delete chat. Please try again.");
     } finally {
+      operationInProgress.current = false;
       setDeletingChat(null);
     }
   };
 
+  // ✅ OPTIMIZED CHAT SELECTION
   const handleSelectChat = (sessionId) => {
-    console.log("🧠 Selected chat session:", sessionId);
-    onSelectSession(sessionId);
+    if (operationInProgress.current) return; // ✅ PREVENT DURING OPERATIONS
+    
+    console.log("🎯 [SideBar] Selected chat session:", sessionId);
+    if (onSelectSession) {
+      onSelectSession(sessionId);
+    }
   };
 
   const handleLogout = async () => {
@@ -221,10 +269,15 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId }) => {
 
   const links = [
     {
-      label: "New Chat",
+      label: creatingChat ? "Creating..." : "New Chat",
       href: "#",
-      icon: <IconMessagePlus className="h-5 w-5 shrink-0 text-neutral-700" />,
+      icon: creatingChat ? (
+        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
+      ) : (
+        <IconMessagePlus className="h-5 w-5 shrink-0 text-neutral-700" />
+      ),
       onClick: handleNewChat,
+      disabled: creatingChat || operationInProgress.current
     },
     {
       label: "Profile",
@@ -268,8 +321,12 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId }) => {
             <div className="mt-8 mb-4">
               <SidebarLink
                 link={links[0]}
-                onClick={links[0].onClick}
-                className="bg-primary/10 hover:bg-primary/20 transition-colors"
+                onClick={links[0].disabled ? undefined : links[0].onClick}
+                className={`transition-colors ${
+                  links[0].disabled 
+                    ? 'opacity-50 cursor-not-allowed' 
+                    : 'bg-primary/10 hover:bg-primary/20'
+                }`}
               />
             </div>
 
@@ -277,7 +334,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId }) => {
               {open && (
                 <>
                   <div className="text-sm text-muted-foreground px-2 mb-2">
-                    Previous Chats
+                    Previous Chats ({chats.length})
                   </div>
                   <div className="space-y-2">
                     {chats.length === 0 ? (
@@ -291,12 +348,14 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId }) => {
                           onClick={() => handleSelectChat(chat._id)}
                           onMouseEnter={() => setHoveredChat(chat._id)}
                           onMouseLeave={() => setHoveredChat(null)}
-                          className="px-2 py-1 text-sm hover:bg-primary/10 rounded-md cursor-pointer transition-colors flex items-center justify-between group"
+                          className={`px-2 py-1 text-sm hover:bg-primary/10 rounded-md cursor-pointer transition-colors flex items-center justify-between group ${
+                            selectedSessionId === chat._id ? 'bg-primary/20 font-medium' : ''
+                          }`}
                         >
                           <span className="truncate">
                             {chat.title || "Untitled Chat"}
                           </span>
-                          {hoveredChat === chat._id && (
+                          {hoveredChat === chat._id && !operationInProgress.current && (
                             <button
                               onClick={(e) => handleDeleteChat(e, chat._id)}
                               disabled={deletingChat === chat._id}

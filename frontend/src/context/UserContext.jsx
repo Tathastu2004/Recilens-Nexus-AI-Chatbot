@@ -1,686 +1,573 @@
-import { createContext, useState, useEffect, useContext } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 
-export const UserContext = createContext();
-
-// Custom hook to use the UserContext
-export const useUser = () => {
-  const context = useContext(UserContext);
-  if (!context) {
-    throw new Error('useUser must be used within a UserProvider');
-  }
-  return context;
-};
+const UserContext = createContext();
 
 export const UserProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
 
-  // Check if user is logged in on component mount
-  useEffect(() => {
-    console.log('🔄 UserProvider mounted, checking auth status...');
-    checkAuthStatus();
-  }, []);
+  // ✅ UTILITY FUNCTION TO CLEAR USER-SPECIFIC SESSION DATA
+  const clearUserSessionData = (userId) => {
+    if (userId) {
+      const userSessionKey = `lastSelectedSession_${userId}`;
+      localStorage.removeItem(userSessionKey);
+      console.log('🧹 [USER CONTEXT] Cleared session data for user:', userId);
+    }
+    
+    // Also clear old non-user-specific data
+    localStorage.removeItem('lastSelectedSession');
+  };
 
-  // Add useEffect to debug user state changes
-  useEffect(() => {
-    console.log('👤 User state changed:', {
-      user,
-      isAuthenticated,
-      loading,
-      hasToken: !!localStorage.getItem('token')
-    });
-  }, [user, isAuthenticated, loading]);
-
-  // Update the checkAuthStatus function
-  const checkAuthStatus = async () => {
-    console.log('🔍 Checking auth status...');
-    try {
-      const token = localStorage.getItem('token');
-      const storedUser = localStorage.getItem('user');
-      
-      console.log('🔑 Token from localStorage:', token ? `${token.substring(0, 20)}...` : 'None');
-      console.log('👤 User from localStorage:', storedUser ? 'Found' : 'None');
-      
-      if (!token) {
-        console.log('❌ No token found, setting unauthenticated');
-        setLoading(false);
-        setIsAuthenticated(false);
-        return;
-      }
-
-      // ✅ If we have stored user data, use it immediately
-      if (storedUser) {
-        try {
-          const parsedUser = JSON.parse(storedUser);
-          console.log('👤 Setting user from localStorage:', parsedUser);
-          setUser(parsedUser);
-          setIsAuthenticated(true);
-        } catch (parseError) {
-          console.error('❌ Error parsing stored user data:', parseError);
-          localStorage.removeItem('user');
-        }
-      }
-
-      // If we have a token, assume user is authenticated until proven otherwise
-      setIsAuthenticated(true);
-      console.log('✅ Token found, setting authenticated to true');
-      
+  // ✅ UTILITY FUNCTION TO CLEAR ALL SESSION DATA
+  const clearAllSessionData = () => {
+    // Get current user before clearing
+    const currentUser = localStorage.getItem("user");
+    if (currentUser) {
       try {
-        console.log('📡 Fetching fresh user profile...');
-        const response = await axios.get(`${API_BASE_URL}/api/auth/getprofile`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-          timeout: 10000,
-        });
-
-        console.log('📊 Profile response:', {
-          status: response.status,
-          data: response.data,
-          success: response.data?.success
-        });
-
-        if (response.data.success || response.status === 200) {
-          const userData = response.data.user || response.data;
-          console.log('👤 Fresh user data from server:', userData);
-          
-          // ✅ Update localStorage with fresh data
-          const completeUserData = {
-            ...userData,
-            token
-          };
-          localStorage.setItem('user', JSON.stringify(completeUserData));
-          
-          setUser(completeUserData);
-          setIsAuthenticated(true);
-        } else {
-          console.log('❌ Profile fetch unsuccessful:', response.data);
-          throw new Error('Profile fetch failed');
-        }
-      } catch (profileError) {
-        console.error('❌ Profile fetch error:', profileError);
-        
-        // Only clear auth on authentication errors (401, 403)
-        if (profileError.response?.status === 401 || 
-            profileError.response?.status === 403) {
-          console.log('🔐 Authentication error, clearing session');
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          setUser(null);
-          setIsAuthenticated(false);
-        } else {
-          console.log('🌐 Network/server error, keeping user logged in with stored data');
-          // Keep the user data from localStorage if it exists
-        }
+        const parsedUser = JSON.parse(currentUser);
+        clearUserSessionData(parsedUser._id);
+      } catch (e) {
+        console.warn('Failed to parse user data for session cleanup');
       }
-      
-    } catch (error) {
-      console.error('💥 Auth check failed:', error);
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      setUser(null);
-      setIsAuthenticated(false);
-    } finally {
-      console.log('✅ Auth check complete, setting loading to false');
-      setLoading(false);
     }
+    
+    // Clear any remaining session data
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('lastSelectedSession')) {
+        localStorage.removeItem(key);
+      }
+    });
+    
+    console.log('🧹 [USER CONTEXT] Cleared all session data');
   };
 
-  // Register User - POST /api/auth/register
-  const registerUser = async (userData) => {
-    console.log('📝 Registering user:', userData);
-    try {
-      setLoading(true);
-      const response = await axios.post(`${API_BASE_URL}/api/auth/register`, userData);
-      console.log('📝 Registration response:', response.data);
-      
-      return {
-        success: response.data.success,
-        message: response.data.message,
-        data: response.data
-      };
-    } catch (error) {
-      console.error('❌ Registration error:', error);
-      return {
-        success: false,
-        message: error.response?.data?.message || 'Registration failed'
-      };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Verify OTP - POST /api/auth/verify-otp
-  const verifyOtp = async (email, otp) => {
-    console.log('🔐 Verifying OTP for:', email);
-    try {
-      setLoading(true);
-      const response = await axios.post(`${API_BASE_URL}/api/auth/verify-otp`, {
-        email,
-        otp
-      });
-      console.log('🔐 OTP verification response:', response.data);
-      
-      return {
-        success: response.data.success,
-        message: response.data.message,
-        data: response.data
-      };
-    } catch (error) {
-      console.error('❌ OTP verification error:', error);
-      return {
-        success: false,
-        message: error.response?.data?.message || 'OTP verification failed'
-      };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Resend OTP - POST /api/auth/resend-otp
-  const resendOtp = async (email) => {
-    console.log('🔄 Resending OTP for:', email);
-    try {
-      setLoading(true);
-      const response = await axios.post(`${API_BASE_URL}/api/auth/resend-otp`, {
-        email
-      });
-      console.log('🔄 Resend OTP response:', response.data);
-      
-      return {
-        success: response.data.success,
-        message: response.data.message,
-        data: response.data
-      };
-    } catch (error) {
-      console.error('❌ Resend OTP error:', error);
-      return {
-        success: false,
-        message: error.response?.data?.message || 'Failed to resend OTP'
-      };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Login User - POST /api/auth/login
+  // ✅ ENHANCED LOGIN FUNCTION WITH BETTER TOKEN HANDLING
   const loginUser = async (credentials) => {
-    console.log('🔑 Logging in user:', credentials);
     try {
       setLoading(true);
       
-      const response = await axios.post(`${API_BASE_URL}/api/auth/login`, credentials, {
+      // ✅ CLEAR PREVIOUS USER'S SESSION DATA BEFORE LOGIN
+      clearAllSessionData();
+
+      console.log('🔐 [USER CONTEXT] Attempting login for:', credentials.email);
+
+      const response = await axios.post(`${backendUrl}/api/auth/login`, credentials, {
         headers: {
           'Content-Type': 'application/json'
         }
       });
-
-      console.log('🔑 Login response:', response.data);
-
-      const { token, role, user: userData } = response.data;
       
-      if (token) {
-        localStorage.setItem('token', token);
-        console.log('💾 Token saved to localStorage');
-      }
-
-      // ✅ FIX: Store complete user data in localStorage
-      const completeUserData = {
-        ...userData,
-        token,
-        role
-      };
-      
-      console.log('👤 Complete user data to store:', completeUserData);
-      
-      // ✅ Store user data in localStorage for persistence
-      localStorage.setItem('user', JSON.stringify(completeUserData));
-      console.log('💾 User data saved to localStorage');
-      
-      setUser(completeUserData);
-      setIsAuthenticated(true);
-      
-      return {
-        success: true,
-        message: response.data.message || 'Login successful',
-        role: role,
-        data: response.data
-      };
-    } catch (error) {
-      console.error('❌ Login error:', error);
-      return {
-        success: false,
-        message: error.response?.data?.message || 'Login failed'
-      };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Logout User - POST /api/auth/logout
-  const logoutUser = async () => {
-    console.log('🚪 Logging out user...');
-    try {
-      const token = localStorage.getItem('token');
-      if (token) {
-        await axios.post(`${API_BASE_URL}/api/auth/logout`, {}, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        });
-        console.log('✅ Logout API call successful');
-      }
-      
-      return {
-        success: true,
-        message: 'Logged out successfully'
-      };
-    } catch (error) {
-      console.error('❌ Logout error:', error);
-      return {
-        success: false,
-        message: 'Logout failed but local session cleared'
-      };
-    } finally {
-      console.log('🧹 Clearing local session data');
-      localStorage.removeItem('token');
-      localStorage.removeItem('user'); // ✅ Clear user data
-      setUser(null);
-      setIsAuthenticated(false);
-    }
-  };
-
-  // Get User Profile - GET /api/auth/getprofile
-  const getUserProfile = async () => {
-    console.log('👤 Getting user profile...');
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_BASE_URL}/api/auth/getprofile`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+      console.log('📡 [USER CONTEXT] Login response:', {
+        success: response.data.success,
+        hasToken: !!response.data.token,
+        hasUser: !!response.data.user,
+        tokenStart: response.data.token ? response.data.token.substring(0, 20) + '...' : 'No token'
       });
+      
+      if (response.data.success && response.data.token && response.data.user) {
+        const { token, user: userData } = response.data;
+        
+        // ✅ VALIDATE TOKEN FORMAT
+        if (!token || token === 'undefined' || token === 'null') {
+          throw new Error('Invalid token received from server');
+        }
 
-      console.log('👤 Get profile response:', response.data);
-
-      if (response.data.success) {
-        const userData = response.data.user;
-        console.log('👤 Setting user data from profile:', userData);
+        if (!userData || !userData._id) {
+          throw new Error('Invalid user data received from server');
+        }
+        
+        // ✅ STORE AUTH DATA
+        localStorage.setItem("token", token);
+        localStorage.setItem("user", JSON.stringify(userData));
+        
         setUser(userData);
         setIsAuthenticated(true);
-        return {
-          success: true,
-          user: userData
+        
+        console.log('✅ [USER CONTEXT] User logged in successfully:', {
+          name: userData.name,
+          email: userData.email,
+          role: userData.role,
+          id: userData._id,
+          tokenStored: !!localStorage.getItem("token")
+        });
+        
+        // ✅ RETURN CONSISTENT STRUCTURE
+        return { 
+          success: true, 
+          user: userData,
+          role: userData.role,
+          message: 'Login successful'
         };
       } else {
-        throw new Error('Failed to fetch user profile');
+        throw new Error(response.data.message || 'Login failed - invalid response format');
       }
     } catch (error) {
-      console.error('❌ Error fetching user:', error);
+      console.error('❌ [USER CONTEXT] Login error:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
       
-      if (error.response?.status === 401) {
-        console.log('🔐 Unauthorized, clearing session');
-        localStorage.removeItem('token');
-        setUser(null);
-        setIsAuthenticated(false);
-      }
+      // ✅ CLEAR DATA ON ERROR
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      setUser(null);
+      setIsAuthenticated(false);
       
-      return {
-        success: false,
-        message: error.response?.data?.message || 'Failed to fetch profile'
-      };
-    }
-  };
-
-  // Update User Profile - PUT /api/auth/updateprofile
-  const updateUserProfile = async (profileData, photoFile = null) => {
-    console.log('✏️ Updating user profile:', profileData);
-    try {
-      setLoading(true);
-      const token = localStorage.getItem('token');
-      
-      // For simple updates (name, email), use JSON
-      if (!photoFile) {
-        const response = await axios.put(`${API_BASE_URL}/api/auth/updateprofile`, profileData, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        console.log('✏️ Update profile response:', response.data);
-
-        if (response.data.success && response.data.user) {
-          console.log('👤 Updating user data in context:', response.data.user);
-          setUser(response.data.user);
-        }
-        
-        return {
-          success: response.data.success,
-          message: response.data.message,
-          user: response.data.user
-        };
-      } else {
-        // For file uploads, use FormData
-        const formData = new FormData();
-        Object.keys(profileData).forEach(key => {
-          formData.append(key, profileData[key]);
-        });
-        if (photoFile) {
-          formData.append('photo', photoFile);
-        }
-
-        const response = await axios.put(`${API_BASE_URL}/api/auth/updateprofile`, formData, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data',
-          },
-        });
-
-        console.log('✏️ Update profile with photo response:', response.data);
-
-        if (response.data.success && response.data.user) {
-          console.log('👤 Updating user data in context:', response.data.user);
-          setUser(response.data.user);
-        }
-        
-        return {
-          success: response.data.success,
-          message: response.data.message,
-          user: response.data.user
-        };
-      }
-    } catch (error) {
-      console.error('❌ Update profile error:', error);
-      return {
-        success: false,
-        message: error.response?.data?.message || 'Failed to update profile'
+      return { 
+        success: false, 
+        message: error.response?.data?.message || error.message || 'Login failed' 
       };
     } finally {
       setLoading(false);
     }
   };
 
-  // Send Password Reset OTP - POST /api/auth/forgot-password
-  const sendPasswordResetOtp = async (email) => {
-    console.log('🔄 Sending password reset OTP for:', email);
+  // ✅ ENHANCED LOGOUT FUNCTION WITH SESSION CLEANUP
+  const logoutUser = async () => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/auth/forgot-password`, {
-        email
-      });
-      console.log('🔄 Password reset OTP response:', response.data);
+      // ✅ CLEAR CURRENT USER'S SESSION DATA BEFORE LOGOUT
+      if (user?._id) {
+        clearUserSessionData(user._id);
+      } else {
+        // Fallback - clear all session data
+        clearAllSessionData();
+      }
+
+      // Call backend logout if needed
+      const token = localStorage.getItem("token");
+      if (token) {
+        try {
+          await axios.post(`${backendUrl}/api/auth/logout`, {}, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+        } catch (error) {
+          console.warn('Backend logout failed, but continuing with local logout');
+        }
+      }
+
+      // Clear auth data
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
       
-      return {
-        success: response.data.success,
-        message: response.data.message,
-        data: response.data
-      };
+      setUser(null);
+      setIsAuthenticated(false);
+      
+      console.log('✅ [USER CONTEXT] User logged out successfully');
+      
+      return { success: true };
     } catch (error) {
-      console.error('❌ Password reset OTP error:', error);
-      return {
-        success: false,
-        message: error.response?.data?.message || 'Failed to send reset OTP'
+      console.error('❌ [USER CONTEXT] Logout error:', error);
+      
+      // Force clear even on error
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      clearAllSessionData();
+      
+      setUser(null);
+      setIsAuthenticated(false);
+      
+      return { success: false, error: error.message };
+    }
+  };
+
+  // ✅ FIXED REGISTER FUNCTION - NO AUTO LOGIN
+  const registerUser = async (userData) => {
+    try {
+      setLoading(true);
+      
+      // ✅ CLEAR ANY EXISTING SESSION DATA
+      clearAllSessionData();
+
+      console.log('📝 [USER CONTEXT] Attempting registration for:', userData.email);
+
+      const response = await axios.post(`${backendUrl}/api/auth/register`, userData);
+      
+      console.log('📡 [USER CONTEXT] Registration response:', {
+        success: response.data.success,
+        message: response.data.message
+      });
+      
+      if (response.data.success) {
+        console.log('✅ [USER CONTEXT] Registration successful - user needs to verify email');
+        
+        // ✅ DON'T AUTO-LOGIN AFTER REGISTRATION
+        // Just return success - user should verify email first
+        return { 
+          success: true, 
+          message: response.data.message || 'Registration successful. Please check your email for verification.',
+          email: userData.email
+        };
+      } else {
+        throw new Error(response.data.message || 'Registration failed');
+      }
+    } catch (error) {
+      console.error('❌ [USER CONTEXT] Registration error:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      
+      return { 
+        success: false, 
+        message: error.response?.data?.message || error.message || 'Registration failed' 
+      };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ UPDATE USER FUNCTION
+  const updateUser = (updatedUserData) => {
+    try {
+      localStorage.setItem("user", JSON.stringify(updatedUserData));
+      setUser(updatedUserData);
+      console.log('✅ [USER CONTEXT] User data updated');
+    } catch (error) {
+      console.error('❌ [USER CONTEXT] Failed to update user:', error);
+    }
+  };
+
+  // ✅ ADD MISSING PROFILE UPDATE FUNCTION
+  const updateUserProfile = async (updateData) => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      console.log('📝 [USER CONTEXT] Updating user profile:', updateData);
+
+      const response = await axios.put(`${backendUrl}/api/auth/updateprofile`, updateData, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      });
+
+      if (response.data.success) {
+        const updatedUser = response.data.user;
+        setUser(updatedUser);
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+        
+        console.log('✅ [USER CONTEXT] Profile updated successfully');
+        return { success: true, user: updatedUser };
+      } else {
+        throw new Error(response.data.message || 'Failed to update profile');
+      }
+    } catch (error) {
+      console.error('❌ [USER CONTEXT] Profile update error:', error);
+      return { 
+        success: false, 
+        message: error.response?.data?.message || error.message || 'Failed to update profile' 
       };
     }
   };
 
-  // Reset Password with OTP - POST /api/auth/reset-password
-  const resetPasswordWithOtp = async (email, otp, newPassword) => {
-    console.log('🔐 Resetting password for:', email);
+  // ✅ ADD MISSING PHOTO UPLOAD FUNCTION
+  const uploadProfilePhoto = async (file) => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/auth/reset-password`, {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      console.log('📸 [USER CONTEXT] Uploading profile photo');
+
+      const formData = new FormData();
+      formData.append('photo', file);
+
+      const response = await axios.put(`${backendUrl}/api/auth/updateprofile`, formData, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "multipart/form-data"
+        }
+      });
+
+      if (response.data.success) {
+        const updatedUser = response.data.user;
+        setUser(updatedUser);
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+        
+        console.log('✅ [USER CONTEXT] Photo uploaded successfully');
+        return { success: true, user: updatedUser };
+      } else {
+        throw new Error(response.data.message || 'Failed to upload photo');
+      }
+    } catch (error) {
+      console.error('❌ [USER CONTEXT] Photo upload error:', error);
+      return { 
+        success: false, 
+        message: error.response?.data?.message || error.message || 'Failed to upload photo' 
+      };
+    }
+  };
+
+  // ✅ ADD MISSING PHOTO DELETE FUNCTION
+  const deleteProfilePhoto = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      console.log('🗑️ [USER CONTEXT] Deleting profile photo');
+
+      // Send empty photo to delete
+      const response = await axios.put(`${backendUrl}/api/auth/updateprofile`, 
+        { removePhoto: true }, 
+        {
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      if (response.data.success) {
+        const updatedUser = response.data.user;
+        setUser(updatedUser);
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+        
+        console.log('✅ [USER CONTEXT] Photo deleted successfully');
+        return { success: true, user: updatedUser };
+      } else {
+        throw new Error(response.data.message || 'Failed to delete photo');
+      }
+    } catch (error) {
+      console.error('❌ [USER CONTEXT] Photo delete error:', error);
+      return { 
+        success: false, 
+        message: error.response?.data?.message || error.message || 'Failed to delete photo' 
+      };
+    }
+  };
+
+  // ✅ ADD MISSING VERIFY OTP FUNCTION
+  const verifyOtp = async (email, otp) => {
+    try {
+      console.log('🔐 [USER CONTEXT] Verifying OTP for:', email);
+
+      const response = await axios.post(`${backendUrl}/api/auth/verify-otp`, {
+        email,
+        otp
+      });
+
+      console.log('📡 [USER CONTEXT] OTP verification response:', response.data);
+
+      if (response.data.success) {
+        console.log('✅ [USER CONTEXT] Email verified successfully');
+        return { 
+          success: true, 
+          message: response.data.message || 'Email verified successfully!' 
+        };
+      } else {
+        throw new Error(response.data.message || 'OTP verification failed');
+      }
+    } catch (error) {
+      console.error('❌ [USER CONTEXT] OTP verification error:', error);
+      return { 
+        success: false, 
+        message: error.response?.data?.message || error.message || 'OTP verification failed' 
+      };
+    }
+  };
+
+  // ✅ ADD MISSING RESEND OTP FUNCTION
+  const resendOtp = async (email) => {
+    try {
+      console.log('🔄 [USER CONTEXT] Resending OTP for:', email);
+
+      const response = await axios.post(`${backendUrl}/api/auth/resend-otp`, {
+        email
+      });
+
+      console.log('📡 [USER CONTEXT] Resend OTP response:', response.data);
+
+      if (response.data.success) {
+        console.log('✅ [USER CONTEXT] OTP resent successfully');
+        return { 
+          success: true, 
+          message: response.data.message || 'OTP sent successfully!' 
+        };
+      } else {
+        throw new Error(response.data.message || 'Failed to resend OTP');
+      }
+    } catch (error) {
+      console.error('❌ [USER CONTEXT] Resend OTP error:', error);
+      return { 
+        success: false, 
+        message: error.response?.data?.message || error.message || 'Failed to resend OTP' 
+      };
+    }
+  };
+
+  // ✅ ADD MISSING SEND PASSWORD RESET OTP FUNCTION
+  const sendPasswordResetOtp = async (email) => {
+    try {
+      console.log('📧 [USER CONTEXT] Sending password reset OTP to:', email);
+
+      const response = await axios.post(`${backendUrl}/api/auth/forgot-password`, {
+        email
+      });
+
+      console.log('📡 [USER CONTEXT] Password reset OTP response:', response.data);
+
+      if (response.data.success) {
+        console.log('✅ [USER CONTEXT] Password reset OTP sent successfully');
+        return { 
+          success: true, 
+          message: response.data.message || 'Password reset OTP sent to your email successfully!' 
+        };
+      } else {
+        throw new Error(response.data.message || 'Failed to send password reset OTP');
+      }
+    } catch (error) {
+      console.error('❌ [USER CONTEXT] Send password reset OTP error:', error);
+      return { 
+        success: false, 
+        message: error.response?.data?.message || error.message || 'Failed to send password reset OTP' 
+      };
+    }
+  };
+
+  // ✅ ADD MISSING RESET PASSWORD WITH OTP FUNCTION
+  const resetPasswordWithOtp = async (email, otp, newPassword) => {
+    try {
+      console.log('🔐 [USER CONTEXT] Resetting password with OTP for:', email);
+
+      const response = await axios.post(`${backendUrl}/api/auth/reset-password`, {
         email,
         otp,
         newPassword
       });
-      console.log('🔐 Password reset response:', response.data);
 
-      return {
-        success: response.data.success,
-        message: response.data.message,
-        data: response.data
-      };
-    } catch (error) {
-      console.error('❌ Password reset error:', error);
-      return {
-        success: false,
-        message: error.response?.data?.message || 'Password reset failed'
-      };
-    }
-  };
+      console.log('📡 [USER CONTEXT] Reset password response:', response.data);
 
-  // Upload Profile Photo - POST /api/user/profile/photo
-  const uploadProfilePhoto = async (photoFile) => {
-    console.log('📸 Uploading profile photo:', photoFile);
-    try {
-      setLoading(true);
-      const token = localStorage.getItem('token');
-      
-      if (!photoFile) {
-        return {
-          success: false,
-          message: 'No photo file provided'
+      if (response.data.success) {
+        console.log('✅ [USER CONTEXT] Password reset successfully');
+        return { 
+          success: true, 
+          message: response.data.message || 'Password reset successfully!' 
         };
+      } else {
+        throw new Error(response.data.message || 'Failed to reset password');
       }
-
-      const formData = new FormData();
-      formData.append('photo', photoFile);
-
-      const response = await axios.post(`${API_BASE_URL}/api/user/profile/photo`, formData, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      console.log('📸 Upload photo response:', response.data);
-
-      // Update user profile picture in context
-      if (response.data.success && (response.data.imageUrl || response.data.user)) {
-        setUser(prevUser => {
-          const updatedUser = {
-            ...prevUser,
-            profilePicture: response.data.imageUrl || response.data.user.profilePicture
-          };
-          console.log('👤 Updated user with new photo:', updatedUser);
-          return updatedUser;
-        });
-        
-        // Force re-authentication to get fresh user data
-        setTimeout(() => {
-          getUserProfile();
-        }, 500);
-      }
-
-      return {
-        success: true,
-        message: response.data.message || 'Profile photo uploaded successfully',
-        imageUrl: response.data.imageUrl,
-        data: response.data
-      };
     } catch (error) {
-      console.error('❌ Upload profile photo error:', error);
-      return {
-        success: false,
-        message: error.response?.data?.message || 'Failed to upload profile photo'
-      };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Get Profile Photo - GET /api/user/profile/photo
-  const getProfilePhoto = async () => {
-    console.log('📸 Getting profile photo...');
-    try {
-      const token = localStorage.getItem('token');
-      
-      const response = await axios.get(`${API_BASE_URL}/api/user/profile/photo`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      console.log('📸 Get photo response:', response.data);
-
-      return {
-        success: true,
-        message: 'Profile photo retrieved successfully',
-        imageUrl: response.data.imageUrl,
-        data: response.data
-      };
-    } catch (error) {
-      console.error('❌ Get profile photo error:', error);
-      
-      if (error.response?.status === 404) {
-        return {
-          success: false,
-          message: 'No profile photo found',
-          imageUrl: null
-        };
-      }
-      
-      return {
-        success: false,
-        message: error.response?.data?.message || 'Failed to get profile photo'
+      console.error('❌ [USER CONTEXT] Reset password error:', error);
+      return { 
+        success: false, 
+        message: error.response?.data?.message || error.message || 'Failed to reset password' 
       };
     }
   };
 
-  // Delete Profile Photo - DELETE /api/user/profile/photo
-  const deleteProfilePhoto = async () => {
-    console.log('🗑️ Deleting profile photo...');
-    try {
-      setLoading(true);
-      const token = localStorage.getItem('token');
-      
-      const response = await axios.delete(`${API_BASE_URL}/api/user/profile/photo`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      console.log('🗑️ Delete photo response:', response.data);
-
-      // Update user profile picture in context
-      setUser(prevUser => {
-        const updatedUser = {
-          ...prevUser,
-          profilePicture: null
-        };
-        console.log('👤 Updated user after photo deletion:', updatedUser);
-        return updatedUser;
-      });
-
-      return {
-        success: true,
-        message: response.data.message || 'Profile photo deleted successfully',
-        data: response.data
-      };
-    } catch (error) {
-      console.error('❌ Delete profile photo error:', error);
-      return {
-        success: false,
-        message: error.response?.data?.message || 'Failed to delete profile photo'
-      };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Helper functions with debug
-  const isEmailVerified = () => {
-    const verified = user?.isVerified || false;
-    console.log('🔍 isEmailVerified:', verified, 'user.isVerified:', user?.isVerified);
-    return verified;
-  };
-
-  const isAdmin = () => {
-    const admin = user?.role === 'admin';
-    console.log('🔍 isAdmin:', admin, 'user.role:', user?.role);
-    return admin;
-  };
-
-  const isClient = () => {
-    const client = user?.role === 'client';
-    console.log('🔍 isClient:', client, 'user.role:', user?.role);
-    return client;
-  };
-
-  const getUserName = () => {
-    const name = user?.name || '';
-    console.log('🔍 getUserName:', name, 'user.name:', user?.name);
-    return name;
-  };
-
-  const getUserEmail = () => {
-    const email = user?.email || '';
-    console.log('🔍 getUserEmail:', email, 'user.email:', user?.email);
-    return email;
-  };
-
-  const getUserRole = () => {
-    const role = user?.role || '';
-    console.log('🔍 getUserRole:', role, 'user.role:', user?.role);
-    return role;
-  };
-
-  const getUserProfilePicture = () => {
-    const picture = user?.profilePicture || '';
-    console.log('🔍 getUserProfilePicture:', picture, 'user.profilePicture:', user?.profilePicture);
-    return picture;
-  };
-
-  // Debug the complete user object
+  // ✅ CHECK AUTH STATUS ON MOUNT (FIXED)
   useEffect(() => {
-    if (user) {
-      console.log('🐛 Complete user object:', {
-        user,
-        keys: Object.keys(user),
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        isVerified: user.isVerified,
-        profilePicture: user.profilePicture
-      });
-    }
-  }, [user]);
+    const checkAuthStatus = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const userData = localStorage.getItem("user");
 
+        console.log('🔍 [USER CONTEXT] Checking auth status:', {
+          hasToken: !!token,
+          hasUserData: !!userData,
+          tokenStart: token ? token.substring(0, 20) + '...' : 'No token'
+        });
+
+        if (!token || !userData) {
+          console.log('⚠️ [USER CONTEXT] Missing auth data');
+          setLoading(false);
+          return;
+        }
+
+        let parsedUser;
+        try {
+          parsedUser = JSON.parse(userData);
+          if (!parsedUser || !parsedUser._id) {
+            throw new Error('Invalid user data structure');
+          }
+        } catch (parseError) {
+          console.error('❌ [USER CONTEXT] Failed to parse user data:', parseError);
+          await logoutUser();
+          setLoading(false);
+          return;
+        }
+
+        // ✅ VERIFY TOKEN WITH PROFILE ENDPOINT
+        try {
+          const response = await axios.get(`${backendUrl}/api/auth/getprofile`, {
+            headers: { 
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.data.success && response.data.user) {
+            // Update user data from backend
+            const updatedUser = response.data.user;
+            setUser(updatedUser);
+            setIsAuthenticated(true);
+            
+            // Update localStorage with fresh user data
+            localStorage.setItem("user", JSON.stringify(updatedUser));
+            
+            console.log('✅ [USER CONTEXT] User authenticated:', updatedUser.name);
+          } else {
+            console.log('❌ [USER CONTEXT] Invalid response from profile endpoint');
+            await logoutUser();
+          }
+        } catch (error) {
+          console.error('❌ [USER CONTEXT] Auth check failed:', {
+            message: error.message,
+            status: error.response?.status,
+            data: error.response?.data
+          });
+          
+          // Only logout if it's an auth error (401/403)
+          if (error.response && [401, 403].includes(error.response.status)) {
+            console.log('🔒 [USER CONTEXT] Authentication failed, logging out');
+            await logoutUser();
+          } else {
+            // For network errors, use cached user data but show warning
+            console.log('⚠️ [USER CONTEXT] Using cached user data due to network error');
+            setUser(parsedUser);
+            setIsAuthenticated(true);
+          }
+        }
+      } catch (error) {
+        console.error('❌ [USER CONTEXT] Auth check failed:', error);
+        await logoutUser();
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkAuthStatus();
+  }, [backendUrl]);
+
+  // ✅ UPDATE THE CONTEXT VALUE TO INCLUDE NEW FUNCTIONS
   const value = {
     user,
-    setUser,
-    isAuthenticated,
-    setIsAuthenticated,
     loading,
-    registerUser,
+    isAuthenticated,
     loginUser,
     logoutUser,
+    registerUser,
     verifyOtp,
     resendOtp,
-    sendPasswordResetOtp,
-    resetPasswordWithOtp,
-    getUserProfile,
+    sendPasswordResetOtp,     // ✅ ADD THIS
+    resetPasswordWithOtp,     // ✅ ADD THIS
+    updateUser,
     updateUserProfile,
-    
-    // Profile photo functions
     uploadProfilePhoto,
-    getProfilePhoto,
     deleteProfilePhoto,
-    
-    // Helper functions
-    isEmailVerified,
-    isAdmin,
-    isClient,
-    getUserName,
-    getUserEmail,
-    getUserRole,
-    getUserProfilePicture,
+    clearUserSessionData,
+    clearAllSessionData
   };
 
   return (
@@ -688,6 +575,14 @@ export const UserProvider = ({ children }) => {
       {children}
     </UserContext.Provider>
   );
+};
+
+export const useUser = () => {
+  const context = useContext(UserContext);
+  if (!context) {
+    throw new Error('useUser must be used within a UserProvider');
+  }
+  return context;
 };
 
 export default UserContext;

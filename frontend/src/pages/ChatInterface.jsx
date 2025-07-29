@@ -7,18 +7,8 @@ const ChatInterface = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
-  const [sessionSelectionTimeout, setSessionSelectionTimeout] = useState(null); // ✅ ADD MISSING STATE
 
-  // ✅ CLEANUP TIMEOUT ON UNMOUNT
-  useEffect(() => {
-    return () => {
-      if (sessionSelectionTimeout) {
-        clearTimeout(sessionSelectionTimeout);
-      }
-    };
-  }, [sessionSelectionTimeout]);
-
-  // ✅ PERSIST SELECTED SESSION ON REFRESH
+  // ✅ PERSIST SELECTED SESSION ON REFRESH WITH USER-SPECIFIC STORAGE
   useEffect(() => {
     // Check authentication
     const token = localStorage.getItem("token");
@@ -30,8 +20,9 @@ const ChatInterface = () => {
       return;
     }
 
+    let parsedUser;
     try {
-      const parsedUser = JSON.parse(user);
+      parsedUser = JSON.parse(user);
       if (!parsedUser._id) {
         setAuthError('Invalid user data. Please log in again.');
         setIsLoading(false);
@@ -43,9 +34,21 @@ const ChatInterface = () => {
       return;
     }
 
-    // ✅ RESTORE LAST SELECTED SESSION FROM LOCALSTORAGE
-    const lastSession = localStorage.getItem('lastSelectedSession');
-    console.log('🔄 [CHAT INTERFACE] Restoring session:', lastSession);
+    // ✅ USER-SPECIFIC SESSION STORAGE KEY
+    const userSessionKey = `lastSelectedSession_${parsedUser._id}`;
+    const lastSession = localStorage.getItem(userSessionKey);
+    
+    console.log('🔄 [CHAT INTERFACE] Restoring session for user:', {
+      userId: parsedUser._id,
+      lastSession
+    });
+
+    // ✅ CLEAR OLD NON-USER-SPECIFIC SESSION DATA
+    const oldSessionKey = 'lastSelectedSession';
+    if (localStorage.getItem(oldSessionKey)) {
+      console.log('🧹 [CHAT INTERFACE] Clearing old non-user-specific session data');
+      localStorage.removeItem(oldSessionKey);
+    }
     
     if (lastSession && 
         lastSession !== 'null' && 
@@ -53,44 +56,72 @@ const ChatInterface = () => {
         lastSession.trim() !== '') {
       
       // ✅ VALIDATE SESSION ID FORMAT
-      if (lastSession.startsWith('new-') || lastSession.startsWith('temp-') || lastSession.match(/^[0-9a-fA-F]{24}$/)) {
-        setSelectedSession(lastSession);
+      if (lastSession.match(/^[0-9a-fA-F]{24}$/)) {
+        // ✅ VERIFY SESSION BELONGS TO CURRENT USER
+        verifyAndRestoreSession(lastSession, parsedUser._id, userSessionKey);
       } else {
         console.log('⚠️ [CHAT INTERFACE] Invalid session format, clearing:', lastSession);
-        localStorage.removeItem('lastSelectedSession');
+        localStorage.removeItem(userSessionKey);
       }
     }
     
     setIsLoading(false);
   }, []);
 
-  // ✅ IMPROVED SESSION SELECTION WITH PROPER CLEANUP
+  // ✅ VERIFY SESSION BELONGS TO CURRENT USER
+  const verifyAndRestoreSession = async (sessionId, userId, storageKey) => {
+    try {
+      const token = localStorage.getItem("token");
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
+      
+      const res = await fetch(`${backendUrl}/api/chat/session/${sessionId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      });
+
+      if (res.ok) {
+        const sessionData = await res.json();
+        // ✅ VERIFY SESSION BELONGS TO CURRENT USER
+        if (sessionData.user === userId) {
+          console.log('✅ [CHAT INTERFACE] Session verified and restored:', sessionId);
+          setSelectedSession(sessionId);
+        } else {
+          console.log('⚠️ [CHAT INTERFACE] Session belongs to different user, clearing:', {
+            sessionUser: sessionData.user,
+            currentUser: userId
+          });
+          localStorage.removeItem(storageKey);
+        }
+      } else {
+        console.log('⚠️ [CHAT INTERFACE] Session not found or invalid, clearing:', sessionId);
+        localStorage.removeItem(storageKey);
+      }
+    } catch (error) {
+      console.error('❌ [CHAT INTERFACE] Failed to verify session:', error);
+      localStorage.removeItem(storageKey);
+    }
+  };
+
+  // ✅ USER-SPECIFIC SESSION SELECTION
   const handleSessionSelect = (sessionId) => {
     console.log('🎯 [CHAT INTERFACE] Session selected:', sessionId);
     
-    // ✅ CLEAR PREVIOUS TIMEOUT
-    if (sessionSelectionTimeout) {
-      clearTimeout(sessionSelectionTimeout);
-    }
+    const user = JSON.parse(localStorage.getItem("user"));
+    const userSessionKey = `lastSelectedSession_${user._id}`;
     
     // ✅ VALIDATE SESSION ID
     if (!sessionId || sessionId === 'null' || sessionId === 'undefined') {
       console.log('⚠️ [CHAT INTERFACE] Invalid session ID, clearing selection');
       setSelectedSession(null);
-      localStorage.removeItem('lastSelectedSession');
+      localStorage.removeItem(userSessionKey);
       return;
     }
     
-    // ✅ IMMEDIATE UPDATE FOR BETTER UX
+    // ✅ IMMEDIATE UPDATE WITH USER-SPECIFIC STORAGE
     setSelectedSession(sessionId);
-    localStorage.setItem('lastSelectedSession', sessionId);
-    
-    // ✅ DEBOUNCE FOR BACKEND CALLS ONLY
-    const timeout = setTimeout(() => {
-      console.log('🔄 [CHAT INTERFACE] Debounced session update completed for:', sessionId);
-    }, 100);
-    
-    setSessionSelectionTimeout(timeout);
+    localStorage.setItem(userSessionKey, sessionId);
   };
 
   const handleSidebarToggle = (isOpen) => {
@@ -99,52 +130,50 @@ const ChatInterface = () => {
 
   const handleSessionUpdate = (updatedSession) => {
     console.log('📝 [CHAT INTERFACE] Session updated:', updatedSession);
-    
-    // ✅ TRIGGER SESSION LIST REFRESH
-    window.dispatchEvent(new CustomEvent('sessionUpdated', { 
-      detail: updatedSession 
-    }));
   };
 
-  const handleNewChat = () => {
-    const tempSessionId = `new-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    console.log('🆕 [CHAT INTERFACE] Creating new chat with ID:', tempSessionId);
-    setSelectedSession(tempSessionId);
-    localStorage.setItem('lastSelectedSession', tempSessionId);
-  };
-
-  // ✅ ADD SESSION DELETION HANDLER
   const handleSessionDelete = (deletedSessionId) => {
     console.log('🗑️ [CHAT INTERFACE] Session deleted:', deletedSessionId);
     
     // ✅ CLEAR SELECTED SESSION IF IT WAS DELETED
     if (selectedSession === deletedSessionId) {
+      const user = JSON.parse(localStorage.getItem("user"));
+      const userSessionKey = `lastSelectedSession_${user._id}`;
+      
       setSelectedSession(null);
-      localStorage.removeItem('lastSelectedSession');
+      localStorage.removeItem(userSessionKey);
     }
-    
-    // ✅ TRIGGER SESSION LIST REFRESH
-    window.dispatchEvent(new CustomEvent('sessionUpdated', { 
-      detail: { _id: deletedSessionId, deleted: true }
-    }));
   };
 
-  // ✅ ADD THIS INSIDE ChatInterface useEffect
+  // ✅ LISTEN FOR SESSION CREATION FROM SIDEBAR
   useEffect(() => {
-    // ✅ LISTEN FOR SESSION CREATION TO UPDATE SELECTED SESSION
-    const handleSessionCreated = (event) => {
-      const { oldId, newId, session } = event.detail;
-      console.log('🎉 [CHAT INTERFACE] Session created:', { oldId, newId });
+    const handleNewSessionCreated = (event) => {
+      const { sessionId } = event.detail;
+      console.log('🎉 [CHAT INTERFACE] New session created from sidebar:', sessionId);
       
-      if (selectedSession === oldId) {
-        setSelectedSession(newId);
-        localStorage.setItem('lastSelectedSession', newId);
+      const user = JSON.parse(localStorage.getItem("user"));
+      const userSessionKey = `lastSelectedSession_${user._id}`;
+      
+      setSelectedSession(sessionId);
+      localStorage.setItem(userSessionKey, sessionId);
+    };
+
+    window.addEventListener('newSessionCreated', handleNewSessionCreated);
+    return () => window.removeEventListener('newSessionCreated', handleNewSessionCreated);
+  }, []);
+
+  // ✅ CLEANUP ON USER CHANGE (ADD THIS)
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key === 'user' || e.key === 'token') {
+        console.log('👤 [CHAT INTERFACE] User changed, clearing session');
+        setSelectedSession(null);
       }
     };
 
-    window.addEventListener('sessionCreated', handleSessionCreated);
-    return () => window.removeEventListener('sessionCreated', handleSessionCreated);
-  }, [selectedSession]);
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
   if (isLoading) {
     return (
@@ -186,7 +215,7 @@ const ChatInterface = () => {
         <SideBar
           onSelectSession={handleSessionSelect}
           onToggle={handleSidebarToggle}
-          onSessionDelete={handleSessionDelete} // ✅ ADD DELETE HANDLER
+          onSessionDelete={handleSessionDelete}
           selectedSessionId={selectedSession}
         />
       </div>
@@ -197,8 +226,8 @@ const ChatInterface = () => {
           <ChatDashBoard
             selectedSession={selectedSession}
             onSessionUpdate={handleSessionUpdate}
-            onSessionDelete={handleSessionDelete} // ✅ ADD DELETE HANDLER
-            key={`${selectedSession}-${Date.now()}`} // ✅ FORCE REMOUNT ON SESSION CHANGE
+            onSessionDelete={handleSessionDelete}
+            key={selectedSession}
           />
         ) : (
           <div className="flex items-center justify-center h-full">
@@ -208,14 +237,8 @@ const ChatInterface = () => {
                 Welcome to Nexus AI
               </div>
               <div className="text-gray-500 max-w-md">
-                Select a chat from the sidebar or start a new conversation.
+                Select a chat from the sidebar or start a new conversation by clicking "New Chat".
               </div>
-              <button
-                onClick={handleNewChat}
-                className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-              >
-                Start New Chat
-              </button>
             </div>
           </div>
         )}

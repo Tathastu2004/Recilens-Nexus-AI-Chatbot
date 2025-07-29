@@ -30,7 +30,17 @@ router.put('/updateprofile', verifyToken, uploadProfilePic.single('photo'), upda
 router.post('/forgot-password', sendPasswordResetOtp);
 router.post('/reset-password', resetPasswordWithOtp);
 
-
-
+// ✅ ADD THIS TEST ROUTE
+router.get('/test-auth', verifyToken, (req, res) => {
+  res.json({
+    success: true,
+    message: 'Token verification successful',
+    user: {
+      id: req.user._id,
+      email: req.user.email,
+      role: req.user.role
+    }
+  });
+});
 
 export default router;

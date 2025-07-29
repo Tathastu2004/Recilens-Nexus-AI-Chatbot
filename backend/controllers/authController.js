@@ -11,7 +11,7 @@ const allowedAdminEmails = ['apurvsrivastava1510@gmail.com'];
 // 📌 Register new user & send OTP
 export const registerUser = async (req, res) => {
   console.log('🔶 [AUTH] Register attempt:', {
-    body: req.body,
+    body: { ...req.body, password: '[HIDDEN]' },
     timestamp: new Date().toISOString()
   });
   
@@ -29,7 +29,7 @@ export const registerUser = async (req, res) => {
     }
 
     console.log('🔍 [AUTH] Checking existing user for email:', email);
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
     console.log('🔍 [AUTH] Existing user found:', !!existingUser, existingUser ? {
       id: existingUser._id,
       email: existingUser.email,
@@ -49,7 +49,12 @@ export const registerUser = async (req, res) => {
     const otp = generateOTP();
     console.log('🔢 [AUTH] Generated OTP:', otp);
 
-    let user = existingUser || new User({ name, email, role: role || 'client' });
+    let user = existingUser || new User({ 
+      name, 
+      email: email.toLowerCase(), 
+      role: role || 'client' 
+    });
+    
     user.name = name;
     user.password = hashedPassword;
     user.otp = otp;
@@ -72,13 +77,23 @@ export const registerUser = async (req, res) => {
       from: process.env.EMAIL,
       to: email,
       subject: 'Verify your email for Nexus AI Chatbot',
-      text: `Your OTP code is ${otp}. It is valid for 10 minutes.`,
+      html: `
+        <h2>Welcome to Nexus AI Chatbot!</h2>
+        <p>Thank you for registering. Your verification code is:</p>
+        <h1 style="color: #4F46E5; font-size: 32px; letter-spacing: 5px;">${otp}</h1>
+        <p>This code is valid for 10 minutes.</p>
+        <p>If you didn't create an account, please ignore this email.</p>
+      `,
+      text: `Welcome to Nexus AI Chatbot! Your OTP code is ${otp}. It is valid for 10 minutes.`,
     });
     console.log('✅ [AUTH] OTP email sent successfully');
 
+    // ✅ RETURN SUCCESS WITHOUT TOKEN - USER MUST VERIFY EMAIL FIRST
     res.status(201).json({ 
       success: true,
-      message: 'OTP sent. Please verify your email.' 
+      message: 'Registration successful! Please check your email for the verification code.',
+      requiresVerification: true,
+      email: email
     });
 
   } catch (error) {
@@ -214,102 +229,110 @@ export const resendOtp = async (req, res) => {
 
 // 📌 Login with JWT
 export const loginUser = async (req, res) => {
-  console.log('🔶 [AUTH] Login attempt:', {
-    headers: req.headers,
-    body: req.body,
+  console.log('🔶 [AUTH] Login request:', {
+    email: req.body.email,
     timestamp: new Date().toISOString()
   });
 
-  if (!req.body || typeof req.body !== 'object') {
-    console.log('❌ [AUTH] Missing or malformed request body');
-    return res.status(400).json({ 
-      success: false,
-      message: 'Missing or malformed request body' 
-    });
-  }
-
   const { email, password } = req.body;
-  console.log('🔍 [AUTH] Login credentials received:', { email, hasPassword: !!password });
-
+  
   try {
-    console.log('🔍 [AUTH] Finding user for login:', email);
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      console.log('❌ [AUTH] User not found for login:', email);
-      return res.status(400).json({ 
+    if (!email || !password) {
+      console.log('❌ [AUTH] Missing credentials');
+      return res.status(400).json({
         success: false,
-        message: 'User not found' 
+        message: 'Email and password are required'
       });
     }
 
-    console.log('🔍 [AUTH] User found for login:', {
-      id: user._id,
+    // Find user by email
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      console.log('❌ [AUTH] User not found:', email);
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password'
+      });
+    }
+
+    // ✅ USE bcryptjs INSTEAD OF bcrypt
+    const isPasswordValid = await bcryptjs.compare(password, user.password);
+    if (!isPasswordValid) {
+      console.log('❌ [AUTH] Invalid password for user:', email);
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password'
+      });
+    }
+
+    // Check if email is verified
+    if (!user.isVerified) {
+      console.log('⚠️ [AUTH] Email not verified:', email);
+      return res.status(401).json({
+        success: false,
+        message: 'Please verify your email before logging in'
+      });
+    }
+
+    // ✅ ENSURE JWT_SECRET EXISTS
+    if (!process.env.JWT_SECRET) {
+      console.error('❌ [AUTH] JWT_SECRET not configured');
+      return res.status(500).json({
+        success: false,
+        message: 'Server configuration error'
+      });
+    }
+
+    // ✅ GENERATE JWT TOKEN WITH PROPER PAYLOAD
+    const tokenPayload = {
+      userId: user._id.toString(),
+      email: user.email,
+      role: user.role
+    };
+
+    const token = jwt.sign(
+      tokenPayload,
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    console.log('🔑 [AUTH] Token generated:', {
+      userId: user._id,
+      tokenLength: token.length,
+      payload: tokenPayload
+    });
+
+    // ✅ ENSURE CONSISTENT USER DATA STRUCTURE
+    const userData = {
+      _id: user._id,
+      name: user.name,
       email: user.email,
       role: user.role,
       isVerified: user.isVerified,
-      hasPassword: !!user.password,
-      name: user.name,
-      profilePicture: user.profilePicture
+      profilePicture: user.profilePicture || null,
+      createdAt: user.createdAt
+    };
+
+    console.log('✅ [AUTH] Login successful:', {
+      userId: user._id,
+      email: user.email,
+      role: user.role,
+      name: user.name
     });
 
-    if (!user.isVerified) {
-      console.log('❌ [AUTH] User not verified for login:', email);
-      return res.status(400).json({ 
-        success: false,
-        message: 'Email not verified' 
-      });
-    }
-
-    console.log('🔐 [AUTH] Comparing passwords...');
-    const isMatch = await bcryptjs.compare(password, user.password);
-    console.log('🔐 [AUTH] Password match result:', isMatch);
-
-    if (!isMatch) {
-      console.log('❌ [AUTH] Invalid credentials for:', email);
-      return res.status(401).json({ 
-        success: false,
-        message: 'Invalid credentials' 
-      });
-    }
-
-    console.log('🎟️ [AUTH] Generating JWT token...');
-    const token = jwt.sign(
-      { userId: user._id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '1d' }
-    );
-    console.log('🎟️ [AUTH] JWT token generated:', token.substring(0, 20) + '...');
-
-    const responseData = {
+    // ✅ RETURN CONSISTENT RESPONSE STRUCTURE
+    res.status(200).json({
       success: true,
       message: 'Login successful',
       token,
-      role: user.role,
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        isVerified: user.isVerified,
-        profilePicture: user.profilePicture
-      }
-    };
-
-    console.log('✅ [AUTH] Login successful, sending response:', {
-      success: responseData.success,
-      role: responseData.role,
-      user: responseData.user
+      user: userData
     });
 
-    res.status(200).json(responseData);
-
   } catch (error) {
-    console.error('❌ [AUTH] Login Error:', error.message);
-    console.error('❌ [AUTH] Login Stack:', error.stack);
-    res.status(500).json({ 
+    console.error('❌ [AUTH] Login Error:', error);
+    res.status(500).json({
       success: false,
-      message: 'Server error during login' 
+      message: 'Server error during login'
     });
   }
 };
@@ -327,116 +350,160 @@ export const logoutUser = async (req, res) => {
   });
 };
 
-// 📌 Send Password Reset OTP
+// ✅ SEND PASSWORD RESET OTP FUNCTION
 export const sendPasswordResetOtp = async (req, res) => {
   console.log('🔶 [AUTH] Password reset OTP request:', {
-    body: req.body,
+    email: req.body.email,
     timestamp: new Date().toISOString()
   });
 
   const { email } = req.body;
+  
   try {
-    console.log('🔍 [AUTH] Finding user for password reset:', email);
-    const user = await User.findOne({ email });
-    
-    if (!user || !user.isVerified) {
-      console.log('❌ [AUTH] No verified user found for password reset:', email);
-      return res.status(404).json({ 
+    if (!email) {
+      console.log('❌ [AUTH] Missing email for password reset');
+      return res.status(400).json({
         success: false,
-        message: 'No verified account found with this email' 
+        message: 'Email is required'
       });
     }
 
-    console.log('🔢 [AUTH] Generating password reset OTP...');
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    console.log('🔢 [AUTH] Password reset OTP generated:', otp);
+    // Find user by email
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      console.log('❌ [AUTH] User not found for password reset:', email);
+      return res.status(404).json({
+        success: false,
+        message: 'No account found with this email address'
+      });
+    }
 
-    user.otp = otp;
-    user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
-    
-    console.log('💾 [AUTH] Saving password reset OTP...');
+    // Check if user is verified
+    if (!user.isVerified) {
+      console.log('⚠️ [AUTH] User not verified for password reset:', email);
+      return res.status(400).json({
+        success: false,
+        message: 'Please verify your email first before resetting password'
+      });
+    }
+
+    // Generate OTP for password reset
+    const otp = generateOTP();
+    console.log('🔢 [AUTH] Generated password reset OTP:', otp);
+
+    // Update user with password reset OTP
+    user.passwordResetOtp = otp;
+    user.passwordResetOtpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
     await user.save();
 
-    console.log('📧 [AUTH] Sending password reset email to:', email);
+    console.log('📧 [AUTH] Sending password reset OTP email to:', email);
     await transporter.sendMail({
       from: process.env.EMAIL,
       to: email,
-      subject: 'Reset Your Password - Nexus AI Chatbot',
-      text: `Your OTP for password reset is ${otp}. It is valid for 10 minutes.`,
+      subject: 'Password Reset - Nexus AI Chatbot',
+      html: `
+        <h2>Password Reset Request</h2>
+        <p>You requested to reset your password. Your verification code is:</p>
+        <h1 style="color: #4F46E5; font-size: 32px; letter-spacing: 5px;">${otp}</h1>
+        <p>This code is valid for 10 minutes.</p>
+        <p>If you didn't request this password reset, please ignore this email.</p>
+      `,
+      text: `Password Reset Request - Your OTP code is ${otp}. It is valid for 10 minutes.`,
     });
-    console.log('✅ [AUTH] Password reset email sent successfully');
+    console.log('✅ [AUTH] Password reset OTP email sent successfully');
 
     res.status(200).json({ 
       success: true,
-      message: 'OTP sent to your email for password reset' 
+      message: 'Password reset OTP sent to your email successfully!'
     });
 
   } catch (error) {
-    console.error('❌ [AUTH] Send Reset OTP Error:', error.message);
-    console.error('❌ [AUTH] Send Reset OTP Stack:', error.stack);
+    console.error('❌ [AUTH] Send Password Reset OTP Error:', error);
     res.status(500).json({ 
       success: false,
-      message: 'Server error during password reset request' 
+      message: 'Server error while sending password reset OTP' 
     });
   }
 };
 
-// 📌 Reset Password using OTP
+// ✅ RESET PASSWORD WITH OTP FUNCTION
 export const resetPasswordWithOtp = async (req, res) => {
-  console.log('🔶 [AUTH] Password reset with OTP attempt:', {
-    body: { ...req.body, newPassword: '[HIDDEN]' },
+  console.log('🔶 [AUTH] Reset password with OTP request:', {
+    email: req.body.email,
     timestamp: new Date().toISOString()
   });
 
   const { email, otp, newPassword } = req.body;
+  
   try {
-    console.log('🔍 [AUTH] Finding user for password reset with OTP:', email);
-    const user = await User.findOne({ email });
+    if (!email || !otp || !newPassword) {
+      console.log('❌ [AUTH] Missing required fields for password reset');
+      return res.status(400).json({
+        success: false,
+        message: 'Email, OTP, and new password are required'
+      });
+    }
 
+    if (newPassword.length < 6) {
+      console.log('❌ [AUTH] Invalid password length for reset');
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters long'
+      });
+    }
+
+    // Find user by email
+    const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
       console.log('❌ [AUTH] User not found for password reset:', email);
-      return res.status(400).json({ 
+      return res.status(404).json({
         success: false,
-        message: 'User not found' 
+        message: 'No account found with this email address'
       });
     }
 
-    console.log('🔍 [AUTH] Validating OTP for password reset:', {
-      storedOtp: user.otp,
-      providedOtp: otp,
-      otpExpires: user.otpExpires,
-      currentTime: new Date(),
-      isExpired: user.otpExpires < Date.now()
-    });
-
-    if (user.otp !== otp || user.otpExpires < Date.now()) {
-      console.log('❌ [AUTH] Invalid or expired OTP for password reset');
-      return res.status(400).json({ 
+    // Check OTP
+    if (!user.passwordResetOtp || user.passwordResetOtp !== otp) {
+      console.log('❌ [AUTH] Invalid OTP for password reset:', {
+        provided: otp,
+        expected: user.passwordResetOtp
+      });
+      return res.status(400).json({
         success: false,
-        message: 'Invalid or expired OTP' 
+        message: 'Invalid OTP code'
       });
     }
 
-    console.log('🔐 [AUTH] Hashing new password...');
-    user.password = await bcryptjs.hash(newPassword, 10);
-    user.otp = null;
-    user.otpExpires = null;
-    
-    console.log('💾 [AUTH] Saving password reset...');
+    // Check OTP expiration
+    if (!user.passwordResetOtpExpires || user.passwordResetOtpExpires < new Date()) {
+      console.log('❌ [AUTH] Expired OTP for password reset');
+      return res.status(400).json({
+        success: false,
+        message: 'OTP code has expired. Please request a new one.'
+      });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcryptjs.hash(newPassword, 10);
+
+    // Update user password and clear OTP fields
+    user.password = hashedPassword;
+    user.passwordResetOtp = undefined;
+    user.passwordResetOtpExpires = undefined;
     await user.save();
-    console.log('✅ [AUTH] Password reset successfully');
+
+    console.log('✅ [AUTH] Password reset successful for user:', email);
 
     res.status(200).json({ 
       success: true,
-      message: 'Password reset successfully' 
+      message: 'Password reset successfully! You can now login with your new password.'
     });
 
   } catch (error) {
-    console.error('❌ [AUTH] Reset Password Error:', error.message);
-    console.error('❌ [AUTH] Reset Password Stack:', error.stack);
+    console.error('❌ [AUTH] Reset Password Error:', error);
     res.status(500).json({ 
-      success: false, 
-      message: 'Server error during password reset' 
+      success: false,
+      message: 'Server error while resetting password' 
     });
   }
 };
@@ -498,18 +565,21 @@ export const updateUserProfile = async (req, res) => {
   console.log('🔶 [AUTH] Update profile request:', {
     userId: req.user?._id,
     body: req.body,
+    file: req.file ? { originalname: req.file.originalname, size: req.file.size } : 'No file',
     timestamp: new Date().toISOString()
   });
 
-  const { name, email } = req.body;
+  const { name, email, removePhoto } = req.body;
   try {
     const user = req.user;
     console.log('🔍 [AUTH] Current user data:', {
       id: user?._id,
       currentName: user?.name,
       currentEmail: user?.email,
+      currentProfilePicture: user?.profilePicture,
       newName: name,
-      newEmail: email
+      newEmail: email,
+      removePhoto: removePhoto
     });
 
     if (!user) {
@@ -520,8 +590,21 @@ export const updateUserProfile = async (req, res) => {
       });
     }
 
-    user.name = name || user.name;
-    user.email = email || user.email;
+    // Update basic fields
+    if (name) user.name = name;
+    if (email) user.email = email;
+
+    // Handle photo removal
+    if (removePhoto === true || removePhoto === 'true') {
+      console.log('🗑️ [AUTH] Removing profile photo');
+      user.profilePicture = null;
+    }
+
+    // Handle photo upload
+    if (req.file) {
+      console.log('📸 [AUTH] New photo uploaded:', req.file.path);
+      user.profilePicture = `/uploads/profiles/${req.file.filename}`;
+    }
 
     console.log('💾 [AUTH] Saving updated user profile...');
     await user.save();

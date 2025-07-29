@@ -5,11 +5,17 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: String,
   role: { type: String, enum: ['admin', 'client'], default: 'client' },
+  // Email verification fields
   otp: String,
   otpExpires: Date,
   isVerified: { type: Boolean, default: false },
+  // Password reset fields
+  passwordResetOtp: String,
+  passwordResetOtpExpires: Date,
   profilePicture: { type: String, default: '' }, // file path or URL
 
+}, {
+  timestamps: true
 });
 
 export default mongoose.model('User', userSchema);

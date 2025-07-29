@@ -36,6 +36,14 @@ const ResetPassword = ({ onBack }) => {
     return () => clearInterval(interval);
   }, [timer, step]);
 
+  // CHECK IF FUNCTIONS ARE AVAILABLE
+  useEffect(() => {
+    if (!sendPasswordResetOtp || !resetPasswordWithOtp) {
+      console.error('❌ [RESET PASSWORD] Required functions not available from UserContext');
+      setError('Password reset functionality is not available. Please try again later.');
+    }
+  }, [sendPasswordResetOtp, resetPasswordWithOtp]);
+
   // Step 1: Send OTP to email
   const handleSendOtp = async (e) => {
     e.preventDefault();
@@ -50,23 +58,32 @@ const ResetPassword = ({ onBack }) => {
       return;
     }
 
+    // CHECK IF FUNCTION EXISTS
+    if (!sendPasswordResetOtp) {
+      setError('Password reset service is not available. Please try again later.');
+      return;
+    }
+
     setLoading(true);
     setError('');
 
     try {
+      console.log('📧 [RESET PASSWORD] Sending OTP to:', email);
       const result = await sendPasswordResetOtp(email);
       
-      if (result.success) {
+      console.log('📡 [RESET PASSWORD] Send OTP result:', result);
+      
+      if (result && result.success) {
         setSuccess('OTP sent to your email successfully!');
-        
         setStep(2);
         setTimer(60);
         setCanResend(false);
         setTimeout(() => setSuccess(''), 3000);
       } else {
-        setError(result.message || 'Failed to send OTP');
+        setError(result?.message || 'Failed to send OTP');
       }
     } catch (error) {
+      console.error('❌ [RESET PASSWORD] Send OTP error:', error);
       setError('An error occurred. Please try again.');
     } finally {
       setLoading(false);

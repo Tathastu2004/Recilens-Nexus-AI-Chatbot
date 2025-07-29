@@ -41,6 +41,43 @@ router.post('/upload',
   uploadFileHandler
 );
 
+// ✅ ADD THIS ENDPOINT TO YOUR BACKEND
+router.get('/api/chat/session/:sessionId', verifyToken, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const userId = req.user.userId;
+
+    const session = await ChatSession.findById(sessionId);
+    
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: 'Session not found'
+      });
+    }
+
+    // ✅ VERIFY SESSION BELONGS TO REQUESTING USER
+    if (session.user.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied - session belongs to different user'
+      });
+    }
+
+    res.json({
+      success: true,
+      ...session.toObject()
+    });
+
+  } catch (error) {
+    console.error('❌ [GET SESSION] Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get session'
+    });
+  }
+});
+
 // Error handling middleware should be at the end
 router.use(handleUploadErrors);
 

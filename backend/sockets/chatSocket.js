@@ -226,6 +226,28 @@ export const registerChatSocket = (io) => {
       socket.broadcast.emit("new-session-created", newSession);
     });
 
+    // Update session title
+    socket.on('update-session-title', async (data) => {
+      try {
+        const { sessionId, title } = data;
+        
+        // Update in database
+        const updatedSession = await ChatSession.findByIdAndUpdate(
+          sessionId,
+          { title, updatedAt: new Date() },
+          { new: true }
+        );
+
+        if (updatedSession) {
+          // Broadcast to all clients immediately
+          io.emit('session-updated', updatedSession);
+          console.log('✅ [SOCKET] Session title updated and broadcasted:', updatedSession.title);
+        }
+      } catch (error) {
+        console.error('❌ [SOCKET] Failed to update session title:', error);
+      }
+    });
+
     socket.on("disconnect", (reason) => {
       const sessionDuration = Date.now() - connectionTime;
       console.log(`❌ [SOCKET DISCONNECTED] ID: ${socket.id} | Duration: ${sessionDuration}ms`);

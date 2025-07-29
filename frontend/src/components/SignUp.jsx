@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { IconEye, IconEyeOff, IconUser, IconLogin } from '@tabler/icons-react';
 import VerifyMail from './verfiyMail';
@@ -12,7 +12,7 @@ const SignUp = () => {
   const [showVerification, setShowVerification] = useState(false);
   const [registrationEmail, setRegistrationEmail] = useState('');
 
-  const { registerUser, loginUser } = useUser();
+  const { registerUser, loginUser, loading: userLoading, isAuthenticated } = useUser();
   const navigate = useNavigate();
 
   // SignUp form data
@@ -28,6 +28,19 @@ const SignUp = () => {
     email: '',
     password: ''
   });
+
+  // ✅ CLEAR ERRORS WHEN SWITCHING MODES
+  useEffect(() => {
+    setErrors({});
+  }, [isSignUp]);
+
+  // ✅ REDIRECT IF ALREADY AUTHENTICATED
+  useEffect(() => {
+    if (isAuthenticated && !userLoading) {
+      console.log('👤 [SignUp] User already authenticated, redirecting...');
+      navigate('/chat');
+    }
+  }, [isAuthenticated, userLoading, navigate]);
 
   const handleSignUpChange = (e) => {
     const { name, value } = e.target;
@@ -85,6 +98,7 @@ const SignUp = () => {
     return Object.keys(newErrors).length === 0;
   };
 
+  // ✅ FIXED REGISTRATION HANDLER
   const handleSignUpSubmit = async (e) => {
     e.preventDefault();
     
@@ -94,15 +108,21 @@ const SignUp = () => {
     try {
       const result = await registerUser(signUpData);
       
-      if (result.success) {
+      console.log('📝 [SignUp] Registration result:', result);
+      
+      if (result && result.success) {
+        console.log('✅ [SignUp] Registration successful, showing verification');
         setRegistrationEmail(signUpData.email);
         setShowVerification(true);
+        // ✅ DON'T SET isAuthenticated HERE - user needs to verify email first
       } else {
-        alert(result.message || 'Registration failed');
+        const errorMessage = result?.message || 'Registration failed';
+        console.error('❌ [SignUp] Registration failed:', errorMessage);
+        setErrors({ general: errorMessage });
       }
     } catch (error) {
-      console.error('Registration error:', error);
-      alert('An error occurred during registration');
+      console.error('❌ [SignUp] Registration error:', error);
+      setErrors({ general: 'An error occurred during registration' });
     } finally {
       setLoading(false);
     }
@@ -118,29 +138,36 @@ const SignUp = () => {
       const result = await loginUser(signInData);
       
       if (result.success) {
-        console.log('Login successful, user role:', result.data?.role || result.role);
+        console.log('✅ [SignUp] Login successful:', result);
         
-        // Redirect based on user role
-        const userRole = result.data?.role || result.role;
+        // ✅ PROPERLY ACCESS USER DATA FROM DIFFERENT POSSIBLE STRUCTURES
+        const userData = result.user || result.data?.user || result.data;
+        const userRole = userData?.role || result.role;
         
+        console.log('👤 [SignUp] User data:', {
+          userData,
+          userRole,
+          fullResult: result
+        });
+        
+        // ✅ REDIRECT BASED ON USER ROLE WITH SAFETY CHECKS
         if (userRole === 'admin') {
-          console.log('Redirecting to admin dashboard...');
+          console.log('🔧 [SignUp] Redirecting to admin dashboard...');
           navigate('/admin-dashboard');
-        } else if (userRole === 'client') {
-          console.log('Redirecting to chat...');
+        } else if (userRole === 'client' || !userRole) {
+          console.log('💬 [SignUp] Redirecting to chat...');
           navigate('/chat');
         } else {
-          console.log('Unknown role, redirecting to chat...');
-          navigate('/chat'); // Default to chat for unknown roles
+          console.log('❓ [SignUp] Unknown role, redirecting to chat...');
+          navigate('/chat'); // Default fallback
         }
         
-        // Optional: Show success message briefly
-        // alert('Login successful!');
       } else {
+        console.error('❌ [SignUp] Login failed:', result);
         setErrors({ general: result.message || 'Login failed' });
       }
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('❌ [SignUp] Login error:', error);
       setErrors({ general: 'An error occurred during login' });
     } finally {
       setLoading(false);

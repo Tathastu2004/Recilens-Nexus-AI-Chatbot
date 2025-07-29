@@ -1,13 +1,13 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { UserProvider } from './context/UserContext';
-import { ChatProvider } from './context/ChatContext'; // ✅ Import ChatProvider
+import { ChatProvider } from './context/ChatContext';
 import ProtectedRoute from './components/ProtectedRoute';
 
 // Pages & Components
 import SignUpPage from './pages/SignUpPage';
 import ResetPassword from './components/ResetPassword';
-import ChatInterface from './pages/chatInterface'; // ✅ Your existing ChatInterface
+import ChatInterface from './pages/chatInterface';
 import Profile from './pages/Profile';
 
 // ✅ Keep your existing ErrorBoundary
@@ -53,55 +53,53 @@ class ErrorBoundary extends React.Component {
 function App() {
   return (
     <ErrorBoundary>
-      <Router>
-        <UserProvider>
-          <div className="App">
-            <Routes>
-              {/* Public Routes (No ChatProvider needed) */}
-              <Route path="/" element={<Navigate to="/signup" replace />} />
-              <Route path="/signup" element={<SignUpPage />} />
-              <Route path="/reset-password" element={<ResetPassword />} />
+      <UserProvider>
+        <ChatProvider>
+          <Router>
+            <div className="App">
+              <Routes>
+                {/* Public Routes (No ChatProvider needed) */}
+                <Route path="/" element={<Navigate to="/signup" replace />} />
+                <Route path="/signup" element={<SignUpPage />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
 
-              {/* ✅ Chat Route with ChatProvider - This is your main chat interface */}
-              <Route
-                path="/chat"
-                element={
-                  <ProtectedRoute clientOnly={true}>
-                    <ChatProvider>
+                {/* ✅ Chat Route with ChatProvider - This is your main chat interface */}
+                <Route
+                  path="/chat"
+                  element={
+                    <ProtectedRoute clientOnly={true}>
                       <ChatInterface />
-                    </ChatProvider>
-                  </ProtectedRoute>
-                }
-              />
+                    </ProtectedRoute>
+                  }
+                />
 
-              {/* ✅ Optional: Dashboard route (if you want a separate dashboard) */}
-              <Route
-                path="/dashboard"
-                element={
-                  <ProtectedRoute clientOnly={true}>
-                    <ChatProvider>
+                {/* ✅ Optional: Dashboard route (if you want a separate dashboard) */}
+                <Route
+                  path="/dashboard"
+                  element={
+                    <ProtectedRoute clientOnly={true}>
                       <ChatInterface />
-                    </ChatProvider>
-                  </ProtectedRoute>
-                }
-              />
+                    </ProtectedRoute>
+                  }
+                />
 
-              {/* Profile Page (No ChatProvider needed) */}
-              <Route
-                path="/profile"
-                element={
-                  <ProtectedRoute>
-                    <Profile />
-                  </ProtectedRoute>
-                }
-              />
+                {/* Profile Page (No ChatProvider needed) */}
+                <Route
+                  path="/profile"
+                  element={
+                    <ProtectedRoute>
+                      <Profile />
+                    </ProtectedRoute>
+                  }
+                />
 
-              {/* Fallback route */}
-              <Route path="*" element={<Navigate to="/signup" replace />} />
-            </Routes>
-          </div>
-        </UserProvider>
-      </Router>
+                {/* Fallback route */}
+                <Route path="*" element={<Navigate to="/signup" replace />} />
+              </Routes>
+            </div>
+          </Router>
+        </ChatProvider>
+      </UserProvider>
     </ErrorBoundary>
   );
 }

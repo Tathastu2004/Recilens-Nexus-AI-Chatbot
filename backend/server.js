@@ -16,6 +16,10 @@ import adminRoutes from './admin/adminRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import { registerChatSocket} from './sockets/chatSocket.js';
 import chatRoutes from './routes/chatRoutes.js';
+import compression from 'compression';
+
+
+
 
 dotenv.config();
 
@@ -39,6 +43,9 @@ if (!fs.existsSync('/tmp')) {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+app.use(compression({ threshold: 0 }));
+
 
 // ✅ Create HTTP server for socket.io
 const server = http.createServer(app);

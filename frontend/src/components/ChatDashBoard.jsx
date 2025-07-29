@@ -3,7 +3,10 @@ import React, { useState, useEffect, useRef } from "react";
 import { IconSend, IconRobot, IconUpload, IconMicrophone, IconCheck } from "@tabler/icons-react";
 import axios from "axios";
 import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
-import { useChat } from '../context/ChatContext';
+import { useChat } from '../context/ChatContext'; // ✅ MAKE SURE THIS IMPORT IS CORRECT
+import ReactMarkdown from 'react-markdown';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) => {
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
@@ -21,30 +24,43 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const [lastProcessedSession, setLastProcessedSession] = useState(null);
   const messagesEndRef = useRef(null);
 
-  // ✅ SIMPLIFIED CHAT CONTEXT USAGE
+  // ✅ SIMPLIFIED CHAT CONTEXT USAGE WITH BETTER ERROR HANDLING
   let chatContext = null;
   let chatContextAvailable = false;
 
   try {
     chatContext = useChat();
     chatContextAvailable = true;
+    console.log('✅ [CHAT DASHBOARD] ChatContext available:', {
+      hasContext: !!chatContext,
+      isConnected: chatContext?.isConnected,
+      currentSessionId: chatContext?.currentSessionId
+    });
   } catch (error) {
+    console.log('⚠️ [CHAT DASHBOARD] ChatContext not available, using fallback mode:', error.message);
     chatContextAvailable = false;
   }
 
   const {
-    socket,
     currentSessionId: contextSessionId,
     setSession,
     sendMessage,
     getCurrentSessionMessages,
     setSessionMessages,
     isConnected: contextIsConnected,
+    connectionStatus,
+    fetchSessionMessages,
+    isSessionStreaming // ✅ ADD THIS
   } = chatContext || {};
 
   const actualCurrentSessionId = chatContextAvailable ? contextSessionId : currentSessionId;
-  const actualIsConnected = chatContextAvailable ? (contextIsConnected ?? false) : isConnected;
+  const actualIsConnected = chatContextAvailable ? (contextIsConnected ?? true) : isConnected;
   const actualMessages = chatContextAvailable ? (getCurrentSessionMessages ? getCurrentSessionMessages() : []) : messages;
+
+  // ✅ ADD THE MISSING isAITyping VARIABLE
+  const isAITyping = chatContextAvailable ? 
+    (isSessionStreaming ? isSessionStreaming(actualCurrentSessionId) : false) : 
+    isTyping;
 
   const {
     transcript,
@@ -53,14 +69,58 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     browserSupportsSpeechRecognition
   } = useSpeechRecognition();
 
-  // ✅ CONNECTION STATUS
+  // ✅ IMPROVED CONNECTION STATUS EFFECT
   useEffect(() => {
     if (chatContextAvailable) {
-      setIsConnected(contextIsConnected ?? false);
+      console.log('🔌 [CONNECTION STATUS] Context connection status:', {
+        contextIsConnected,
+        connectionStatus,
+        updating: contextIsConnected !== isConnected
+      });
+      
+      // ✅ ONLY UPDATE IF DIFFERENT TO AVOID LOOPS
+      if (contextIsConnected !== isConnected) {
+        setIsConnected(contextIsConnected ?? true);
+      }
     } else {
-      setIsConnected(true);
+      // ✅ FALLBACK MODE - ASSUME CONNECTED IF NO CONTEXT
+      if (!isConnected) {
+        console.log('🔄 [CONNECTION STATUS] Fallback mode - setting connected');
+        setIsConnected(true);
+      }
     }
-  }, [chatContextAvailable, contextIsConnected]);
+  }, [chatContextAvailable, contextIsConnected, connectionStatus]);
+
+  // ✅ ADD INDEPENDENT CONNECTION CHECK FOR FALLBACK MODE
+  useEffect(() => {
+    if (!chatContextAvailable) {
+      const checkFallbackConnection = async () => {
+        try {
+          const response = await fetch(`${backendUrl}/api/health`, {
+            signal: AbortSignal.timeout(3000)
+          });
+          const connected = response.ok;
+          
+          if (connected !== isConnected) {
+            console.log('🔄 [FALLBACK CONNECTION] Status changed:', { from: isConnected, to: connected });
+            setIsConnected(connected);
+          }
+        } catch (error) {
+          console.log('⚠️ [FALLBACK CONNECTION] Check failed:', error.message);
+          if (isConnected) {
+            setIsConnected(false);
+          }
+        }
+      };
+
+      // ✅ IMMEDIATE CHECK
+      checkFallbackConnection();
+      
+      // ✅ PERIODIC CHECK EVERY 15 SECONDS
+      const interval = setInterval(checkFallbackConnection, 15000);
+      return () => clearInterval(interval);
+    }
+  }, [chatContextAvailable, backendUrl, isConnected]);
 
   // ✅ SCROLL TO BOTTOM
   useEffect(() => {
@@ -74,19 +134,11 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     console.log('🔄 [SESSION SELECTION] Effect triggered:', {
       selectedSession,
       lastProcessedSession,
-      isCreatingSession,
       actualCurrentSessionId
     });
 
     // ✅ GUARD: Prevent processing the same session multiple times
     if (selectedSession === lastProcessedSession) {
-      console.log('⚠️ [SESSION SELECTION] Session already processed, skipping');
-      return;
-    }
-
-    // ✅ GUARD: Prevent processing during session creation
-    if (isCreatingSession) {
-      console.log('⚠️ [SESSION SELECTION] Session creation in progress, skipping');
       return;
     }
 
@@ -105,17 +157,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       return;
     }
 
-    // ✅ HANDLE NEW SESSION CREATION (only once)
-    if (selectedSession.startsWith('new-')) {
-      console.log('🆕 [SESSION SELECTION] Creating new session for:', selectedSession);
-      setLastProcessedSession(selectedSession); // ✅ Mark as processed IMMEDIATELY
-      createNewSession();
-      return;
-    }
-
-    // ✅ HANDLE TEMP SESSION (already in progress)
-    if (selectedSession.startsWith('temp-')) {
-      console.log('⏳ [SESSION SELECTION] Temp session detected:', selectedSession);
+    // ✅ HANDLE EXISTING SESSION SWITCH ONLY
+    if (selectedSession !== actualCurrentSessionId) {
+      console.log('🔗 [SESSION SELECTION] Switching to session:', selectedSession);
+      
       setLastProcessedSession(selectedSession);
       
       if (chatContextAvailable && setSession) {
@@ -123,115 +168,23 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       } else {
         setCurrentSessionId(selectedSession);
       }
-      return;
-    }
-
-    // ✅ HANDLE EXISTING SESSION SWITCH
-    if (selectedSession !== actualCurrentSessionId) {
-      console.log('🔗 [SESSION SELECTION] Switching to existing session:', {
-        from: actualCurrentSessionId,
-        to: selectedSession
-      });
       
-      setLastProcessedSession(selectedSession); // ✅ Mark as processed IMMEDIATELY
-      
-      if (chatContextAvailable && setSession) {
-        setSession(selectedSession);
-      } else {
-        setCurrentSessionId(selectedSession);
-      }
-      
-      // ✅ LOAD MESSAGES ONLY IF NOT CACHED
-      const cachedMessages = chatContextAvailable ? 
-        (chatContext.allMessages && chatContext.allMessages[selectedSession] ? chatContext.allMessages[selectedSession] : []) : 
-        [];
-      
-      if (cachedMessages.length === 0) {
+      // ✅ ALWAYS FETCH MESSAGES FOR REAL SESSIONS
+      if (selectedSession.match(/^[0-9a-fA-F]{24}$/)) {
         fetchMessages(selectedSession);
+      } else {
+        // Clear messages for invalid sessions
+        if (chatContextAvailable && setSessionMessages) {
+          setSessionMessages(selectedSession, []);
+        } else {
+          setMessages([]);
+        }
       }
     } else {
-      // ✅ Same session, just mark as processed
       setLastProcessedSession(selectedSession);
     }
 
   }, [selectedSession]); // ✅ ONLY selectedSession dependency
-
-  // ✅ IMPROVED createNewSession
-  const createNewSession = async () => {
-    if (isCreatingSession) {
-      console.log('⚠️ [CREATE SESSION] Already creating session, skipping...');
-      return;
-    }
-    
-    console.log('🆕 [CREATE SESSION] Starting instant session creation...');
-    setIsCreatingSession(true);
-    
-    // ✅ CREATE TEMPORARY SESSION ID FOR IMMEDIATE USE
-    const tempSessionId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    // ✅ IMMEDIATELY SWITCH TO TEMP SESSION
-    if (chatContextAvailable && setSession) {
-      setSession(tempSessionId);
-      setSessionMessages(tempSessionId, []);
-    } else {
-      setCurrentSessionId(tempSessionId);
-      setMessages([]);
-    }
-    
-    try {
-      // ✅ CREATE REAL SESSION IN BACKGROUND
-      const res = await axios.post(
-        `${backendUrl}/api/chat/session`,
-        { title: "New Chat" },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          }
-        }
-      );
-
-      const realSession = res.data.session || res.data;
-      console.log('✅ [CREATE SESSION] Real session created:', realSession._id);
-      
-      // ✅ MIGRATE FROM TEMP TO REAL SESSION
-      const tempMessages = chatContextAvailable ? 
-        (getCurrentSessionMessages ? getCurrentSessionMessages() : []) : 
-        messages;
-      
-      if (chatContextAvailable && setSession) {
-        setSession(realSession._id);
-        setSessionMessages(realSession._id, tempMessages);
-        // Clean up temp session
-        if (chatContext.allMessages) {
-          delete chatContext.allMessages[tempSessionId];
-        }
-      } else {
-        setCurrentSessionId(realSession._id);
-      }
-      
-      // ✅ UPDATE PARENT COMPONENT WITH REAL SESSION
-      if (onSessionUpdate) {
-        onSessionUpdate(realSession);
-      }
-
-      setLastProcessedSession(realSession._id);
-
-      // ✅ UPDATE SESSION IN PARENT (for localStorage)
-      if (window.dispatchEvent) {
-        window.dispatchEvent(new CustomEvent('sessionCreated', { 
-          detail: { oldId: selectedSession, newId: realSession._id, session: realSession }
-        }));
-      }
-      
-    } catch (err) {
-      console.error('❌ [CREATE SESSION] Failed:', err);
-      setLastProcessedSession(null); // ✅ Reset on error
-      alert(`Failed to create session: ${err.response?.data?.message || err.message}`);
-    } finally {
-      setIsCreatingSession(false);
-    }
-  };
 
   // ✅ IMPROVED fetchMessages with proper error handling
   const fetchMessages = async (sessionId) => {
@@ -269,11 +222,11 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   };
 
-  // ✅ IMPROVED updateSessionTitle
+  // ✅ SIMPLIFIED SESSION TITLE UPDATE
   const updateSessionTitle = async (sessionId, firstMessage) => {
-    // ✅ SKIP IF TEMP SESSION OR INVALID
-    if (!sessionId || sessionId.startsWith('temp-') || sessionId.startsWith('new-')) {
-      console.log('⚠️ [UPDATE TITLE] Skipping temp/new session:', sessionId);
+    // ✅ SKIP IF INVALID SESSION
+    if (!sessionId || !sessionId.match(/^[0-9a-fA-F]{24}$/)) {
+      console.log('⚠️ [UPDATE TITLE] Invalid session ID:', sessionId);
       return;
     }
 
@@ -282,7 +235,12 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         ? `${firstMessage.substring(0, 30)}...` 
         : firstMessage;
 
-      console.log('📝 [UPDATE TITLE] Updating session title:', { sessionId, title });
+      console.log('📝 [UPDATE TITLE] Updating session title immediately:', { sessionId, title });
+
+      // ✅ IMMEDIATE SOCKET EMIT FOR REAL-TIME UPDATE
+      if (chatContextAvailable && socket) {
+        socket.emit('update-session-title', { sessionId, title });
+      }
 
       const res = await axios.patch(
         `${backendUrl}/api/chat/session/${sessionId}`,
@@ -296,17 +254,8 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       );
       
       const updatedSession = res.data.session;
-      console.log('✅ [UPDATE TITLE] Session title updated successfully:', updatedSession);
+      console.log('✅ [UPDATE TITLE] Session title updated in database:', updatedSession);
       
-      if (onSessionUpdate) {
-        onSessionUpdate(updatedSession);
-      }
-
-      // ✅ TRIGGER SESSION LIST REFRESH
-      window.dispatchEvent(new CustomEvent('sessionUpdated', { 
-        detail: updatedSession 
-      }));
-
     } catch (err) {
       console.error('❌ [UPDATE TITLE] Failed to update session title:', err);
     }
@@ -518,9 +467,80 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
 
   }, [selectedSession]);
 
+  // ✅ REMOVE className FROM ReactMarkdown AND USE A WRAPPER DIV INSTEAD
+  const MessageRenderer = ({ message, isAI }) => {
+    if (!isAI) {
+      // User messages - simple text
+      return <div className="whitespace-pre-wrap break-words">{message}</div>;
+    }
+
+    // AI messages - full markdown support
+    return (
+      <div className="prose prose-sm max-w-none">
+        <ReactMarkdown
+          components={{
+            code({ node, inline, className, children, ...props }) {
+              const match = /language-(\w+)/.exec(className || '');
+              return !inline && match ? (
+                <SyntaxHighlighter
+                  style={oneDark}
+                  language={match[1]}
+                  PreTag="div"
+                  className="rounded-md !mt-2 !mb-2"
+                  {...props}
+                >
+                  {String(children).replace(/\n$/, '')}
+                </SyntaxHighlighter>
+              ) : (
+                <code 
+                  className="bg-gray-200 text-gray-800 px-1 py-0.5 rounded text-xs font-mono" 
+                  {...props}
+                >
+                  {children}
+                </code>
+              );
+            },
+            p({ children }) {
+              return <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>;
+            },
+            ul({ children }) {
+              return <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>;
+            },
+            ol({ children }) {
+              return <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>;
+            },
+            li({ children }) {
+              return <li className="leading-relaxed">{children}</li>;
+            },
+            h1({ children }) {
+              return <h1 className="text-lg font-bold mb-2 mt-3 first:mt-0">{children}</h1>;
+            },
+            h2({ children }) {
+              return <h2 className="text-base font-bold mb-2 mt-3 first:mt-0">{children}</h2>;
+            },
+            h3({ children }) {
+              return <h3 className="text-sm font-bold mb-1 mt-2 first:mt-0">{children}</h3>;
+            },
+            blockquote({ children }) {
+              return <blockquote className="border-l-4 border-gray-300 pl-3 italic my-2">{children}</blockquote>;
+            },
+            strong({ children }) {
+              return <strong className="font-semibold">{children}</strong>;
+            },
+            em({ children }) {
+              return <em className="italic">{children}</em>;
+            }
+          }}
+        >
+          {message}
+        </ReactMarkdown>
+      </div>
+    );
+  };
+
+  // ✅ UPDATE THE HEADER TO SHOW MORE ACCURATE STATUS
   return (
     <div className="flex flex-col h-screen bg-white">
-      {/* ✅ IMPROVED HEADER WITH SESSION INFO */}
       <div className="border-b border-gray-200 p-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-800">
@@ -535,6 +555,12 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
               actualIsConnected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
             }`}>
               {actualIsConnected ? '🟢 Connected' : '🔴 Disconnected'}
+            </div>
+            {/* ✅ ADD CONTEXT STATUS INDICATOR */}
+            <div className={`text-xs px-2 py-1 rounded-full ${
+              chatContextAvailable ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'
+            }`}>
+              {chatContextAvailable ? '⚡ Enhanced' : '🔧 Basic'}
             </div>
             {isCreatingSession && (
               <div className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800">
@@ -566,42 +592,82 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                 key={msg._id || index} 
                 className={`flex ${msg.sender === 'AI' ? 'justify-start' : 'justify-end'}`}
               >
-                <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                <div className={`max-w-xs lg:max-w-md xl:max-w-lg px-4 py-3 rounded-lg shadow-sm ${
                   msg.sender === 'AI' 
-                    ? 'bg-gray-100 text-gray-800' 
+                    ? 'bg-gray-50 text-gray-800 border border-gray-200' 
                     : msg.status === 'failed'
-                      ? 'bg-red-100 text-red-800 border border-red-300'
+                      ? 'bg-red-50 text-red-800 border border-red-300'
                       : 'bg-blue-500 text-white'
                 }`}>
-                  <div className="text-sm font-medium mb-1">
-                    {msg.sender === 'AI' ? '🤖 AI Assistant' : '👤 You'}
-                    {msg.status === 'failed' && <span className="ml-1">⚠️</span>}
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="text-xs font-medium">
+                      {msg.sender === 'AI' ? '🤖 AI Assistant' : '👤 You'}
+                    </div>
+                    {msg.status === 'failed' && <span className="text-red-500">⚠️</span>}
+                    {msg.optimistic && <span className="text-gray-400">⏳</span>}
                   </div>
+                  
+                  {/* ✅ USE NEW MESSAGE RENDERER */}
                   <div className="text-sm">
-                    {msg.message}
+                    <MessageRenderer 
+                      message={msg.message} 
+                      isAI={msg.sender === 'AI'} 
+                    />
                   </div>
+                  
                   {msg.fileUrl && (
-                    <div className="mt-2">
+                    <div className="mt-3 pt-2 border-t border-gray-200">
                       {msg.type === 'image' ? (
-                        <img src={msg.fileUrl} alt="Uploaded" className="max-w-full h-auto rounded" />
+                        <img 
+                          src={msg.fileUrl} 
+                          alt="Uploaded" 
+                          className="max-w-full h-auto rounded border"
+                        />
                       ) : (
-                        <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer" className="text-blue-300 hover:underline">
+                        <a 
+                          href={msg.fileUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className={`inline-flex items-center gap-1 text-sm hover:underline ${
+                            msg.sender === 'AI' ? 'text-blue-600' : 'text-blue-200'
+                          }`}
+                        >
                           📎 View File
                         </a>
                       )}
                     </div>
                   )}
-                  <div className="text-xs mt-1 opacity-70">
-                    {new Date(msg.timestamp).toLocaleTimeString()}
-                    {msg.status === 'failed' && <span className="ml-1 text-red-600">Failed to send</span>}
+                  
+                  <div className="flex items-center justify-between mt-2 pt-1">
+                    <div className={`text-xs opacity-70 ${
+                      msg.sender === 'AI' ? 'text-gray-500' : 'text-blue-100'
+                    }`}>
+                      {new Date(msg.timestamp).toLocaleTimeString()}
+                    </div>
+                    {msg.status === 'failed' && (
+                      <span className="text-xs text-red-600">Failed to send</span>
+                    )}
+                    {msg.status === 'sending' && (
+                      <span className="text-xs text-gray-500">Sending...</span>
+                    )}
                   </div>
                 </div>
               </div>
             ))}
-            {isTyping && (
+            {isAITyping && (
               <div className="flex justify-start">
-                <div className="bg-gray-100 px-4 py-2 rounded-lg">
-                  <div className="text-sm text-gray-600">AI is typing...</div>
+                <div className="bg-gray-50 border border-gray-200 px-4 py-3 rounded-lg shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <div className="text-xs font-medium text-gray-600">🤖 AI Assistant</div>
+                  </div>
+                  <div className="flex items-center gap-1 mt-1">
+                    <div className="text-sm text-gray-600">AI is thinking</div>
+                    <div className="flex gap-1">
+                      <div className="w-1 h-1 bg-gray-400 rounded-full animate-bounce"></div>
+                      <div className="w-1 h-1 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                      <div className="w-1 h-1 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -713,6 +779,60 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       </div>
     </div>
   );
+};
+
+// ✅ ADD THE MISSING createNewSession FUNCTION
+const createNewSession = async () => {
+  if (isCreatingSession) {
+    console.log('⚠️ [CREATE SESSION] Already creating a session, skipping...');
+    return;
+  }
+
+  try {
+    setIsCreatingSession(true);
+    console.log('🆕 [CREATE SESSION] Creating new chat session...');
+
+    const response = await axios.post(
+      `${backendUrl}/api/chat/session`,
+      {
+        title: 'New Chat',
+        userId: userId
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    if (response.data.success) {
+      const newSession = response.data.session;
+      console.log('✅ [CREATE SESSION] New session created:', newSession._id);
+
+      // Set the new session as current
+      if (chatContextAvailable && setSession) {
+        setSession(newSession._id);
+      } else {
+        setCurrentSessionId(newSession._id);
+        setMessages([]);
+      }
+
+      // Notify parent component to update sidebar
+      if (onSessionUpdate) {
+        onSessionUpdate(newSession);
+      }
+
+      return newSession;
+    } else {
+      throw new Error(response.data.message || 'Failed to create session');
+    }
+  } catch (error) {
+    console.error('❌ [CREATE SESSION] Failed:', error);
+    return null;
+  } finally {
+    setIsCreatingSession(false);
+  }
 };
 
 export default ChatDashBoard;
