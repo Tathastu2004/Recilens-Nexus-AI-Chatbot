@@ -7,14 +7,16 @@ import { useChat } from '../context/ChatContext';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import AiResponse from './AiResponse';
+import '../styles/animations.css';
 
 const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) => {
-  // 1. ✅ Constants and token
+  // ✅ Constants and token
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
   const token = localStorage.getItem("token");
   const userId = JSON.parse(localStorage.getItem("user"))?._id;
 
-  // 2. ✅ State declarations
+  // ✅ State declarations
   const [input, setInput] = useState("");
   const [file, setFile] = useState(null);
   const [isTyping, setIsTyping] = useState(false);
@@ -25,9 +27,18 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [lastProcessedSession, setLastProcessedSession] = useState(null);
   const [aiServiceStatus, setAiServiceStatus] = useState('normal');
+  
+  // ✅ NEW STATE FOR TRACKING ANIMATIONS AND AI RESPONSE
+  const [animatedMessages, setAnimatedMessages] = useState(new Set());
+  const [lastMessageCount, setLastMessageCount] = useState(0);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [isAiResponding, setIsAiResponding] = useState(false);
+  const [aiResponseStatus, setAiResponseStatus] = useState('idle'); // 'idle', 'thinking', 'responding', 'complete'
+  const [responseStartTime, setResponseStartTime] = useState(null);
+  
   const messagesEndRef = useRef(null);
 
-  // ✅ SIMPLIFIED CHAT CONTEXT USAGE WITH BETTER ERROR HANDLING
+  // ✅ CHAT CONTEXT SETUP (same as before)
   let chatContext = null;
   let chatContextAvailable = false;
 
@@ -60,10 +71,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const actualIsConnected = chatContextAvailable ? (contextIsConnected ?? true) : isConnected;
   const actualMessages = chatContextAvailable ? (getCurrentSessionMessages ? getCurrentSessionMessages() : []) : messages;
 
-  // ✅ ADD THE MISSING isAITyping VARIABLE
   const isAITyping = chatContextAvailable ? 
     (isSessionStreaming ? isSessionStreaming(actualCurrentSessionId) : false) : 
-    isTyping;
+    (isTyping || isAiResponding);
 
   const {
     transcript,
@@ -72,11 +82,178 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     browserSupportsSpeechRecognition
   } = useSpeechRecognition();
 
-  // ✅ ADD STATE TO TRACK IF USER IS MANUALLY EDITING
   const [isManuallyEditing, setIsManuallyEditing] = useState(false);
   const [hasStoppedListening, setHasStoppedListening] = useState(false);
 
-  // 4. ✅ Function definitions
+  // ✅ TRACK NEW MESSAGES FOR ANIMATION
+  useEffect(() => {
+    const currentMessageCount = actualMessages.length;
+    
+    // If this is initial load (refresh), don't animate existing messages
+    if (isInitialLoad) {
+      console.log('🔄 [ANIMATION] Initial load - marking all messages as non-animated');
+      const allMessageIds = new Set(actualMessages.map(msg => msg._id));
+      setAnimatedMessages(allMessageIds);
+      setIsInitialLoad(false);
+      setLastMessageCount(currentMessageCount);
+      return;
+    }
+
+    // Only animate new messages (when count increases)
+    if (currentMessageCount > lastMessageCount) {
+      console.log('📝 [ANIMATION] New messages detected:', {
+        previous: lastMessageCount,
+        current: currentMessageCount,
+        newMessages: currentMessageCount - lastMessageCount
+      });
+      
+      // Get the new messages (ones that should be animated)
+      const newMessages = actualMessages.slice(lastMessageCount);
+      console.log('✨ [ANIMATION] Animating new messages:', newMessages.map(m => m._id));
+      
+      // Check if the new message is from AI and update response status
+      const lastMessage = newMessages[newMessages.length - 1];
+      if (lastMessage && lastMessage.sender === 'AI') {
+        setAiResponseStatus('complete');
+        setIsAiResponding(false);
+        console.log('✅ [AI RESPONSE] AI response received, stopping indicators');
+      }
+      
+      // Don't add them to animated set immediately - let them animate first
+      setTimeout(() => {
+        setAnimatedMessages(prev => {
+          const updated = new Set(prev);
+          newMessages.forEach(msg => updated.add(msg._id));
+          return updated;
+        });
+      }, 500); // After animation completes
+    }
+    
+    setLastMessageCount(currentMessageCount);
+  }, [actualMessages.length, isInitialLoad]);
+
+  // ✅ RESET ANIMATION TRACKING WHEN SESSION CHANGES
+  useEffect(() => {
+    console.log('🔄 [SESSION CHANGE] Resetting animation tracking for session:', actualCurrentSessionId);
+    setAnimatedMessages(new Set());
+    setIsInitialLoad(true);
+    setLastMessageCount(0);
+    setIsAiResponding(false);
+    setAiResponseStatus('idle');
+    setResponseStartTime(null);
+  }, [actualCurrentSessionId]);
+
+  // ✅ ENHANCED USER MESSAGE COMPONENT WITH CONDITIONAL ANIMATION
+  const UserMessage = ({ message, timestamp, status, optimistic, fileUrl, type, messageId, shouldAnimate }) => (
+    <div className="flex justify-end mb-4">
+      <div className={`max-w-xs lg:max-w-md xl:max-w-lg px-4 py-3 rounded-2xl shadow-sm transition-all duration-300 ${
+        shouldAnimate ? 'message-enter message-enter-active' : ''
+      } ${
+        status === 'failed'
+          ? 'bg-red-50 text-red-800 border border-red-300'
+          : 'bg-blue-500 text-white'
+      }`}>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="text-xs font-medium">👤 You</div>
+          {status === 'failed' && <span className="text-red-500">⚠️</span>}
+          {optimistic && <span className="text-blue-200">⏳</span>}
+        </div>
+        
+        <div className="text-sm whitespace-pre-wrap break-words">
+          {message}
+        </div>
+        
+        {fileUrl && (
+          <div className="mt-3 pt-2 border-t border-blue-400">
+            {type === 'image' ? (
+              <img 
+                src={fileUrl} 
+                alt="Uploaded" 
+                className={`max-w-full h-auto rounded border ${shouldAnimate ? 'animate-fade-in' : ''}`}
+              />
+            ) : (
+              <a 
+                href={fileUrl} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="inline-flex items-center gap-1 text-sm text-blue-200 hover:underline"
+              >
+                📎 View File
+              </a>
+            )}
+          </div>
+        )}
+        
+        <div className="flex items-center justify-between mt-2 pt-1">
+          <div className="text-xs opacity-70 text-blue-100">
+            {new Date(timestamp).toLocaleTimeString()}
+          </div>
+          {status === 'failed' && (
+            <span className="text-xs text-red-200">Failed to send</span>
+          )}
+          {status === 'sending' && (
+            <span className="text-xs text-blue-200">Sending...</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  // ✅ ENHANCED AI RESPONSE WRAPPER WITH CONDITIONAL ANIMATION
+  const AiResponseWrapper = ({ message, timestamp, fileUrl, fileType, messageId, shouldAnimate }) => (
+    <div className={shouldAnimate ? 'message-enter message-enter-active' : ''}>
+      <AiResponse
+        isTyping={false}
+        message={message}
+        animationType="dots"
+        showAnimation={true}
+        timestamp={timestamp}
+        fileUrl={fileUrl}
+        fileType={fileType}
+        serviceStatus={aiServiceStatus}
+        shouldAnimate={shouldAnimate}
+      />
+    </div>
+  );
+
+  // ✅ AI RESPONSE STATUS COMPONENT
+  const AiResponseStatusIndicator = () => {
+    const getElapsedTime = () => {
+      if (!responseStartTime) return 0;
+      return Math.floor((Date.now() - responseStartTime) / 1000);
+    };
+
+    const [elapsedTime, setElapsedTime] = useState(0);
+
+    useEffect(() => {
+      if (isAiResponding && responseStartTime) {
+        const timer = setInterval(() => {
+          setElapsedTime(getElapsedTime());
+        }, 1000);
+        return () => clearInterval(timer);
+      }
+    }, [isAiResponding, responseStartTime]);
+
+    if (!isAiResponding) return null;
+
+    return (
+      <AiResponse
+        isTyping={true}
+        message=""
+        animationType="thinking"
+        showAnimation={true}
+        customResponseText={
+          elapsedTime > 5 
+            ? `AI is processing your request... (${elapsedTime}s)`
+            : elapsedTime > 3
+            ? "AI is thinking deeply..."
+            : "AI is responding..."
+        }
+      />
+    );
+  };
+
+  // ✅ ALL YOUR EXISTING FUNCTIONS WITH ENHANCED AI RESPONSE TRACKING
   const createNewSession = async () => {
     if (isCreatingSession) {
       console.log('⚠️ [CREATE SESSION] Already creating a session, skipping...');
@@ -105,7 +282,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         const newSession = response.data.session;
         console.log('✅ [CREATE SESSION] New session created:', newSession._id);
 
-        // ✅ IMMEDIATELY DISPATCH EVENT TO UPDATE SIDEBAR
         window.dispatchEvent(new CustomEvent('sessionCreated', {
           detail: { 
             session: newSession,
@@ -114,7 +290,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           }
         }));
 
-        // ✅ ALSO DISPATCH FOR BACKWARD COMPATIBILITY
         window.dispatchEvent(new CustomEvent('newSessionCreated', {
           detail: { 
             session: newSession,
@@ -122,7 +297,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           }
         }));
 
-        // Set the new session as current
         if (chatContextAvailable && setSession) {
           setSession(newSession._id);
         } else {
@@ -130,7 +304,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           setMessages([]);
         }
 
-        // ✅ NOTIFY PARENT COMPONENT IMMEDIATELY
         if (onSessionUpdate) {
           console.log('📢 [CREATE SESSION] Notifying parent component');
           onSessionUpdate(newSession);
@@ -143,7 +316,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     } catch (error) {
       console.error('❌ [CREATE SESSION] Failed:', error);
       
-      // ✅ DISPATCH ERROR EVENT
       window.dispatchEvent(new CustomEvent('sessionCreationFailed', {
         detail: { error: error.message }
       }));
@@ -154,10 +326,14 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   };
 
-  // ✅ FALLBACK SEND MESSAGE FUNCTION
   const fallbackSendMessage = async (messagePayload) => {
     try {
+      // ✅ SET AI RESPONSE TRACKING
       setIsTyping(true);
+      setIsAiResponding(true);
+      setAiResponseStatus('thinking');
+      setResponseStartTime(Date.now());
+      console.log('🤖 [AI RESPONSE] Starting AI response tracking');
       
       const response = await axios.post(
         `${backendUrl}/api/chat/message`,
@@ -171,12 +347,13 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       );
 
       if (response.data.success) {
-        // ✅ CHECK FOR AI SERVICE STATUS IN RESPONSE
+        console.log('✅ [AI RESPONSE] Received response from backend');
+        setAiResponseStatus('responding');
+        
         if (response.data.aiServiceStatus) {
           setAiServiceStatus(response.data.aiServiceStatus);
         }
 
-        // Add AI response to messages
         const aiMessage = {
           _id: `ai-${Date.now()}`,
           message: response.data.response || response.data.message,
@@ -186,6 +363,8 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         };
 
         setMessages(prev => [...prev, aiMessage]);
+        
+        // The useEffect will handle setting isAiResponding to false when new message is added
         return { success: true };
       } else {
         throw new Error(response.data.error || 'Failed to send message');
@@ -193,7 +372,11 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     } catch (error) {
       console.error('❌ [FALLBACK SEND] Error:', error);
       
-      // ✅ UPDATE AI SERVICE STATUS ON ERROR
+      // ✅ STOP AI RESPONSE TRACKING ON ERROR
+      setIsAiResponding(false);
+      setAiResponseStatus('idle');
+      setResponseStartTime(null);
+      
       if (error.response?.data?.aiServiceStatus) {
         setAiServiceStatus(error.response.data.aiServiceStatus);
       } else if (error.message.includes('503') || error.message.includes('overloaded')) {
@@ -208,7 +391,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   };
 
-  // ✅ IMPROVED fetchMessages with proper error handling
   const fetchMessages = async (sessionId) => {
     if (!sessionId || sessionId.startsWith('temp-') || sessionId.startsWith('new-')) {
       console.log('⚠️ [FETCH MESSAGES] Skipping fetch for temp/new session:', sessionId);
@@ -244,9 +426,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   };
 
-  // ✅ IMPROVED SESSION TITLE UPDATE WITH IMMEDIATE SIDEBAR REFRESH
   const updateSessionTitle = async (sessionId, firstMessage) => {
-    // ✅ SKIP IF INVALID SESSION
     if (!sessionId || !sessionId.match(/^[0-9a-fA-F]{24}$/)) {
       console.log('⚠️ [UPDATE TITLE] Invalid session ID:', sessionId);
       return;
@@ -259,17 +439,14 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
 
       console.log('📝 [UPDATE TITLE] Updating session title immediately:', { sessionId, title });
 
-      // ✅ IMMEDIATE UI UPDATE - DISPATCH EVENT TO SIDEBAR
       window.dispatchEvent(new CustomEvent('sessionTitleUpdated', {
         detail: { sessionId, title, timestamp: new Date().toISOString() }
       }));
 
-      // ✅ IMMEDIATE SOCKET EMIT FOR REAL-TIME UPDATE
       if (chatContextAvailable && chatContext.socket) {
         chatContext.socket.emit('update-session-title', { sessionId, title });
       }
 
-      // ✅ UPDATE BACKEND
       const res = await axios.patch(
         `${backendUrl}/api/chat/session/${sessionId}`,
         { title },
@@ -284,7 +461,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       const updatedSession = res.data.session;
       console.log('✅ [UPDATE TITLE] Session title updated in database:', updatedSession);
       
-      // ✅ DISPATCH ANOTHER EVENT FOR CONFIRMATION
       window.dispatchEvent(new CustomEvent('sessionUpdated', {
         detail: { session: updatedSession }
       }));
@@ -292,14 +468,12 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     } catch (err) {
       console.error('❌ [UPDATE TITLE] Failed to update session title:', err);
       
-      // ✅ REVERT UI CHANGE IF BACKEND UPDATE FAILED
       window.dispatchEvent(new CustomEvent('sessionTitleUpdateFailed', {
         detail: { sessionId, error: err.message }
       }));
     }
   };
 
-  // ✅ IMPROVED VOICE INPUT WITH PROPER CONTROL
   const handleVoiceInput = () => {
     if (!browserSupportsSpeechRecognition) {
       alert("Browser doesn't support speech recognition.");
@@ -323,23 +497,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   };
 
-  // ✅ FIXED TRANSCRIPT UPDATE - ONLY WHEN ACTIVELY LISTENING AND NOT MANUALLY EDITING
-  useEffect(() => {
-    // Only update input from transcript if:
-    // 1. Currently listening
-    // 2. User hasn't manually edited the text
-    // 3. Haven't stopped listening yet
-    if (listening && transcript && !isManuallyEditing && !hasStoppedListening) {
-      setInput(transcript);
-    }
-  }, [transcript, listening, isManuallyEditing, hasStoppedListening]);
-
-  // ✅ IMPROVED INPUT CHANGE HANDLER
   const handleInputChange = (e) => {
     const newValue = e.target.value;
     setInput(newValue);
     
-    // ✅ MARK AS MANUALLY EDITING IF USER TYPES WHILE LISTENING
     if (listening) {
       console.log('✏️ [INPUT] User manually editing while listening');
       setIsManuallyEditing(true);
@@ -353,17 +514,14 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     if (!input.trim() && !file) return;
     if (!actualCurrentSessionId) return;
 
-    // ✅ RESET VOICE INPUT STATES
     setIsManuallyEditing(false);
     setHasStoppedListening(false);
     
     const originalInput = input;
     const tempMessageId = `temp-${Date.now()}-${Math.random()}`;
     
-    // ✅ CHECK IF THIS IS THE FIRST MESSAGE BEFORE ADDING OPTIMISTIC MESSAGE
     const isFirstMessage = actualMessages.length === 0;
     
-    // ✅ IMMEDIATE UI UPDATE - NO DELAY
     const optimisticMessage = {
       _id: tempMessageId,
       message: originalInput,
@@ -374,7 +532,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       optimistic: true
     };
 
-    // ✅ ADD MESSAGE TO UI IMMEDIATELY
     if (chatContextAvailable && setSessionMessages) {
       const currentMessages = getCurrentSessionMessages();
       setSessionMessages(actualCurrentSessionId, [...currentMessages, optimisticMessage]);
@@ -382,7 +539,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       setMessages(prev => [...prev, optimisticMessage]);
     }
 
-    // Clear form immediately
     setInput("");
     setFile(null);
     resetTranscript();
@@ -392,7 +548,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     let fileUrl = null;
     let fileType = null;
 
-    // Handle file upload in background
     if (file) {
       try {
         const formData = new FormData();
@@ -410,7 +565,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           fileType = file.type.startsWith("image") ? "image" : "document";
         }
       } catch (err) {
-        // ✅ UPDATE OPTIMISTIC MESSAGE TO FAILED STATE
         const updateMessage = (messages) => messages.map(msg => 
           msg._id === tempMessageId 
             ? { ...msg, status: 'failed', error: 'File upload failed' }
@@ -448,7 +602,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       }
       
       if (sendResult.success) {
-        // ✅ UPDATE OPTIMISTIC MESSAGE TO CONFIRMED
         const updateMessage = (messages) => messages.map(msg => 
           msg._id === tempMessageId 
             ? { ...msg, status: 'sent', optimistic: false }
@@ -462,7 +615,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           setMessages(updateMessage);
         }
 
-        // ✅ UPDATE SESSION TITLE IF FIRST MESSAGE
         if (isFirstMessage && originalInput.trim()) {
           console.log('🏷️ [HANDLE SUBMIT] Updating title for first message:', originalInput.trim());
           updateSessionTitle(actualCurrentSessionId, originalInput.trim());
@@ -471,7 +623,11 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         throw new Error(sendResult.error || 'Failed to send message');
       }
     } catch (error) {
-      // ✅ UPDATE OPTIMISTIC MESSAGE TO FAILED STATE
+      // ✅ STOP AI RESPONSE TRACKING ON ERROR
+      setIsAiResponding(false);
+      setAiResponseStatus('idle');
+      setResponseStartTime(null);
+      
       const updateMessage = (messages) => messages.map(msg => 
         msg._id === tempMessageId 
           ? { ...msg, status: 'failed', error: error.message }
@@ -487,82 +643,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   };
 
-  // ✅ MESSAGE RENDERER
-  const MessageRenderer = ({ message, isAI, serviceStatus = 'normal' }) => {
-    if (!isAI) {
-      return <div className="whitespace-pre-wrap break-words">{message}</div>;
-    }
-
-    return (
-      <div className="prose prose-sm max-w-none">
-        {serviceStatus === 'overloaded' && (
-          <div className="mb-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800">
-            ⚠️ AI service is experiencing high demand. Response may be delayed.
-          </div>
-        )}
-        
-        <ReactMarkdown
-          components={{
-            code({ node, inline, className, children, ...props }) {
-              const match = /language-(\w+)/.exec(className || '');
-              return !inline && match ? (
-                <SyntaxHighlighter
-                  style={oneDark}
-                  language={match[1]}
-                  PreTag="div"
-                  className="rounded-md !mt-2 !mb-2"
-                  {...props}
-                >
-                  {String(children).replace(/\n$/, '')}
-                </SyntaxHighlighter>
-              ) : (
-                <code 
-                  className="bg-gray-200 text-gray-800 px-1 py-0.5 rounded text-xs font-mono" 
-                  {...props}
-                >
-                  {children}
-                </code>
-              );
-            },
-            p({ children }) {
-              return <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>;
-            },
-            ul({ children }) {
-              return <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>;
-            },
-            ol({ children }) {
-              return <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>;
-            },
-            li({ children }) {
-              return <li className="leading-relaxed">{children}</li>;
-            },
-            h1({ children }) {
-              return <h1 className="text-lg font-bold mb-2 mt-3 first:mt-0">{children}</h1>;
-            },
-            h2({ children }) {
-              return <h2 className="text-base font-bold mb-2 mt-3 first:mt-0">{children}</h2>;
-            },
-            h3({ children }) {
-              return <h3 className="text-sm font-bold mb-1 mt-2 first:mt-0">{children}</h3>;
-            },
-            blockquote({ children }) {
-              return <blockquote className="border-l-4 border-gray-300 pl-3 italic my-2">{children}</blockquote>;
-            },
-            strong({ children }) {
-              return <strong className="font-semibold">{children}</strong>;
-            },
-            em({ children }) {
-              return <em className="italic">{children}</em>;
-            }
-          }}
-        >
-          {message}
-        </ReactMarkdown>
-      </div>
-    );
-  };
-
-  // 5. ✅ useEffect hooks
+  // ✅ ALL YOUR EXISTING useEffect HOOKS REMAIN THE SAME...
   useEffect(() => {
     if (chatContextAvailable) {
       console.log('🔌 [CONNECTION STATUS] Context connection status:', {
@@ -613,7 +694,13 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [actualMessages, isTyping]);
+  }, [actualMessages, isAiResponding]);
+
+  useEffect(() => {
+    if (listening && transcript && !isManuallyEditing && !hasStoppedListening) {
+      setInput(transcript);
+    }
+  }, [transcript, listening, isManuallyEditing, hasStoppedListening]);
 
   useEffect(() => {
     console.log('🔄 [SESSION SELECTION] Effect triggered:', {
@@ -665,54 +752,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
 
   }, [selectedSession]);
 
-  // ✅ FIXED TRANSCRIPT UPDATE
-  useEffect(() => {
-    if (listening && transcript && !isManuallyEditing && !hasStoppedListening) {
-      setInput(transcript);
-    }
-  }, [transcript, listening, isManuallyEditing, hasStoppedListening]);
-
-  useEffect(() => {
-    if (selectedSession === lastProcessedSession) return;
-    if (isCreatingSession) return;
-    if (!selectedSession || selectedSession === 'null' || selectedSession === 'undefined') {
-      setLastProcessedSession(selectedSession);
-      return;
-    }
-
-    console.log('⚡ [SESSION SELECTION] Instant switch to:', selectedSession);
-
-    if (selectedSession.startsWith('new-')) {
-      setLastProcessedSession(selectedSession);
-      createNewSession();
-      return;
-    }
-
-    if (selectedSession !== actualCurrentSessionId) {
-      setLastProcessedSession(selectedSession);
-      
-      if (chatContextAvailable && setSession) {
-        setSession(selectedSession);
-      } else {
-        setCurrentSessionId(selectedSession);
-      }
-      
-      const cachedMessages = chatContextAvailable ? 
-        (chatContext.allMessages && chatContext.allMessages[selectedSession] ? chatContext.allMessages[selectedSession] : []) : 
-        [];
-      
-      if (cachedMessages.length === 0) {
-        fetchMessages(selectedSession);
-      }
-    } else {
-      setLastProcessedSession(selectedSession);
-    }
-
-  }, [selectedSession]);
-
-  // 6. ✅ Return statement
+  // ✅ UPDATED RETURN WITH CONDITIONAL ANIMATIONS AND AI RESPONSE STATUS
   return (
     <div className="flex flex-col h-screen bg-white">
+      {/* ✅ HEADER WITH AI RESPONSE STATUS */}
       <div className="border-b border-gray-200 p-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-800">
@@ -738,16 +781,22 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                 🔄 Creating...
               </div>
             )}
+            {/* ✅ AI RESPONSE STATUS INDICATOR */}
+            {isAiResponding && (
+              <div className="text-xs px-2 py-1 rounded-full bg-purple-100 text-purple-800 animate-pulse">
+                🤖 AI Responding...
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Messages Area */}
+      {/* ✅ ENHANCED MESSAGES AREA WITH CONDITIONAL ANIMATIONS */}
       <div className="flex-1 overflow-y-auto p-4">
         {actualMessages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
-            <div className="text-center space-y-2">
-              <IconRobot size={48} className="mx-auto text-gray-400" />
+            <div className="text-center space-y-2 animate-fade-in">
+              <IconRobot size={48} className="mx-auto text-gray-400 animate-float" />
               <h3 className="text-lg font-semibold text-gray-700">
                 {isCreatingSession ? 'Setting up your new chat...' : 'Ready to chat!'}
               </h3>
@@ -758,96 +807,48 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           </div>
         ) : (
           <div className="space-y-4">
-            {actualMessages.map((msg, index) => (
-              <div 
-                key={msg._id || index} 
-                className={`flex ${msg.sender === 'AI' ? 'justify-start' : 'justify-end'}`}
-              >
-                <div className={`max-w-xs lg:max-w-md xl:max-w-lg px-4 py-3 rounded-lg shadow-sm ${
-                  msg.sender === 'AI' 
-                    ? 'bg-gray-50 text-gray-800 border border-gray-200' 
-                    : msg.status === 'failed'
-                      ? 'bg-red-50 text-red-800 border border-red-300'
-                      : 'bg-blue-500 text-white'
-                }`}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="text-xs font-medium">
-                      {msg.sender === 'AI' ? '🤖 AI Assistant' : '👤 You'}
-                    </div>
-                    {msg.status === 'failed' && <span className="text-red-500">⚠️</span>}
-                    {msg.optimistic && <span className="text-gray-400">⏳</span>}
-                  </div>
-                  
-                  <div className="text-sm">
-                    <MessageRenderer 
-                      message={msg.message} 
-                      isAI={msg.sender === 'AI'}
-                      serviceStatus={aiServiceStatus}
+            {actualMessages.map((msg, index) => {
+              // ✅ CHECK IF MESSAGE SHOULD BE ANIMATED
+              const shouldAnimate = !animatedMessages.has(msg._id);
+              
+              return (
+                <div key={msg._id || index}>
+                  {msg.sender === 'AI' ? (
+                    // ✅ AI RESPONSE WITH CONDITIONAL ANIMATION
+                    <AiResponseWrapper
+                      message={msg.message}
+                      timestamp={msg.timestamp}
+                      fileUrl={msg.fileUrl}
+                      fileType={msg.type}
+                      messageId={msg._id}
+                      shouldAnimate={shouldAnimate}
                     />
-                  </div>
-                  
-                  {msg.fileUrl && (
-                    <div className="mt-3 pt-2 border-t border-gray-200">
-                      {msg.type === 'image' ? (
-                        <img 
-                          src={msg.fileUrl} 
-                          alt="Uploaded" 
-                          className="max-w-full h-auto rounded border"
-                        />
-                      ) : (
-                        <a 
-                          href={msg.fileUrl} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className={`inline-flex items-center gap-1 text-sm hover:underline ${
-                            msg.sender === 'AI' ? 'text-blue-600' : 'text-blue-200'
-                          }`}
-                        >
-                          📎 View File
-                        </a>
-                      )}
-                    </div>
+                  ) : (
+                    // ✅ USER MESSAGE WITH CONDITIONAL ANIMATION
+                    <UserMessage
+                      message={msg.message}
+                      timestamp={msg.timestamp}
+                      status={msg.status}
+                      optimistic={msg.optimistic}
+                      fileUrl={msg.fileUrl}
+                      type={msg.type}
+                      messageId={msg._id}
+                      shouldAnimate={shouldAnimate}
+                    />
                   )}
-                  
-                  <div className="flex items-center justify-between mt-2 pt-1">
-                    <div className={`text-xs opacity-70 ${
-                      msg.sender === 'AI' ? 'text-gray-500' : 'text-blue-100'
-                    }`}>
-                      {new Date(msg.timestamp).toLocaleTimeString()}
-                    </div>
-                    {msg.status === 'failed' && (
-                      <span className="text-xs text-red-600">Failed to send</span>
-                    )}
-                    {msg.status === 'sending' && (
-                      <span className="text-xs text-gray-500">Sending...</span>
-                    )}
-                  </div>
                 </div>
-              </div>
-            ))}
-            {isAITyping && (
-              <div className="flex justify-start">
-                <div className="bg-gray-50 border border-gray-200 px-4 py-3 rounded-lg shadow-sm">
-                  <div className="flex items-center gap-2">
-                    <div className="text-xs font-medium text-gray-600">🤖 AI Assistant</div>
-                  </div>
-                  <div className="flex items-center gap-1 mt-1">
-                    <div className="text-sm text-gray-600">AI is thinking</div>
-                    <div className="flex gap-1">
-                      <div className="w-1 h-1 bg-gray-400 rounded-full animate-bounce"></div>
-                      <div className="w-1 h-1 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                      <div className="w-1 h-1 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+              );
+            })}
+
+            {/* ✅ ENHANCED AI TYPING INDICATOR WITH STATUS */}
+            <AiResponseStatusIndicator />
+            
             <div ref={messagesEndRef} />
           </div>
         )}
       </div>
 
-      {/* Input Area */}
+      {/* ✅ INPUT AREA REMAINS THE SAME */}
       <div className="border-t border-gray-200 p-4">
         <form onSubmit={handleSubmit} className="flex gap-2 items-center">
           {/* File Upload */}
@@ -860,7 +861,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           />
           <label
             htmlFor="fileUpload"
-            className="cursor-pointer p-2 rounded-lg hover:bg-gray-100"
+            className="cursor-pointer p-2 rounded-lg hover:bg-gray-100 smooth-transition"
             title="Upload file"
           >
             <IconUpload className="text-gray-600" />
@@ -870,9 +871,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           <button
             type="button"
             onClick={handleVoiceInput}
-            className={`p-2 rounded-lg transition-all duration-200 ${
+            className={`p-2 rounded-lg transition-all duration-200 smooth-transition ${
               listening 
-                ? 'bg-green-100 hover:bg-green-200 border-2 border-green-300' 
+                ? 'bg-green-100 hover:bg-green-200 border-2 border-green-300 animate-pulse-glow' 
                 : 'hover:bg-gray-100'
             }`}
             title={listening ? "Stop Recording" : "Start Voice Input"}
@@ -895,31 +896,40 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             placeholder={
               !actualIsConnected
                 ? "Connection lost - messages may not send..."
+                : isAiResponding
+                  ? "AI is responding... please wait"
                 : listening 
                   ? "Listening to your voice... (or type to override)" 
                   : browserSupportsSpeechRecognition 
                     ? "Type a message or use voice input..."
                     : "Type a message..."
             }
-            className={`flex-1 p-2 border rounded-lg focus:outline-none transition-colors ${
+            className={`flex-1 p-2 border rounded-lg focus:outline-none transition-colors smooth-transition ${
               !actualIsConnected
                 ? 'border-red-300 bg-red-50'
+                : isAiResponding
+                  ? 'border-purple-300 bg-purple-50'
                 : listening 
                   ? 'border-blue-300 bg-blue-50' 
                   : 'border-gray-300 focus:border-blue-500'
             }`}
+            disabled={isAiResponding}
           />
 
           {/* Send Button */}
           <button
             type="submit"
-            className={`px-4 py-2 rounded-lg transition-colors ${
-              !actualIsConnected
+            className={`px-4 py-2 rounded-lg transition-colors smooth-transition ${
+              !actualIsConnected || isAiResponding
                 ? 'bg-gray-400 text-white cursor-not-allowed'
-                : 'bg-blue-500 text-white hover:bg-blue-600'
+                : 'bg-blue-500 text-white hover:bg-blue-600 hover:shadow-lg transform hover:scale-105'
             } disabled:opacity-50`}
-            disabled={(!input.trim() && !file) || isUploading || !actualIsConnected}
-            title={!actualIsConnected ? "Cannot send - disconnected" : "Send message"}
+            disabled={(!input.trim() && !file) || isUploading || !actualIsConnected || isAiResponding}
+            title={
+              !actualIsConnected ? "Cannot send - disconnected" : 
+              isAiResponding ? "Please wait for AI response" : 
+              "Send message"
+            }
           >
             {isUploading ? (
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
@@ -929,28 +939,44 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           </button>
         </form>
 
-        {/* Status Messages */}
+        {/* ✅ ENHANCED STATUS MESSAGES WITH AI RESPONSE STATUS */}
         {!actualIsConnected && (
-          <div className="mt-2 text-xs text-red-600 bg-red-50 px-2 py-1 rounded">
+          <div className="mt-2 text-xs text-red-600 bg-red-50 px-2 py-1 rounded animate-slide-up">
             ⚠️ Connection lost. Messages may not be sent or received.
           </div>
         )}
 
+        {isAiResponding && (
+          <div className="mt-2 text-xs text-purple-600 bg-purple-50 px-2 py-1 rounded animate-slide-up">
+            🤖 AI is processing your request...
+            <div className="typing-dots ml-2 inline-flex">
+              <div className="typing-dot"></div>
+              <div className="typing-dot"></div>
+              <div className="typing-dot"></div>
+            </div>
+          </div>
+        )}
+
         {file && (
-          <div className="mt-2 text-sm text-gray-600">
+          <div className="mt-2 text-sm text-gray-600 animate-slide-up">
             📎 {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
           </div>
         )}
 
         {!browserSupportsSpeechRecognition && (
-          <div className="mt-2 text-xs text-gray-500">
+          <div className="mt-2 text-xs text-gray-500 animate-slide-up">
             Voice input not supported in this browser. Try Chrome or Edge.
           </div>
         )}
 
         {listening && (
-          <div className="mt-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded">
+          <div className="mt-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded animate-slide-up">
             🎤 Listening... (Tap the microphone to stop)
+            <div className="typing-dots ml-2 inline-flex">
+              <div className="typing-dot"></div>
+              <div className="typing-dot"></div>
+              <div className="typing-dot"></div>
+            </div>
           </div>
         )}
       </div>
