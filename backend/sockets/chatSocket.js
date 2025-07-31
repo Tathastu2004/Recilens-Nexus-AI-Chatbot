@@ -256,3 +256,5 @@ export const registerChatSocket = (io) => {
 
   console.log('✅ [SOCKET] Chat socket handlers registered successfully');
 };
+
+

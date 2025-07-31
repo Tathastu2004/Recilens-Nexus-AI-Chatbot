@@ -54,19 +54,41 @@ const ChatSessionList = ({ onSelect }) => {
     fetchSessions();
   }, [backendUrl]);
 
-  // ✅ LISTEN FOR SESSION UPDATES
+  // ✅ REPLACE THE useEffect FOR EVENT LISTENERS (around line 45)
   useEffect(() => {
+    // ✅ SESSION UPDATE HANDLER
     const handleSessionUpdate = (event) => {
       console.log('🔄 [SESSION LIST] Session updated, refreshing list:', event.detail);
       fetchSessions();
     };
 
-    // ✅ ADD IMMEDIATE TITLE UPDATE HANDLER
+    // ✅ NEW SESSION CREATED HANDLER
+    const handleSessionCreated = (event) => {
+      const { session } = event.detail;
+      console.log('🆕 [SESSION LIST] New session created, adding to list:', session);
+      
+      // ✅ ADD NEW SESSION TO TOP OF LIST IMMEDIATELY
+      setSessions(prevSessions => {
+        // Check if session already exists to prevent duplicates
+        const exists = prevSessions.some(s => s._id === session._id);
+        if (exists) {
+          console.log('⚠️ [SESSION LIST] Session already exists in list');
+          return prevSessions;
+        }
+        
+        // Add to top and sort by updatedAt
+        const newSessions = [session, ...prevSessions];
+        return newSessions.sort((a, b) => 
+          new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)
+        );
+      });
+    };
+
+    // ✅ IMMEDIATE TITLE UPDATE HANDLER
     const handleTitleUpdate = (event) => {
       const { sessionId, title } = event.detail;
       console.log('📝 [SESSION LIST] Title updated immediately:', { sessionId, title });
       
-      // ✅ UPDATE SESSION IN LOCAL STATE IMMEDIATELY
       setSessions(prevSessions => 
         prevSessions.map(session => 
           session._id === sessionId 
@@ -76,23 +98,47 @@ const ChatSessionList = ({ onSelect }) => {
       );
     };
 
-    // ✅ ADD TITLE UPDATE FAILURE HANDLER
+    // ✅ TITLE UPDATE FAILURE HANDLER
     const handleTitleUpdateFailed = (event) => {
       const { sessionId, error } = event.detail;
       console.error('❌ [SESSION LIST] Title update failed:', { sessionId, error });
-      
-      // ✅ REVERT TO ORIGINAL TITLE OR FETCH FRESH DATA
-      fetchSessions();
+      fetchSessions(); // Refresh from server
     };
 
+    // ✅ SESSION DELETION HANDLER
+    const handleSessionDeleted = (event) => {
+      const { sessionId } = event.detail;
+      console.log('🗑️ [SESSION LIST] Session deleted, removing from list:', sessionId);
+      
+      setSessions(prevSessions => 
+        prevSessions.filter(session => session._id !== sessionId)
+      );
+    };
+
+    // ✅ SESSION CREATION ERROR HANDLER
+    const handleSessionCreationFailed = (event) => {
+      const { error } = event.detail;
+      console.error('❌ [SESSION LIST] Session creation failed:', error);
+      // You could show a toast notification here
+    };
+
+    // ✅ ADD ALL EVENT LISTENERS
     window.addEventListener('sessionUpdated', handleSessionUpdate);
-    window.addEventListener('sessionTitleUpdated', handleTitleUpdate); // ✅ ADD THIS
-    window.addEventListener('sessionTitleUpdateFailed', handleTitleUpdateFailed); // ✅ ADD THIS
+    window.addEventListener('sessionCreated', handleSessionCreated); // ✅ NEW
+    window.addEventListener('newSessionCreated', handleSessionCreated); // ✅ BACKWARD COMPATIBILITY
+    window.addEventListener('sessionTitleUpdated', handleTitleUpdate);
+    window.addEventListener('sessionTitleUpdateFailed', handleTitleUpdateFailed);
+    window.addEventListener('sessionDeleted', handleSessionDeleted); // ✅ NEW
+    window.addEventListener('sessionCreationFailed', handleSessionCreationFailed); // ✅ NEW
     
     return () => {
       window.removeEventListener('sessionUpdated', handleSessionUpdate);
-      window.removeEventListener('sessionTitleUpdated', handleTitleUpdate); // ✅ ADD THIS
-      window.removeEventListener('sessionTitleUpdateFailed', handleTitleUpdateFailed); // ✅ ADD THIS
+      window.removeEventListener('sessionCreated', handleSessionCreated); // ✅ NEW
+      window.removeEventListener('newSessionCreated', handleSessionCreated); // ✅ BACKWARD COMPATIBILITY
+      window.removeEventListener('sessionTitleUpdated', handleTitleUpdate);
+      window.removeEventListener('sessionTitleUpdateFailed', handleTitleUpdateFailed);
+      window.removeEventListener('sessionDeleted', handleSessionDeleted); // ✅ NEW
+      window.removeEventListener('sessionCreationFailed', handleSessionCreationFailed); // ✅ NEW
     };
   }, []);
 

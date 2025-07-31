@@ -148,46 +148,93 @@ const ChatInterface = () => {
   // ✅ LISTEN FOR SESSION CREATION FROM SIDEBAR
   useEffect(() => {
     const handleNewSessionCreated = (event) => {
-      const { sessionId } = event.detail;
-      console.log('🎉 [CHAT INTERFACE] New session created from sidebar:', sessionId);
+      const { sessionId, session } = event.detail;
+      console.log('🎉 [CHAT INTERFACE] New session created from event:', sessionId);
       
       const user = JSON.parse(localStorage.getItem("user"));
       const userSessionKey = `lastSelectedSession_${user._id}`;
       
-      setSelectedSession(sessionId);
-      localStorage.setItem(userSessionKey, sessionId);
+      // ✅ ONLY UPDATE IF NOT ALREADY SELECTED
+      if (selectedSession !== sessionId) {
+        setSelectedSession(sessionId);
+        localStorage.setItem(userSessionKey, sessionId);
+      }
     };
 
-    window.addEventListener('newSessionCreated', handleNewSessionCreated);
-    return () => window.removeEventListener('newSessionCreated', handleNewSessionCreated);
-  }, []);
-
-  // ✅ CLEANUP ON USER CHANGE (ADD THIS)
-  useEffect(() => {
-    const handleStorageChange = (e) => {
-      if (e.key === 'user' || e.key === 'token') {
-        console.log('👤 [CHAT INTERFACE] User changed, clearing session');
+    // ✅ ADD ERROR HANDLER
+    const handleSessionCreationFailed = (event) => {
+      const { error } = event.detail;
+      console.error('❌ [CHAT INTERFACE] Session creation failed:', error);
+      
+      // Clear any temp session
+      if (selectedSession && selectedSession.startsWith('temp-')) {
         setSelectedSession(null);
       }
     };
 
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
+    window.addEventListener('newSessionCreated', handleNewSessionCreated);
+    window.addEventListener('sessionCreated', handleNewSessionCreated); // ✅ ALSO LISTEN TO NEW EVENT
+    window.addEventListener('sessionCreationFailed', handleSessionCreationFailed); // ✅ NEW
+    
+    return () => {
+      window.removeEventListener('newSessionCreated', handleNewSessionCreated);
+      window.removeEventListener('sessionCreated', handleNewSessionCreated); // ✅ NEW
+      window.removeEventListener('sessionCreationFailed', handleSessionCreationFailed); // ✅ NEW
+    };
+  }, [selectedSession]);
 
-  // ✅ ADD NEW CHAT CREATION FUNCTION
+  // ✅ REPLACE THE ENTIRE createNewChat FUNCTION WITH THIS ROBUST VERSION
   const createNewChat = async () => {
     try {
       const token = localStorage.getItem("token");
-      const user = JSON.parse(localStorage.getItem("user"));
+      const user = localStorage.getItem("user");
       const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
 
-      if (!token || !user) {
-        console.error('❌ No authentication data found');
+      // ✅ VALIDATION
+      if (!token) {
+        console.error('❌ No authentication token found');
+        setAuthError('Authentication token missing. Please log in again.');
         return;
       }
 
-      console.log('🆕 [CHAT INTERFACE] Creating new chat session...');
+      if (!user) {
+        console.error('❌ No user data found');
+        setAuthError('User data missing. Please log in again.');
+        return;
+      }
+
+      let parsedUser;
+      try {
+        parsedUser = JSON.parse(user);
+        if (!parsedUser._id) {
+          throw new Error('User ID missing');
+        }
+      } catch (parseError) {
+        console.error('❌ Invalid user data:', parseError);
+        setAuthError('Invalid user data. Please log in again.');
+        return;
+      }
+
+      console.log('🆕 [CHAT INTERFACE] Creating new chat session...', {
+        userId: parsedUser._id,
+        backendUrl
+      });
+
+      // ✅ SHOW IMMEDIATE FEEDBACK
+      const tempSessionId = `temp-${Date.now()}`;
+      setSelectedSession(tempSessionId);
+
+      // ✅ REQUEST DATA
+      const requestData = {
+        title: 'New Chat',
+        userId: parsedUser._id
+      };
+
+      console.log('📤 [CHAT INTERFACE] Sending request:', {
+        url: `${backendUrl}/api/chat/session`,
+        method: 'POST',
+        body: requestData
+      });
 
       const response = await fetch(`${backendUrl}/api/chat/session`, {
         method: 'POST',
@@ -195,35 +242,131 @@ const ChatInterface = () => {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          title: 'New Chat',
-          userId: user._id
-        })
+        body: JSON.stringify(requestData)
+      });
+
+      console.log('📥 [CHAT INTERFACE] Response received:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        
+        try {
+          const errorData = await response.json();
+          console.error('❌ [CHAT INTERFACE] Server error response:', errorData);
+          errorMessage = errorData.message || errorData.error || errorMessage;
+        } catch (jsonError) {
+          console.error('❌ [CHAT INTERFACE] Failed to parse error response:', jsonError);
+          const textError = await response.text();
+          console.error('❌ [CHAT INTERFACE] Error response text:', textError);
+          errorMessage = textError || errorMessage;
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
-      
-      if (data.success && data.session) {
-        const newSessionId = data.session._id;
-        console.log('✅ [CHAT INTERFACE] New session created:', newSessionId);
+      console.log('✅ [CHAT INTERFACE] Session creation response:', data);
+
+      // ✅ HANDLE BOTH RESPONSE FORMATS
+      let sessionData;
+      let isSuccess = false;
+
+      // Check if response has success field (new format)
+      if (data.hasOwnProperty('success')) {
+        isSuccess = data.success;
+        sessionData = data.session;
+        console.log('📋 [CHAT INTERFACE] Using wrapped response format');
+      } 
+      // Check if response is direct session object (current backend format)
+      else if (data._id && data.title && data.user) {
+        isSuccess = true;
+        sessionData = data;
+        console.log('📋 [CHAT INTERFACE] Using direct session response format');
+      }
+      // Invalid response
+      else {
+        console.error('❌ [CHAT INTERFACE] Invalid response format:', data);
+        throw new Error(data.message || data.error || 'Invalid response format from server');
+      }
+
+      if (isSuccess && sessionData) {
+        const newSessionId = sessionData._id;
+        console.log('✅ [CHAT INTERFACE] New session created successfully:', {
+          sessionId: newSessionId,
+          title: sessionData.title,
+          userId: sessionData.user || sessionData.userId // Handle both field names
+        });
         
-        // Select the new session
+        // ✅ IMMEDIATELY DISPATCH MULTIPLE EVENTS FOR COMPREHENSIVE UPDATE
+        const sessionCreatedEvent = new CustomEvent('sessionCreated', {
+          detail: { 
+            session: sessionData,
+            sessionId: newSessionId,
+            timestamp: new Date().toISOString()
+          }
+        });
+        
+        const newSessionCreatedEvent = new CustomEvent('newSessionCreated', {
+          detail: { 
+            session: sessionData,
+            sessionId: newSessionId
+          }
+        });
+
+        window.dispatchEvent(sessionCreatedEvent);
+        window.dispatchEvent(newSessionCreatedEvent);
+        
+        console.log('📢 [CHAT INTERFACE] Events dispatched:', {
+          sessionCreated: true,
+          newSessionCreated: true
+        });
+
+        // ✅ UPDATE STATE AND STORAGE
         handleSessionSelect(newSessionId);
         
-        // Dispatch event to update sidebar
-        window.dispatchEvent(new CustomEvent('newSessionCreated', {
-          detail: { sessionId: newSessionId, session: data.session }
-        }));
+        console.log('✅ [CHAT INTERFACE] Session selection updated');
+        return sessionData;
+        
       } else {
-        throw new Error(data.message || 'Failed to create session');
+        console.error('❌ [CHAT INTERFACE] Session creation failed:', data);
+        throw new Error(data.message || data.error || 'Failed to create session');
       }
+      
     } catch (error) {
-      console.error('❌ [CHAT INTERFACE] Failed to create new chat:', error);
-      // You might want to show a toast notification here
+      console.error('❌ [CHAT INTERFACE] Failed to create new chat:', {
+        error: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      
+      // ✅ CLEAR TEMP SESSION ON ERROR
+      setSelectedSession(null);
+      
+      // ✅ HANDLE SPECIFIC ERROR TYPES
+      if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+        setAuthError('Session expired. Please log in again.');
+        localStorage.clear();
+      } else if (error.message.includes('403') || error.message.includes('Forbidden')) {
+        setAuthError('Access denied. Please check your permissions.');
+      } else if (error.message.includes('500')) {
+        console.error('❌ Server error - check backend logs');
+      }
+      
+      // ✅ DISPATCH ERROR EVENT
+      window.dispatchEvent(new CustomEvent('sessionCreationFailed', {
+        detail: { 
+          error: error.message,
+          timestamp: new Date().toISOString(),
+          userAgent: navigator.userAgent
+        }
+      }));
+      
+      // ✅ SHOW USER-FRIENDLY ERROR MESSAGE
+      alert(`Failed to create new chat: ${error.message}`);
     }
   };
 
