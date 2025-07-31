@@ -105,6 +105,23 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         const newSession = response.data.session;
         console.log('✅ [CREATE SESSION] New session created:', newSession._id);
 
+        // ✅ IMMEDIATELY DISPATCH EVENT TO UPDATE SIDEBAR
+        window.dispatchEvent(new CustomEvent('sessionCreated', {
+          detail: { 
+            session: newSession,
+            sessionId: newSession._id,
+            timestamp: new Date().toISOString()
+          }
+        }));
+
+        // ✅ ALSO DISPATCH FOR BACKWARD COMPATIBILITY
+        window.dispatchEvent(new CustomEvent('newSessionCreated', {
+          detail: { 
+            session: newSession,
+            sessionId: newSession._id
+          }
+        }));
+
         // Set the new session as current
         if (chatContextAvailable && setSession) {
           setSession(newSession._id);
@@ -113,8 +130,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           setMessages([]);
         }
 
-        // Notify parent component to update sidebar
+        // ✅ NOTIFY PARENT COMPONENT IMMEDIATELY
         if (onSessionUpdate) {
+          console.log('📢 [CREATE SESSION] Notifying parent component');
           onSessionUpdate(newSession);
         }
 
@@ -124,6 +142,12 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       }
     } catch (error) {
       console.error('❌ [CREATE SESSION] Failed:', error);
+      
+      // ✅ DISPATCH ERROR EVENT
+      window.dispatchEvent(new CustomEvent('sessionCreationFailed', {
+        detail: { error: error.message }
+      }));
+      
       return null;
     } finally {
       setIsCreatingSession(false);

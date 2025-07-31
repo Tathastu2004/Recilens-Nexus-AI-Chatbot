@@ -26,6 +26,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
   const [deletingChat, setDeletingChat] = useState(null);
   const [creatingChat, setCreatingChat] = useState(false); // ✅ ADD STATE FOR CREATING
   const operationInProgress = useRef(false); // ✅ PREVENT DUPLICATE OPERATIONS
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // ✅ ADD REFRESH TRIGGER STATE
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
 
@@ -310,6 +311,23 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
       onToggle(newOpenState);
     }
   };
+
+  // ✅ ADD THIS TO YOUR SIDEBAR COMPONENT (if it exists)
+  useEffect(() => {
+    const handleSessionCreated = (event) => {
+      console.log('🎉 [SIDEBAR] New session created, updating UI');
+      // Force re-render or refresh session list
+      setRefreshTrigger(prev => prev + 1); // If you have a refresh trigger state
+    };
+
+    window.addEventListener('sessionCreated', handleSessionCreated);
+    window.addEventListener('newSessionCreated', handleSessionCreated);
+    
+    return () => {
+      window.removeEventListener('sessionCreated', handleSessionCreated);
+      window.removeEventListener('newSessionCreated', handleSessionCreated);
+    };
+  }, []);
 
   return (
     <div className="h-screen w-full">
