@@ -1,25 +1,18 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import http from 'http';
-import { Server } from 'socket.io';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import compression from 'compression';
+import http from 'http';
 
-// Import Cloudinary config EARLY
 import './config/cloudinary.js';
-
 import connectDB from './config/mongodb.js';
 import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './admin/adminRoutes.js';
 import userRoutes from './routes/userRoutes.js';
-import { registerChatSocket} from './sockets/chatSocket.js';
 import chatRoutes from './routes/chatRoutes.js';
-import compression from 'compression';
-
-
-
 
 dotenv.config();
 
@@ -32,7 +25,7 @@ console.log('🔑 [ENV CHECK] Environment variables status:', {
   CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET ? 'Set' : 'Missing'
 });
 
-// Resolve __dirname in ES Module
+// Resolve __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -44,23 +37,15 @@ if (!fs.existsSync('/tmp')) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ✅ Apply compression
 app.use(compression({ threshold: 0 }));
 
-
-// ✅ Create HTTP server for socket.io
+// ✅ Create HTTP server
 const server = http.createServer(app);
 
-// ✅ Initialize Socket.IO
-const io = new Server(server, {
-  cors: {
-    origin: '*', // replace with frontend URL in prod
-    methods: ['GET', 'POST']
-  }
-});
-
-// ✅ MongoDB Connection
+// ✅ MongoDB connection
 if (!process.env.MONGO_URI) {
-  console.error('MONGO_URI is not defined in .env file');
+  console.error('❌ MONGO_URI is not defined in .env');
   process.exit(1);
 }
 connectDB();
@@ -70,7 +55,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ Serve uploaded files with CORS
+// ✅ Serve uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/uploads', (req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
@@ -78,20 +63,25 @@ app.use('/uploads', (req, res, next) => {
   next();
 });
 
+// ✅ Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    server: 'running'
+  });
+});
+
 // ✅ Routes
 app.get('/', (req, res) => {
   res.send('Welcome to the Recilens Nexus AI Chatbot Backend!');
 });
-
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/chat', chatRoutes);
 
-// ✅ Start Socket.IO listeners
-registerChatSocket(io);
-
-// ✅ Launch server (IMPORTANT: use server.listen)
+// ✅ Launch server (HTTP only — no Socket.IO)
 server.listen(PORT, () => {
   console.log(`✅ Server is running on port ${PORT}`);
 });

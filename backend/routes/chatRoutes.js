@@ -9,7 +9,7 @@ import {
   updateSessionTitle,
   deleteChatSession,
   uploadFileHandler,
-  sendMessage // ✅ ADD THIS IMPORT
+  sendMessage
 } from '../controllers/chatController.js';
 
 const router = express.Router();
@@ -29,26 +29,29 @@ router.patch('/session/:sessionId', verifyToken, updateSessionTitle);
 // 🔹 Delete chat session
 router.delete('/session/:sessionId', verifyToken, deleteChatSession);
 
-// ✅ ADD THIS NEW ROUTE
-// 🔹 Send message via API (fallback when socket unavailable)
+// 🔹 Send message with streaming support (FIXED ROUTE)
 router.post('/message', verifyToken, sendMessage);
 
+// 🔹 Legacy streaming route (keep for compatibility)
+router.get('/stream/:sessionId', verifyToken, sendMessage);
+
 // 🔹 Upload file (image/doc) to Cloudinary for chat
-router.post('/upload', 
-  verifyToken, 
+router.post(
+  '/upload',
+  verifyToken,
   debugUploadRequest,
-  uploadChatFile.single('file'), 
+  uploadChatFile.single('file'),
   uploadFileHandler
 );
 
-// ✅ ADD THIS ENDPOINT TO YOUR BACKEND
-router.get('/api/chat/session/:sessionId', verifyToken, async (req, res) => {
+// 🔹 Get individual session metadata
+router.get('/session/:sessionId', verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const userId = req.user.userId;
+    const userId = req.user._id;
 
     const session = await ChatSession.findById(sessionId);
-    
+
     if (!session) {
       return res.status(404).json({
         success: false,
@@ -56,7 +59,6 @@ router.get('/api/chat/session/:sessionId', verifyToken, async (req, res) => {
       });
     }
 
-    // ✅ VERIFY SESSION BELONGS TO REQUESTING USER
     if (session.user.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
@@ -78,7 +80,7 @@ router.get('/api/chat/session/:sessionId', verifyToken, async (req, res) => {
   }
 });
 
-// Error handling middleware should be at the end
+// Error handling middleware
 router.use(handleUploadErrors);
 
 export default router;

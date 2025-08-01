@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
-import socket from "../socket.js";
-import { debugAuth } from '../utils/authDebug';
+import axios from 'axios';
 
 const ChatContext = createContext();
 
@@ -8,293 +7,484 @@ export const ChatProvider = ({ children }) => {
   const [messages, setMessages] = useState({}); // sessionId -> messages array
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [typingUsers, setTypingUsers] = useState({});
+  const [streamingStates, setStreamingStates] = useState({}); // sessionId -> streaming status
+  const [activeStreams, setActiveStreams] = useState({}); // sessionId -> AbortController
 
-  // Debug connection status
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
+  const token = localStorage.getItem("token");
+
+  console.log('🚀 [CHAT CONTEXT] Initializing streaming-based ChatProvider...');
+
+  // ✅ CHECK CONNECTION STATUS
   useEffect(() => {
-    console.log('🚀 [CHAT CONTEXT] Initializing ChatProvider...');
+    const checkConnection = async () => {
+      try {
+        const response = await fetch(`${backendUrl}/api/health`, {
+          signal: AbortSignal.timeout(3000)
+        });
+        const connected = response.ok;
+        setIsConnected(connected);
+        console.log('📊 [CONNECTION] Status:', connected ? 'Connected' : 'Disconnected');
+      } catch (error) {
+        console.log('⚠️ [CONNECTION] Check failed:', error.message);
+        setIsConnected(false);
+      }
+    };
+
+    checkConnection();
+    const interval = setInterval(checkConnection, 30000); // Check every 30s
     
-    const handleConnect = () => {
-      console.log('✅ [SOCKET] Connected to server');
-      setIsConnected(true);
-    };
+    return () => clearInterval(interval);
+  }, [backendUrl]);
 
-    const handleDisconnect = (reason) => {
-      console.log('❌ [SOCKET] Disconnected from server:', reason);
-      setIsConnected(false);
-    };
+  // ✅ ENHANCED STREAMING SEND MESSAGE
+  const sendMessage = useCallback(async (messageData) => {
+    const startTime = Date.now();
+    const { sessionId, message, tempId, senderId, fileUrl, fileType, type } = messageData;
+    
+    console.log('📤 [STREAMING] Starting message send:', {
+      sessionId,
+      tempId,
+      messageLength: message?.length,
+      hasFile: !!fileUrl,
+      senderId
+    });
 
-    const handleConnectError = (error) => {
-      console.error('🔥 [SOCKET] Connection error:', error);
-      setIsConnected(false);
-    };
+    if (!sessionId || !message) {
+      console.error('❌ [STREAMING] Missing required fields:', { sessionId: !!sessionId, message: !!message });
+      return { success: false, error: 'Session ID and message are required' };
+    }
 
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
-    socket.on('connect_error', handleConnectError);
+    // ✅ MARK SESSION AS STREAMING
+    setStreamingStates(prev => ({
+      ...prev,
+      [sessionId]: true
+    }));
 
-    // Initial connection status
-    setIsConnected(socket.connected);
-    console.log('📊 [SOCKET] Initial connection status:', socket.connected);
+    // ✅ CREATE ABORT CONTROLLER FOR CANCELLATION
+    const abortController = new AbortController();
+    setActiveStreams(prev => ({
+      ...prev,
+      [sessionId]: abortController
+    }));
 
-    return () => {
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
-      socket.off('connect_error', handleConnectError);
-    };
-  }, []);
+    try {
+      // ✅ PREPARE AI MESSAGE PLACEHOLDER (no user message here - handled by ChatDashboard)
+      const aiMessageId = `ai-${Date.now()}-${Math.random()}`;
+      const aiMessage = {
+        _id: aiMessageId,
+        message: '',
+        sender: 'AI',
+        type: 'text',
+        timestamp: new Date().toISOString(),
+        isStreaming: true
+      };
 
-  // Handle incoming messages with real-time optimization
-  useEffect(() => {
-    console.log('🔗 [CHAT CONTEXT] Setting up message listeners...');
+      // ✅ ADD AI MESSAGE PLACEHOLDER TO EXISTING MESSAGES
+      setMessages(prev => ({
+        ...prev,
+        [sessionId]: [...(prev[sessionId] || []), aiMessage]
+      }));
 
-    const handleReceiveMessage = (msg) => {
-      const timestamp = Date.now();
-      console.log('📩 [SOCKET] Message received at', new Date(timestamp).toLocaleTimeString(), ':', {
-        messageId: msg._id,
-        sessionId: msg.session,
-        sender: msg.sender,
-        type: msg.type,
-        messageLength: msg.message?.length || 0,
-        hasFile: !!msg.fileUrl,
-        latency: timestamp - (msg.timestamp ? new Date(msg.timestamp).getTime() : timestamp)
+      console.log('🌊 [STREAMING] Starting streaming request to backend...');
+
+      // ✅ START STREAMING REQUEST
+      const response = await fetch(`${backendUrl}/api/chat/message`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Accept': 'text/plain' // ✅ REQUEST STREAMING RESPONSE
+        },
+        body: JSON.stringify({
+          sessionId,
+          message,
+          type: type || 'text',
+          fileUrl,
+          fileType,
+          tempId
+        }),
+        signal: abortController.signal
       });
 
-      if (!msg.session) {
-        console.warn('⚠️ [SOCKET] No sessionId in message:', msg);
-        return;
+      console.log('📥 [STREAMING] Response received:', {
+        status: response.status,
+        ok: response.ok,
+        headers: Object.fromEntries(response.headers.entries())
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ [STREAMING] HTTP Error:', { status: response.status, body: errorText });
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      setMessages((prev) => {
-        const sessionMessages = prev[msg.session] || [];
+      // ✅ CHECK IF RESPONSE IS STREAMABLE
+      const contentType = response.headers.get('content-type');
+      const isStreamable = contentType?.includes('text/plain') && response.body;
+
+      if (isStreamable) {
+        console.log('🌊 [STREAMING] Reading stream...');
         
-        // ✅ CHECK FOR OPTIMISTIC MESSAGE TO REPLACE
-        const optimisticIndex = sessionMessages.findIndex(m => 
-          m.optimistic && m.message === msg.message && m.sender === msg.sender
-        );
+        // ✅ HANDLE STREAMING RESPONSE
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let accumulatedText = '';
+        let chunkCount = 0;
 
-        if (optimisticIndex !== -1) {
-          // ✅ REPLACE OPTIMISTIC MESSAGE WITH REAL ONE
-          const updatedMessages = [...sessionMessages];
-          updatedMessages[optimisticIndex] = {
-            ...msg,
-            optimistic: false,
-            status: 'confirmed'
-          };
+        while (true) {
+          const { done, value } = await reader.read();
           
-          return {
+          if (done) {
+            console.log('✅ [STREAMING] Stream completed after', chunkCount, 'chunks');
+            break;
+          }
+
+          // ✅ DECODE AND ACCUMULATE TEXT
+          const chunk = decoder.decode(value, { stream: true });
+          accumulatedText += chunk;
+          chunkCount++;
+
+          console.log(`📝 [STREAMING] Chunk ${chunkCount}:`, {
+            chunkLength: chunk.length,
+            totalLength: accumulatedText.length,
+            preview: chunk.substring(0, 50) + (chunk.length > 50 ? '...' : '')
+          });
+
+          // ✅ UPDATE AI MESSAGE WITH STREAMED CONTENT
+          setMessages(prev => ({
             ...prev,
-            [msg.session]: updatedMessages,
-          };
+            [sessionId]: (prev[sessionId] || []).map(msg => 
+              msg._id === aiMessageId 
+                ? { ...msg, message: accumulatedText, isStreaming: true }
+                : msg
+            )
+          }));
         }
 
-        // ✅ CHECK FOR DUPLICATE REAL MESSAGES
-        const isDuplicate = sessionMessages.some(existingMsg => 
-          existingMsg._id === msg._id && !existingMsg.optimistic
-        );
-
-        if (isDuplicate) {
-          return prev;
-        }
-
-        // ✅ ADD NEW MESSAGE
-        return {
+        // ✅ FINALIZE AI MESSAGE
+        setMessages(prev => ({
           ...prev,
-          [msg.session]: [...sessionMessages, msg],
-        };
+          [sessionId]: (prev[sessionId] || []).map(msg => 
+            msg._id === aiMessageId 
+              ? { ...msg, message: accumulatedText, isStreaming: false, timestamp: new Date().toISOString() }
+              : msg
+          )
+        }));
+
+        console.log('✅ [STREAMING] Message completed in', Date.now() - startTime, 'ms');
+        return { success: true, aiMessageId, responseLength: accumulatedText.length };
+
+      } else {
+        // ✅ FALLBACK TO JSON RESPONSE
+        console.log('📋 [STREAMING] Falling back to JSON response...');
+        
+        const responseData = await response.json();
+        const aiText = responseData.response || responseData.message || 'No response received';
+        
+        // ✅ UPDATE AI MESSAGE WITH COMPLETE RESPONSE
+        setMessages(prev => ({
+          ...prev,
+          [sessionId]: (prev[sessionId] || []).map(msg => 
+            msg._id === aiMessageId 
+              ? { ...msg, message: aiText, isStreaming: false, timestamp: new Date().toISOString() }
+              : msg
+          )
+        }));
+
+        console.log('✅ [STREAMING] JSON response completed:', { responseLength: aiText.length });
+        return { success: true, aiMessageId, responseLength: aiText.length };
+      }
+
+    } catch (error) {
+      console.error('❌ [STREAMING] Error occurred:', {
+        name: error.name,
+        message: error.message,
+        sessionId,
+        elapsed: Date.now() - startTime
       });
-    };
 
-    const handleError = (error) => {
-      console.error('❌ [SOCKET] Socket error:', error);
-    };
+      // ✅ HANDLE DIFFERENT ERROR TYPES
+      let errorMessage = 'Failed to send message';
+      let errorType = 'unknown';
 
-    const handleTypingStart = (data) => {
-      console.log('⌨️ [SOCKET] User started typing:', data);
-      setTypingUsers(prev => ({
+      if (error.name === 'AbortError') {
+        errorMessage = 'Request was cancelled';
+        errorType = 'cancelled';
+      } else if (error.message.includes('429')) {
+        errorMessage = 'AI service is overloaded. Please try again later.';
+        errorType = 'rate_limit';
+      } else if (error.message.includes('401')) {
+        errorMessage = 'Authentication required. Please log in again.';
+        errorType = 'auth';
+      } else if (error.message.includes('403')) {
+        errorMessage = 'Access denied. Please check your permissions.';
+        errorType = 'permission';
+      } else if (error.message.includes('500')) {
+        errorMessage = 'Server error. Please try again later.';
+        errorType = 'server';
+      } else if (error.message.includes('timeout') || error.message.includes('network')) {
+        errorMessage = 'Network error. Please check your connection.';
+        errorType = 'network';
+      }
+
+      // ✅ REMOVE AI PLACEHOLDER AND ADD ERROR MESSAGE
+      const errorMessageObj = {
+        _id: `error-${Date.now()}`,
+        message: `❌ ${errorMessage}`,
+        sender: 'AI',
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        isError: true,
+        errorType
+      };
+
+      setMessages(prev => ({
         ...prev,
-        [data.sessionId]: {
-          ...prev[data.sessionId],
-          [data.userId]: true
-        }
+        [sessionId]: [
+          ...(prev[sessionId] || []).filter(msg => !msg.isStreaming), 
+          errorMessageObj
+        ]
       }));
-    };
 
-    const handleTypingStop = (data) => {
-      console.log('⏹️ [SOCKET] User stopped typing:', data);
-      setTypingUsers(prev => {
-        const sessionTyping = { ...prev[data.sessionId] };
-        delete sessionTyping[data.userId];
-        return {
-          ...prev,
-          [data.sessionId]: sessionTyping
-        };
+      return { success: false, error: errorMessage, errorType };
+
+    } finally {
+      // ✅ CLEANUP STREAMING STATE
+      setStreamingStates(prev => ({
+        ...prev,
+        [sessionId]: false
+      }));
+      
+      setActiveStreams(prev => {
+        const updated = { ...prev };
+        delete updated[sessionId];
+        return updated;
       });
-    };
 
-    // Register event listeners
-    socket.on("receive-message", handleReceiveMessage);
-    socket.on("error", handleError);
-    socket.on("user-typing", handleTypingStart);
-    socket.on("user-stop-typing", handleTypingStop);
+      console.log('🧹 [STREAMING] Cleanup completed for session:', sessionId);
+    }
+  }, [backendUrl, token]);
 
-    console.log('✅ [CHAT CONTEXT] Message listeners registered');
+  // ✅ CANCEL STREAMING FOR SESSION
+  const cancelStream = useCallback((sessionId) => {
+    console.log('🛑 [STREAMING] Cancelling stream for session:', sessionId);
+    
+    const controller = activeStreams[sessionId];
+    if (controller) {
+      controller.abort();
+      console.log('✅ [STREAMING] Stream cancelled successfully');
+    }
+  }, [activeStreams]);
 
-    return () => {
-      console.log('🧹 [CHAT CONTEXT] Cleaning up message listeners...');
-      socket.off("receive-message", handleReceiveMessage);
-      socket.off("error", handleError);
-      socket.off("user-typing", handleTypingStart);
-      socket.off("user-stop-typing", handleTypingStop);
-    };
-  }, []);
+  // ✅ CHECK IF SESSION IS STREAMING
+  const isSessionStreaming = useCallback((sessionId) => {
+    return streamingStates[sessionId] || false;
+  }, [streamingStates]);
 
-  // Join session for real-time updates
-  const joinSession = useCallback((sessionId) => {
+  // ✅ FETCH MESSAGES FROM SERVER
+  const fetchSessionMessages = useCallback(async (sessionId) => {
     if (!sessionId) {
-      console.warn('⚠️ [CHAT CONTEXT] Cannot join session: no sessionId provided');
+      console.log('⚠️ [FETCH] No session ID provided');
+      return [];
+    }
+
+    console.log('📤 [FETCH] Loading messages for session:', sessionId);
+    
+    try {
+      const response = await axios.get(
+        `${backendUrl}/api/chat/messages/${sessionId}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 10000 // 10 second timeout
+        }
+      );
+      
+      const fetchedMessages = response.data || [];
+      console.log('✅ [FETCH] Loaded', fetchedMessages.length, 'messages for session:', sessionId);
+      
+      setMessages(prev => ({
+        ...prev,
+        [sessionId]: fetchedMessages
+      }));
+      
+      return fetchedMessages;
+    } catch (error) {
+      console.error('❌ [FETCH] Failed to load messages:', {
+        sessionId,
+        error: error.message,
+        status: error.response?.status
+      });
+      
+      // ✅ SET EMPTY ARRAY ON ERROR
+      setMessages(prev => ({
+        ...prev,
+        [sessionId]: []
+      }));
+      
+      return [];
+    }
+  }, [backendUrl, token]);
+
+  // ✅ SET CURRENT SESSION
+  const setSession = useCallback((sessionId) => {
+    console.log('🎯 [SESSION] Setting current session:', {
+      from: currentSessionId,
+      to: sessionId,
+      hasMessages: sessionId ? (messages[sessionId]?.length || 0) : 0
+    });
+    
+    // Cancel any active streams for the current session
+    if (currentSessionId && activeStreams[currentSessionId]) {
+      console.log('🛑 [SESSION] Cancelling active stream for previous session');
+      cancelStream(currentSessionId);
+    }
+    
+    setCurrentSessionId(sessionId);
+    
+    // Load messages if switching to a real session that we don't have cached
+    if (sessionId && sessionId.match(/^[0-9a-fA-F]{24}$/) && !messages[sessionId]) {
+      console.log('📤 [SESSION] Loading messages for new session:', sessionId);
+      fetchSessionMessages(sessionId);
+    }
+  }, [currentSessionId, activeStreams, cancelStream, fetchSessionMessages, messages]);
+
+  // ✅ GET CURRENT SESSION MESSAGES
+  const getCurrentSessionMessages = useCallback(() => {
+    if (!currentSessionId) {
+      console.log('📋 [MESSAGES] No current session');
+      return [];
+    }
+
+    const sessionMessages = messages[currentSessionId] || [];
+    console.log('📋 [MESSAGES] Current session messages:', {
+      sessionId: currentSessionId,
+      count: sessionMessages.length,
+      streaming: streamingStates[currentSessionId] || false,
+      lastMessage: sessionMessages[sessionMessages.length - 1]?._id
+    });
+    
+    return sessionMessages;
+  }, [messages, currentSessionId, streamingStates]);
+
+  // ✅ MANUALLY SET SESSION MESSAGES
+  const setSessionMessages = useCallback((sessionId, msgs) => {
+    console.log('📝 [MESSAGES] Setting messages for session:', {
+      sessionId,
+      count: msgs?.length || 0,
+      isCurrent: sessionId === currentSessionId
+    });
+
+    if (!Array.isArray(msgs)) {
+      console.warn('⚠️ [MESSAGES] Invalid messages array provided:', typeof msgs);
       return;
     }
 
-    console.log('🔗 [CHAT CONTEXT] Joining session:', sessionId);
-    socket.emit("join-session", sessionId);
-    setCurrentSessionId(sessionId);
-    
-    // Clear typing indicators for new session
-    setTypingUsers(prev => ({
+    setMessages(prev => ({
       ...prev,
-      [sessionId]: {}
-    }));
-  }, []);
-
-  // ✅ OPTIMIZED SEND MESSAGE WITH IMMEDIATE RESPONSE
-  const sendMessage = useCallback(async (messageData) => {
-    const startTime = Date.now();
-    
-    console.log('📤 [CHAT CONTEXT] Instant message send:', {
-      sessionId: messageData.sessionId,
-      tempId: messageData.tempId
-    });
-
-    if (!messageData.senderId) {
-      try {
-        const storedUser = localStorage.getItem("user");
-        if (storedUser) {
-          const user = JSON.parse(storedUser);
-          messageData.senderId = user._id;
-        }
-      } catch (parseError) {
-        console.error('❌ [CHAT CONTEXT] Error parsing user:', parseError);
-      }
-    }
-
-    if (!messageData.senderId) {
-      return { success: false, error: 'User authentication required. Please log in again.' };
-    }
-
-    try {
-      // ✅ EMIT SOCKET MESSAGE FOR INSTANT DELIVERY
-      socket.emit("send-message", {
-        ...messageData,
-        timestamp: new Date().toISOString()
-      });
-
-      const latency = Date.now() - startTime;
-      console.log('✅ [CHAT CONTEXT] Message sent instantly in', latency, 'ms');
-      
-      return { success: true, latency };
-    } catch (error) {
-      console.error('❌ [CHAT CONTEXT] Failed to send message:', error);
-      return { success: false, error: error.message };
-    }
-  }, []);
-
-  // Optimized message retrieval
-  const getCurrentSessionMessages = useCallback(() => {
-    const sessionMessages = messages[currentSessionId] || [];
-    console.log('📋 [CHAT CONTEXT] Getting messages for session', currentSessionId, ':', {
-      messageCount: sessionMessages.length,
-      hasMessages: sessionMessages.length > 0,
-      lastMessageTime: sessionMessages.length > 0 ? 
-        new Date(sessionMessages[sessionMessages.length - 1].timestamp).toLocaleTimeString() : 'N/A'
-    });
-    return sessionMessages;
-  }, [messages, currentSessionId]);
-
-  // Set current session with debugging
-  const setSession = useCallback((sessionId) => {
-    console.log('🎯 [CHAT CONTEXT] Setting current session:', {
-      from: currentSessionId,
-      to: sessionId,
-      messagesAvailable: sessionId ? (messages[sessionId]?.length || 0) : 0
-    });
-    
-    if (sessionId) {
-      joinSession(sessionId);
-    } else {
-      setCurrentSessionId(null);
-    }
-  }, [currentSessionId, messages, joinSession]);
-
-  // Manually set all messages with optimization
-  const setSessionMessages = useCallback((sessionId, msgs) => {
-    console.log('📝 [CHAT CONTEXT] Setting messages for session', sessionId, ':', {
-      messageCount: msgs.length,
-      isCurrentSession: sessionId === currentSessionId,
-      messageSenders: msgs.map(m => m.sender).filter((sender, index, arr) => arr.indexOf(sender) === index)
-    });
-
-    setMessages((prev) => ({
-      ...prev,
-      [sessionId]: msgs,
+      [sessionId]: msgs
     }));
   }, [currentSessionId]);
 
-  // Add message to specific session (for immediate UI updates)
+  // ✅ ADD MESSAGE TO SPECIFIC SESSION
   const addMessageToSession = useCallback((sessionId, message) => {
-    console.log('➕ [CHAT CONTEXT] Adding message to session', sessionId, ':', {
+    if (!sessionId || !message) {
+      console.warn('⚠️ [MESSAGES] Invalid parameters for addMessageToSession:', { sessionId, message });
+      return;
+    }
+
+    console.log('➕ [MESSAGES] Adding message to session:', {
+      sessionId,
       messageId: message._id,
       sender: message.sender,
-      type: message.type,
-      timestamp: new Date().toLocaleTimeString()
+      isCurrent: sessionId === currentSessionId
     });
 
-    setMessages((prev) => ({
+    setMessages(prev => ({
       ...prev,
-      [sessionId]: [...(prev[sessionId] || []), message],
+      [sessionId]: [...(prev[sessionId] || []), message]
+    }));
+  }, [currentSessionId]);
+
+  // ✅ UPDATE MESSAGE IN SESSION
+  const updateMessageInSession = useCallback((sessionId, messageId, updates) => {
+    console.log('🔄 [MESSAGES] Updating message in session:', {
+      sessionId,
+      messageId,
+      updates: Object.keys(updates)
+    });
+
+    setMessages(prev => ({
+      ...prev,
+      [sessionId]: (prev[sessionId] || []).map(msg => 
+        msg._id === messageId ? { ...msg, ...updates } : msg
+      )
     }));
   }, []);
 
-  // Get typing status for current session
-  const getTypingUsers = useCallback(() => {
-    const sessionTyping = typingUsers[currentSessionId] || {};
-    const typingUserIds = Object.keys(sessionTyping).filter(userId => sessionTyping[userId]);
-    
-    if (typingUserIds.length > 0) {
-      console.log('⌨️ [CHAT CONTEXT] Users typing in current session:', typingUserIds);
-    }
-    
-    return typingUserIds;
-  }, [typingUsers, currentSessionId]);
+  // ✅ REMOVE MESSAGE FROM SESSION
+  const removeMessageFromSession = useCallback((sessionId, messageId) => {
+    console.log('🗑️ [MESSAGES] Removing message from session:', { sessionId, messageId });
 
+    setMessages(prev => ({
+      ...prev,
+      [sessionId]: (prev[sessionId] || []).filter(msg => msg._id !== messageId)
+    }));
+  }, []);
+
+  // ✅ CLEAR SESSION MESSAGES
+  const clearSessionMessages = useCallback((sessionId) => {
+    console.log('🧹 [MESSAGES] Clearing messages for session:', sessionId);
+
+    setMessages(prev => ({
+      ...prev,
+      [sessionId]: []
+    }));
+  }, []);
+
+  // ✅ CLEANUP ON UNMOUNT
+  useEffect(() => {
+    return () => {
+      console.log('🧹 [CHAT CONTEXT] Cleaning up on unmount...');
+      // Cancel all active streams on unmount
+      Object.values(activeStreams).forEach(controller => {
+        if (controller) {
+          controller.abort();
+        }
+      });
+    };
+  }, [activeStreams]);
+
+  // ✅ ENHANCED CONTEXT VALUE
   const contextValue = {
     // Core functionality
-    socket,
     currentSessionId,
     setSession,
-    joinSession,
     sendMessage,
     
     // Message management
     getCurrentSessionMessages,
     setSessionMessages,
     addMessageToSession,
+    updateMessageInSession,
+    removeMessageFromSession,
+    clearSessionMessages,
+    fetchSessionMessages,
     allMessages: messages,
     
-    // Real-time features
+    // Streaming features
     isConnected,
-    getTypingUsers,
-    typingUsers: getTypingUsers(),
+    isSessionStreaming,
+    cancelStream,
+    streamingStates,
+    activeStreams: Object.keys(activeStreams),
+    
+    // Connection status
+    connectionStatus: isConnected ? 'connected' : 'disconnected',
+    
+    // Utility functions
+    hasSession: (sessionId) => !!messages[sessionId],
+    getSessionMessageCount: (sessionId) => messages[sessionId]?.length || 0,
     
     // Debug info
     debug: {
@@ -302,16 +492,27 @@ export const ChatProvider = ({ children }) => {
       totalMessages: Object.values(messages).flat().length,
       connectionStatus: isConnected ? 'Connected' : 'Disconnected',
       currentSession: currentSessionId,
-      lastActivity: new Date().toLocaleTimeString()
+      activeStreams: Object.keys(activeStreams).length,
+      streamingSessions: Object.keys(streamingStates).filter(id => streamingStates[id]).length,
+      lastActivity: new Date().toLocaleTimeString(),
+      messagesPreview: Object.entries(messages).reduce((acc, [sessionId, msgs]) => {
+        acc[sessionId] = {
+          count: msgs.length,
+          lastMessage: msgs[msgs.length - 1]?.message?.substring(0, 50) || 'No messages'
+        };
+        return acc;
+      }, {})
     }
   };
 
-  console.log('🎯 [CHAT CONTEXT] Context value updated:', {
+  // ✅ DEBUG LOGGING
+  console.log('🎯 [CHAT CONTEXT] Context updated:', {
     currentSessionId,
     isConnected,
     totalSessions: Object.keys(messages).length,
     totalMessages: Object.values(messages).flat().length,
-    typingUsers: Object.keys(typingUsers).length
+    activeStreams: Object.keys(activeStreams).length,
+    streamingSessions: Object.keys(streamingStates).filter(id => streamingStates[id]).length
   });
 
   return (

@@ -1,6 +1,6 @@
 "use client";
-import React, { useState, useEffect, useRef } from "react";
-import { IconSend, IconRobot, IconUpload, IconMicrophone, IconCheck } from "@tabler/icons-react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { IconSend, IconRobot, IconUpload, IconMicrophone, IconCheck, IconRefresh } from "@tabler/icons-react";
 import axios from "axios";
 import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 import { useChat } from '../context/ChatContext';
@@ -16,29 +16,23 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const token = localStorage.getItem("token");
   const userId = JSON.parse(localStorage.getItem("user"))?._id;
 
-  // ✅ State declarations
+  // ✅ SIMPLIFIED STATE - Most state is now in ChatContext
   const [input, setInput] = useState("");
   const [file, setFile] = useState(null);
-  const [isTyping, setIsTyping] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [messages, setMessages] = useState([]);
-  const [currentSessionId, setCurrentSessionId] = useState(null);
-  const [isConnected, setIsConnected] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [lastProcessedSession, setLastProcessedSession] = useState(null);
-  const [aiServiceStatus, setAiServiceStatus] = useState('normal');
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [connectionError, setConnectionError] = useState(null);
   
-  // ✅ NEW STATE FOR TRACKING ANIMATIONS AND AI RESPONSE
+  // ✅ ANIMATION AND UI STATE
   const [animatedMessages, setAnimatedMessages] = useState(new Set());
   const [lastMessageCount, setLastMessageCount] = useState(0);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [isAiResponding, setIsAiResponding] = useState(false);
-  const [aiResponseStatus, setAiResponseStatus] = useState('idle'); // 'idle', 'thinking', 'responding', 'complete'
-  const [responseStartTime, setResponseStartTime] = useState(null);
   
   const messagesEndRef = useRef(null);
 
-  // ✅ CHAT CONTEXT SETUP (same as before)
+  // ✅ CHAT CONTEXT INTEGRATION
   let chatContext = null;
   let chatContextAvailable = false;
 
@@ -48,33 +42,96 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     console.log('✅ [CHAT DASHBOARD] ChatContext available:', {
       hasContext: !!chatContext,
       isConnected: chatContext?.isConnected,
-      currentSessionId: chatContext?.currentSessionId
+      currentSessionId: chatContext?.currentSessionId,
+      connectionStatus: chatContext?.connectionStatus
     });
   } catch (error) {
     console.log('⚠️ [CHAT DASHBOARD] ChatContext not available, using fallback mode:', error.message);
     chatContextAvailable = false;
   }
 
+  // ✅ DESTRUCTURE CONTEXT VALUES WITH FALLBACKS
   const {
-    currentSessionId: contextSessionId,
+    currentSessionId,
     setSession,
     sendMessage,
     getCurrentSessionMessages,
     setSessionMessages,
-    isConnected: contextIsConnected,
+    isConnected,
     connectionStatus,
     fetchSessionMessages,
-    isSessionStreaming
+    isSessionStreaming,
+    cancelStream,
+    streamingStates,
+    initializeContext,
+    reconnect,
+    debug
   } = chatContext || {};
 
-  const actualCurrentSessionId = chatContextAvailable ? contextSessionId : currentSessionId;
-  const actualIsConnected = chatContextAvailable ? (contextIsConnected ?? true) : isConnected;
-  const actualMessages = chatContextAvailable ? (getCurrentSessionMessages ? getCurrentSessionMessages() : []) : messages;
+  // ✅ FALLBACK MESSAGE FETCHING (when ChatContext is disconnected)
+  const [fallbackMessages, setFallbackMessages] = useState([]);
+  const [isFetchingFallback, setIsFetchingFallback] = useState(false);
 
-  const isAITyping = chatContextAvailable ? 
-    (isSessionStreaming ? isSessionStreaming(actualCurrentSessionId) : false) : 
-    (isTyping || isAiResponding);
+  // ✅ CALCULATE CONNECTION STATUS AND STREAMING STATE FIRST
+  const actualIsConnected = chatContextAvailable ? (isConnected ?? false) : false;
+  const isAIStreaming = chatContextAvailable ? (isSessionStreaming ? isSessionStreaming(currentSessionId) : false) : false;
 
+  // ✅ FALLBACK FETCH FUNCTION
+  const fetchMessagesViaHTTP = useCallback(async (sessionId) => {
+    if (!sessionId || !token) return;
+    
+    try {
+      setIsFetchingFallback(true);
+      console.log('📥 [FALLBACK] Fetching messages via HTTP for session:', sessionId);
+      
+      const response = await axios.get(`${backendUrl}/api/chat/session/${sessionId}/messages`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      });
+      
+      if (response.data.success) {
+        const messages = response.data.messages || [];
+        console.log('✅ [FALLBACK] Messages fetched via HTTP:', messages.length);
+        setFallbackMessages(messages);
+        return messages;
+      } else {
+        console.error('❌ [FALLBACK] Failed to fetch messages:', response.data.message);
+        setFallbackMessages([]);
+      }
+    } catch (error) {
+      console.error('❌ [FALLBACK] Error fetching messages via HTTP:', error);
+      setFallbackMessages([]);
+    } finally {
+      setIsFetchingFallback(false);
+    }
+  }, [backendUrl, token]);
+
+  // ✅ GET CURRENT MESSAGES (NOW actualIsConnected IS DEFINED)
+  const actualMessages = useMemo(() => {
+    if (chatContextAvailable && actualIsConnected && getCurrentSessionMessages) {
+      // Use ChatContext when connected
+      const contextMessages = getCurrentSessionMessages();
+      console.log('📋 [MESSAGES] Using ChatContext messages:', contextMessages.length);
+      return contextMessages;
+    } else {
+      // Use HTTP fallback when disconnected
+      console.log('📋 [MESSAGES] Using HTTP fallback messages:', fallbackMessages.length);
+      return fallbackMessages;
+    }
+  }, [chatContextAvailable, actualIsConnected, getCurrentSessionMessages, fallbackMessages]);
+
+  console.log('📋 [CHAT DASHBOARD] Current state:', {
+    selectedSession,
+    currentSessionId,
+    messagesCount: actualMessages.length,
+    isConnected: actualIsConnected,
+    connectionStatus,
+    isStreaming: isAIStreaming
+  });
+
+  // ✅ SPEECH RECOGNITION
   const {
     transcript,
     listening,
@@ -84,6 +141,59 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
 
   const [isManuallyEditing, setIsManuallyEditing] = useState(false);
   const [hasStoppedListening, setHasStoppedListening] = useState(false);
+
+  // ✅ CONNECTION RECOVERY
+  const handleReconnect = useCallback(async () => {
+    console.log('🔄 [RECONNECT] Attempting to reconnect...');
+    setConnectionError(null);
+    
+    if (chatContextAvailable && reconnect) {
+      try {
+        await reconnect();
+        console.log('✅ [RECONNECT] Reconnection successful');
+      } catch (error) {
+        console.error('❌ [RECONNECT] Reconnection failed:', error);
+        setConnectionError('Failed to reconnect. Please refresh the page.');
+      }
+    } else if (chatContextAvailable && initializeContext) {
+      try {
+        await initializeContext();
+        console.log('✅ [RECONNECT] Context reinitialized');
+      } catch (error) {
+        console.error('❌ [RECONNECT] Context reinitialization failed:', error);
+        setConnectionError('Failed to initialize. Please refresh the page.');
+      }
+    }
+  }, [chatContextAvailable, reconnect, initializeContext]);
+
+  // ✅ LOAD SESSION MESSAGES
+  const loadSessionMessages = useCallback(async (sessionId) => {
+    if (!sessionId || !chatContextAvailable || !fetchSessionMessages) {
+      console.log('⚠️ [LOAD MESSAGES] Cannot load - missing requirements:', {
+        sessionId: !!sessionId,
+        contextAvailable: chatContextAvailable,
+        fetchFunction: !!fetchSessionMessages
+      });
+      return;
+    }
+
+    try {
+      setIsLoadingMessages(true);
+      console.log('📥 [LOAD MESSAGES] Loading messages for session:', sessionId);
+      
+      const result = await fetchSessionMessages(sessionId);
+      
+      if (result.success) {
+        console.log('✅ [LOAD MESSAGES] Messages loaded successfully:', result.messages?.length || 0);
+      } else {
+        console.error('❌ [LOAD MESSAGES] Failed to load messages:', result.error);
+      }
+    } catch (error) {
+      console.error('❌ [LOAD MESSAGES] Error loading messages:', error);
+    } finally {
+      setIsLoadingMessages(false);
+    }
+  }, [chatContextAvailable, fetchSessionMessages]);
 
   // ✅ TRACK NEW MESSAGES FOR ANIMATION
   useEffect(() => {
@@ -111,14 +221,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       const newMessages = actualMessages.slice(lastMessageCount);
       console.log('✨ [ANIMATION] Animating new messages:', newMessages.map(m => m._id));
       
-      // Check if the new message is from AI and update response status
-      const lastMessage = newMessages[newMessages.length - 1];
-      if (lastMessage && lastMessage.sender === 'AI') {
-        setAiResponseStatus('complete');
-        setIsAiResponding(false);
-        console.log('✅ [AI RESPONSE] AI response received, stopping indicators');
-      }
-      
       // Don't add them to animated set immediately - let them animate first
       setTimeout(() => {
         setAnimatedMessages(prev => {
@@ -134,16 +236,13 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
 
   // ✅ RESET ANIMATION TRACKING WHEN SESSION CHANGES
   useEffect(() => {
-    console.log('🔄 [SESSION CHANGE] Resetting animation tracking for session:', actualCurrentSessionId);
+    console.log('🔄 [SESSION CHANGE] Resetting animation tracking for session:', currentSessionId);
     setAnimatedMessages(new Set());
     setIsInitialLoad(true);
     setLastMessageCount(0);
-    setIsAiResponding(false);
-    setAiResponseStatus('idle');
-    setResponseStartTime(null);
-  }, [actualCurrentSessionId]);
+  }, [currentSessionId]);
 
-  // ✅ ENHANCED USER MESSAGE COMPONENT WITH CONDITIONAL ANIMATION
+  // ✅ ENHANCED USER MESSAGE COMPONENT
   const UserMessage = ({ message, timestamp, status, optimistic, fileUrl, type, messageId, shouldAnimate }) => (
     <div className="flex justify-end mb-4">
       <div className={`max-w-xs lg:max-w-md xl:max-w-lg px-4 py-3 rounded-2xl shadow-sm transition-all duration-300 ${
@@ -199,62 +298,25 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     </div>
   );
 
-  // ✅ ENHANCED AI RESPONSE WRAPPER WITH CONDITIONAL ANIMATION
-  const AiResponseWrapper = ({ message, timestamp, fileUrl, fileType, messageId, shouldAnimate }) => (
+  // ✅ AI RESPONSE WRAPPER WITH STREAMING SUPPORT
+  const AiResponseWrapper = ({ message, timestamp, fileUrl, fileType, messageId, shouldAnimate, isStreaming = false }) => (
     <div className={shouldAnimate ? 'message-enter message-enter-active' : ''}>
       <AiResponse
-        isTyping={false}
+        isTyping={isStreaming}
         message={message}
-        animationType="dots"
+        animationType={isStreaming ? "thinking" : "dots"}
         showAnimation={true}
         timestamp={timestamp}
         fileUrl={fileUrl}
         fileType={fileType}
-        serviceStatus={aiServiceStatus}
         shouldAnimate={shouldAnimate}
+        customResponseText={isStreaming ? "AI is streaming response..." : null}
       />
     </div>
   );
 
-  // ✅ AI RESPONSE STATUS COMPONENT
-  const AiResponseStatusIndicator = () => {
-    const getElapsedTime = () => {
-      if (!responseStartTime) return 0;
-      return Math.floor((Date.now() - responseStartTime) / 1000);
-    };
-
-    const [elapsedTime, setElapsedTime] = useState(0);
-
-    useEffect(() => {
-      if (isAiResponding && responseStartTime) {
-        const timer = setInterval(() => {
-          setElapsedTime(getElapsedTime());
-        }, 1000);
-        return () => clearInterval(timer);
-      }
-    }, [isAiResponding, responseStartTime]);
-
-    if (!isAiResponding) return null;
-
-    return (
-      <AiResponse
-        isTyping={true}
-        message=""
-        animationType="thinking"
-        showAnimation={true}
-        customResponseText={
-          elapsedTime > 5 
-            ? `AI is processing your request... (${elapsedTime}s)`
-            : elapsedTime > 3
-            ? "AI is thinking deeply..."
-            : "AI is responding..."
-        }
-      />
-    );
-  };
-
-  // ✅ ALL YOUR EXISTING FUNCTIONS WITH ENHANCED AI RESPONSE TRACKING
-  const createNewSession = async () => {
+  // ✅ CREATE NEW SESSION
+  const createNewSession = useCallback(async () => {
     if (isCreatingSession) {
       console.log('⚠️ [CREATE SESSION] Already creating a session, skipping...');
       return;
@@ -282,6 +344,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         const newSession = response.data.session;
         console.log('✅ [CREATE SESSION] New session created:', newSession._id);
 
+        // ✅ NOTIFY COMPONENTS
         window.dispatchEvent(new CustomEvent('sessionCreated', {
           detail: { 
             session: newSession,
@@ -290,18 +353,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           }
         }));
 
-        window.dispatchEvent(new CustomEvent('newSessionCreated', {
-          detail: { 
-            session: newSession,
-            sessionId: newSession._id
-          }
-        }));
-
+        // ✅ SET SESSION IN CONTEXT
         if (chatContextAvailable && setSession) {
           setSession(newSession._id);
-        } else {
-          setCurrentSessionId(newSession._id);
-          setMessages([]);
         }
 
         if (onSessionUpdate) {
@@ -315,118 +369,14 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       }
     } catch (error) {
       console.error('❌ [CREATE SESSION] Failed:', error);
-      
-      window.dispatchEvent(new CustomEvent('sessionCreationFailed', {
-        detail: { error: error.message }
-      }));
-      
       return null;
     } finally {
       setIsCreatingSession(false);
     }
-  };
+  }, [isCreatingSession, backendUrl, userId, token, chatContextAvailable, setSession, onSessionUpdate]);
 
-  const fallbackSendMessage = async (messagePayload) => {
-    try {
-      // ✅ SET AI RESPONSE TRACKING
-      setIsTyping(true);
-      setIsAiResponding(true);
-      setAiResponseStatus('thinking');
-      setResponseStartTime(Date.now());
-      console.log('🤖 [AI RESPONSE] Starting AI response tracking');
-      
-      const response = await axios.post(
-        `${backendUrl}/api/chat/message`,
-        messagePayload,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          }
-        }
-      );
-
-      if (response.data.success) {
-        console.log('✅ [AI RESPONSE] Received response from backend');
-        setAiResponseStatus('responding');
-        
-        if (response.data.aiServiceStatus) {
-          setAiServiceStatus(response.data.aiServiceStatus);
-        }
-
-        const aiMessage = {
-          _id: `ai-${Date.now()}`,
-          message: response.data.response || response.data.message,
-          sender: 'AI',
-          type: 'text',
-          timestamp: new Date().toISOString()
-        };
-
-        setMessages(prev => [...prev, aiMessage]);
-        
-        // The useEffect will handle setting isAiResponding to false when new message is added
-        return { success: true };
-      } else {
-        throw new Error(response.data.error || 'Failed to send message');
-      }
-    } catch (error) {
-      console.error('❌ [FALLBACK SEND] Error:', error);
-      
-      // ✅ STOP AI RESPONSE TRACKING ON ERROR
-      setIsAiResponding(false);
-      setAiResponseStatus('idle');
-      setResponseStartTime(null);
-      
-      if (error.response?.data?.aiServiceStatus) {
-        setAiServiceStatus(error.response.data.aiServiceStatus);
-      } else if (error.message.includes('503') || error.message.includes('overloaded')) {
-        setAiServiceStatus('overloaded');
-      } else {
-        setAiServiceStatus('error');
-      }
-      
-      return { success: false, error: error.message };
-    } finally {
-      setIsTyping(false);
-    }
-  };
-
-  const fetchMessages = async (sessionId) => {
-    if (!sessionId || sessionId.startsWith('temp-') || sessionId.startsWith('new-')) {
-      console.log('⚠️ [FETCH MESSAGES] Skipping fetch for temp/new session:', sessionId);
-      return;
-    }
-
-    console.log('📤 [FETCH MESSAGES] Fetching messages for session:', sessionId);
-    
-    try {
-      const res = await axios.get(
-        `${backendUrl}/api/chat/messages/${sessionId}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      
-      const fetchedMessages = res.data || [];
-      console.log('✅ [FETCH MESSAGES] Fetched', fetchedMessages.length, 'messages');
-      
-      if (chatContextAvailable && setSessionMessages) {
-        setSessionMessages(sessionId, fetchedMessages);
-      } else {
-        setMessages(fetchedMessages);
-      }
-    } catch (err) {
-      console.error('❌ [FETCH MESSAGES] Failed:', err);
-      
-      if (chatContextAvailable && setSessionMessages) {
-        setSessionMessages(sessionId, []);
-      } else {
-        setMessages([]);
-      }
-    }
-  };
-
-  const updateSessionTitle = async (sessionId, firstMessage) => {
+  // ✅ UPDATE SESSION TITLE
+  const updateSessionTitle = useCallback(async (sessionId, firstMessage) => {
     if (!sessionId || !sessionId.match(/^[0-9a-fA-F]{24}$/)) {
       console.log('⚠️ [UPDATE TITLE] Invalid session ID:', sessionId);
       return;
@@ -437,15 +387,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         ? `${firstMessage.substring(0, 30)}...` 
         : firstMessage;
 
-      console.log('📝 [UPDATE TITLE] Updating session title immediately:', { sessionId, title });
-
-      window.dispatchEvent(new CustomEvent('sessionTitleUpdated', {
-        detail: { sessionId, title, timestamp: new Date().toISOString() }
-      }));
-
-      if (chatContextAvailable && chatContext.socket) {
-        chatContext.socket.emit('update-session-title', { sessionId, title });
-      }
+      console.log('📝 [UPDATE TITLE] Updating session title:', { sessionId, title });
 
       const res = await axios.patch(
         `${backendUrl}/api/chat/session/${sessionId}`,
@@ -459,22 +401,20 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       );
       
       const updatedSession = res.data.session;
-      console.log('✅ [UPDATE TITLE] Session title updated in database:', updatedSession);
+      console.log('✅ [UPDATE TITLE] Session title updated:', updatedSession);
       
+      // ✅ NOTIFY COMPONENTS
       window.dispatchEvent(new CustomEvent('sessionUpdated', {
         detail: { session: updatedSession }
       }));
       
     } catch (err) {
       console.error('❌ [UPDATE TITLE] Failed to update session title:', err);
-      
-      window.dispatchEvent(new CustomEvent('sessionTitleUpdateFailed', {
-        detail: { sessionId, error: err.message }
-      }));
     }
-  };
+  }, [backendUrl, token]);
 
-  const handleVoiceInput = () => {
+  // ✅ VOICE INPUT HANDLERS
+  const handleVoiceInput = useCallback(() => {
     if (!browserSupportsSpeechRecognition) {
       alert("Browser doesn't support speech recognition.");
       return;
@@ -495,9 +435,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         language: 'en-US'
       });
     }
-  };
+  }, [listening, browserSupportsSpeechRecognition, resetTranscript]);
 
-  const handleInputChange = (e) => {
+  const handleInputChange = useCallback((e) => {
     const newValue = e.target.value;
     setInput(newValue);
     
@@ -507,49 +447,46 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       SpeechRecognition.stopListening();
       setHasStoppedListening(true);
     }
-  };
+  }, [listening]);
 
-  const handleSubmit = async (e) => {
+  // ✅ ENHANCED SUBMIT HANDLER WITH STREAMING SUPPORT
+  const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
     if (!input.trim() && !file) return;
-    if (!actualCurrentSessionId) return;
+    if (!currentSessionId) return;
+    if (isAIStreaming) {
+      console.log('⚠️ [SUBMIT] AI is currently streaming, blocking new message');
+      return;
+    }
+
+    console.log('📤 [SUBMIT] Starting message submission:', {
+      sessionId: currentSessionId,
+      messageLength: input.trim().length,
+      hasFile: !!file,
+      isStreaming: isAIStreaming
+    });
 
     setIsManuallyEditing(false);
     setHasStoppedListening(false);
     
     const originalInput = input;
     const tempMessageId = `temp-${Date.now()}-${Math.random()}`;
-    
     const isFirstMessage = actualMessages.length === 0;
     
-    const optimisticMessage = {
-      _id: tempMessageId,
-      message: originalInput,
-      sender: userId,
-      type: file ? (file.type.startsWith("image") ? "image" : "document") : "text",
-      timestamp: new Date().toISOString(),
-      status: 'sending',
-      optimistic: true
-    };
-
-    if (chatContextAvailable && setSessionMessages) {
-      const currentMessages = getCurrentSessionMessages();
-      setSessionMessages(actualCurrentSessionId, [...currentMessages, optimisticMessage]);
-    } else {
-      setMessages(prev => [...prev, optimisticMessage]);
-    }
-
+    // ✅ CLEAR INPUT IMMEDIATELY
     setInput("");
     setFile(null);
     resetTranscript();
     const fileInput = document.getElementById("fileUpload");
     if (fileInput) fileInput.value = "";
 
+    // ✅ HANDLE FILE UPLOAD FIRST
     let fileUrl = null;
     let fileType = null;
 
     if (file) {
       try {
+        setIsUploading(true);
         const formData = new FormData();
         formData.append("file", file);
 
@@ -565,148 +502,73 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           fileType = file.type.startsWith("image") ? "image" : "document";
         }
       } catch (err) {
-        const updateMessage = (messages) => messages.map(msg => 
-          msg._id === tempMessageId 
-            ? { ...msg, status: 'failed', error: 'File upload failed' }
-            : msg
-        );
-
-        if (chatContextAvailable) {
-          const currentMessages = getCurrentSessionMessages();
-          setSessionMessages(actualCurrentSessionId, updateMessage(currentMessages));
-        } else {
-          setMessages(updateMessage);
-        }
-        return;
+        console.error('❌ [SUBMIT] File upload failed:', err);
+        // Continue without file
+      } finally {
+        setIsUploading(false);
       }
     }
 
-    const messagePayload = {
-      sessionId: actualCurrentSessionId,
-      senderId: userId,
+    // ✅ CREATE USER MESSAGE AND ADD TO CONTEXT
+    const userMessage = {
+      _id: tempMessageId,
       message: originalInput,
-      type: file ? fileType : "text",
+      sender: userId,
+      type: fileType || "text",
       fileUrl,
       fileType,
       timestamp: new Date().toISOString(),
+      status: 'sent'
+    };
+
+    // ✅ ADD USER MESSAGE TO SESSION
+    if (chatContextAvailable && setSessionMessages) {
+      const currentMessages = getCurrentSessionMessages();
+      setSessionMessages(currentSessionId, [...currentMessages, userMessage]);
+    }
+
+    // ✅ PREPARE MESSAGE PAYLOAD FOR CONTEXT
+    const messagePayload = {
+      sessionId: currentSessionId,
+      senderId: userId,
+      message: originalInput,
+      type: fileType || "text",
+      fileUrl,
+      fileType,
       tempId: tempMessageId
     };
 
     try {
-      let sendResult;
-      
+      // ✅ SEND MESSAGE THROUGH CONTEXT (HANDLES STREAMING)
       if (chatContextAvailable && sendMessage) {
-        sendResult = await sendMessage(messagePayload);
-      } else {
-        sendResult = await fallbackSendMessage(messagePayload);
-      }
-      
-      if (sendResult.success) {
-        const updateMessage = (messages) => messages.map(msg => 
-          msg._id === tempMessageId 
-            ? { ...msg, status: 'sent', optimistic: false }
-            : msg
-        );
-
-        if (chatContextAvailable) {
-          const currentMessages = getCurrentSessionMessages();
-          setSessionMessages(actualCurrentSessionId, updateMessage(currentMessages));
+        console.log('🌊 [SUBMIT] Sending message through streaming context...');
+        const result = await sendMessage(messagePayload);
+        
+        if (result.success) {
+          console.log('✅ [SUBMIT] Message sent successfully:', result);
+          
+          // ✅ UPDATE SESSION TITLE FOR FIRST MESSAGE
+          if (isFirstMessage && originalInput.trim()) {
+            updateSessionTitle(currentSessionId, originalInput.trim());
+          }
         } else {
-          setMessages(updateMessage);
-        }
-
-        if (isFirstMessage && originalInput.trim()) {
-          console.log('🏷️ [HANDLE SUBMIT] Updating title for first message:', originalInput.trim());
-          updateSessionTitle(actualCurrentSessionId, originalInput.trim());
+          console.error('❌ [SUBMIT] Failed to send message:', result.error);
         }
       } else {
-        throw new Error(sendResult.error || 'Failed to send message');
+        console.log('⚠️ [SUBMIT] ChatContext not available, cannot send message');
       }
     } catch (error) {
-      // ✅ STOP AI RESPONSE TRACKING ON ERROR
-      setIsAiResponding(false);
-      setAiResponseStatus('idle');
-      setResponseStartTime(null);
-      
-      const updateMessage = (messages) => messages.map(msg => 
-        msg._id === tempMessageId 
-          ? { ...msg, status: 'failed', error: error.message }
-          : msg
-      );
-
-      if (chatContextAvailable) {
-        const currentMessages = getCurrentSessionMessages();
-        setSessionMessages(actualCurrentSessionId, updateMessage(currentMessages));
-      } else {
-        setMessages(updateMessage);
-      }
+      console.error('❌ [SUBMIT] Error during message submission:', error);
     }
-  };
+  }, [input, file, currentSessionId, isAIStreaming, actualMessages.length, userId, resetTranscript, backendUrl, token, chatContextAvailable, setSessionMessages, getCurrentSessionMessages, sendMessage, updateSessionTitle]);
 
-  // ✅ ALL YOUR EXISTING useEffect HOOKS REMAIN THE SAME...
-  useEffect(() => {
-    if (chatContextAvailable) {
-      console.log('🔌 [CONNECTION STATUS] Context connection status:', {
-        contextIsConnected,
-        connectionStatus,
-        updating: contextIsConnected !== isConnected
-      });
-      
-      if (contextIsConnected !== isConnected) {
-        setIsConnected(contextIsConnected ?? true);
-      }
-    } else {
-      if (!isConnected) {
-        console.log('🔄 [CONNECTION STATUS] Fallback mode - setting connected');
-        setIsConnected(true);
-      }
-    }
-  }, [chatContextAvailable, contextIsConnected, connectionStatus]);
-
-  useEffect(() => {
-    if (!chatContextAvailable) {
-      const checkFallbackConnection = async () => {
-        try {
-          const response = await fetch(`${backendUrl}/api/health`, {
-            signal: AbortSignal.timeout(3000)
-          });
-          const connected = response.ok;
-          
-          if (connected !== isConnected) {
-            console.log('🔄 [FALLBACK CONNECTION] Status changed:', { from: isConnected, to: connected });
-            setIsConnected(connected);
-          }
-        } catch (error) {
-          console.log('⚠️ [FALLBACK CONNECTION] Check failed:', error.message);
-          if (isConnected) {
-            setIsConnected(false);
-          }
-        }
-      };
-
-      checkFallbackConnection();
-      const interval = setInterval(checkFallbackConnection, 15000);
-      return () => clearInterval(interval);
-    }
-  }, [chatContextAvailable, backendUrl, isConnected]);
-
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [actualMessages, isAiResponding]);
-
-  useEffect(() => {
-    if (listening && transcript && !isManuallyEditing && !hasStoppedListening) {
-      setInput(transcript);
-    }
-  }, [transcript, listening, isManuallyEditing, hasStoppedListening]);
-
+  // ✅ HANDLE SESSION SELECTION
   useEffect(() => {
     console.log('🔄 [SESSION SELECTION] Effect triggered:', {
       selectedSession,
       lastProcessedSession,
-      actualCurrentSessionId
+      currentSessionId,
+      isConnected: actualIsConnected
     });
 
     if (selectedSession === lastProcessedSession) {
@@ -716,52 +578,76 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     if (!selectedSession || selectedSession === 'null' || selectedSession === 'undefined') {
       console.log('🧹 [SESSION SELECTION] Clearing session - invalid or empty:', selectedSession);
       setLastProcessedSession(selectedSession);
-      
+      setFallbackMessages([]); // Clear fallback messages
+    
       if (chatContextAvailable && setSession) {
         setSession(null);
-      } else {
-        setCurrentSessionId(null);
-        setMessages([]);
       }
       return;
     }
 
-    if (selectedSession !== actualCurrentSessionId) {
-      console.log('🔗 [SESSION SELECTION] Switching to session:', selectedSession);
-      
-      setLastProcessedSession(selectedSession);
-      
-      if (chatContextAvailable && setSession) {
-        setSession(selectedSession);
-      } else {
-        setCurrentSessionId(selectedSession);
-      }
-      
-      if (selectedSession.match(/^[0-9a-fA-F]{24}$/)) {
-        fetchMessages(selectedSession);
-      } else {
-        if (chatContextAvailable && setSessionMessages) {
-          setSessionMessages(selectedSession, []);
-        } else {
-          setMessages([]);
-        }
-      }
-    } else {
-      setLastProcessedSession(selectedSession);
+    setLastProcessedSession(selectedSession);
+
+    // ✅ SET SESSION IN CONTEXT FIRST
+    if (chatContextAvailable && setSession) {
+      setSession(selectedSession);
+    }
+    
+    // ✅ ALWAYS FETCH VIA HTTP FALLBACK WHEN NOT CONNECTED OR DIFFERENT SESSION
+    if (!actualIsConnected || selectedSession !== currentSessionId) {
+      console.log('🔗 [SESSION SELECTION] Fetching messages via HTTP fallback for session:', selectedSession);
+      fetchMessagesViaHTTP(selectedSession);
     }
 
-  }, [selectedSession]);
+    // ✅ ALSO TRY CHATCONTEXT IF AVAILABLE AND CONNECTED
+    if (chatContextAvailable && fetchSessionMessages && actualIsConnected) {
+      console.log('🌊 [SESSION SELECTION] Also trying ChatContext fetch...');
+      loadSessionMessages(selectedSession);
+    }
+  }, [selectedSession, currentSessionId, lastProcessedSession, actualIsConnected, chatContextAvailable, setSession, fetchMessagesViaHTTP, loadSessionMessages, fetchSessionMessages]);
 
-  // ✅ UPDATED RETURN WITH CONDITIONAL ANIMATIONS AND AI RESPONSE STATUS
+  // ✅ ADD A SEPARATE EFFECT TO TRIGGER FALLBACK WHEN SESSION CHANGES BUT NO MESSAGES
+  useEffect(() => {
+    // If we have a session, context is disconnected, and no messages - trigger fallback
+    if (currentSessionId && !actualIsConnected && actualMessages.length === 0 && !isFetchingFallback) {
+      console.log('🚨 [FALLBACK TRIGGER] No messages and disconnected, fetching via HTTP:', currentSessionId);
+      fetchMessagesViaHTTP(currentSessionId);
+    }
+  }, [currentSessionId, actualIsConnected, actualMessages.length, isFetchingFallback, fetchMessagesViaHTTP]);
+
+  // ✅ AUTO-SCROLL WHEN MESSAGES CHANGE
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [actualMessages, isAIStreaming]);
+
+  // ✅ VOICE INPUT TRANSCRIPT HANDLING
+  useEffect(() => {
+    if (listening && transcript && !isManuallyEditing && !hasStoppedListening) {
+      setInput(transcript);
+    }
+  }, [transcript, listening, isManuallyEditing, hasStoppedListening]);
+
+  // ✅ CONNECTION STATUS MONITORING
+  useEffect(() => {
+    if (!actualIsConnected && chatContextAvailable) {
+      setConnectionError('Connection lost. Some features may not work properly.');
+    } else {
+      setConnectionError(null);
+    }
+  }, [actualIsConnected, chatContextAvailable]);
+
+  // ✅ MAIN RENDER
   return (
     <div className="flex flex-col h-screen bg-white">
-      {/* ✅ HEADER WITH AI RESPONSE STATUS */}
+      {/* ✅ ENHANCED HEADER WITH STREAMING STATUS */}
       <div className="border-b border-gray-200 p-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-800">
-            {actualCurrentSessionId ? (
-              actualCurrentSessionId.startsWith('temp-') ? 'New Chat (Creating...)' :
-              actualCurrentSessionId.startsWith('new-') ? 'New Chat (Preparing...)' :
+            {currentSessionId ? (
+              currentSessionId.startsWith('temp-') ? 'New Chat (Creating...)' :
+              currentSessionId.startsWith('new-') ? 'New Chat (Preparing...)' :
               'Chat Dashboard'
             ) : 'Chat Dashboard'}
           </h2>
@@ -774,35 +660,90 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             <div className={`text-xs px-2 py-1 rounded-full ${
               chatContextAvailable ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'
             }`}>
-              {chatContextAvailable ? '⚡ Enhanced' : '🔧 Basic'}
+              {chatContextAvailable ? '⚡ Streaming' : '🔧 Basic'}
             </div>
             {isCreatingSession && (
               <div className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800">
                 🔄 Creating...
               </div>
             )}
-            {/* ✅ AI RESPONSE STATUS INDICATOR */}
-            {isAiResponding && (
+            {isLoadingMessages && (
+              <div className="text-xs px-2 py-1 rounded-full bg-purple-100 text-purple-800">
+                📥 Loading...
+              </div>
+            )}
+            {isAIStreaming && (
               <div className="text-xs px-2 py-1 rounded-full bg-purple-100 text-purple-800 animate-pulse">
-                🤖 AI Responding...
+                🌊 AI Streaming...
+              </div>
+            )}
+            {/* ✅ RECONNECT BUTTON */}
+            {!actualIsConnected && chatContextAvailable && (
+              <button
+                onClick={handleReconnect}
+                className="text-xs px-2 py-1 rounded-full bg-orange-100 text-orange-800 hover:bg-orange-200 transition-colors"
+                title="Reconnect"
+              >
+                <IconRefresh size={12} className="inline mr-1" />
+                Reconnect
+              </button>
+            )}
+            {/* ✅ DEBUG INFO */}
+            {debug && (
+              <div className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
+                📊 {debug.totalMessages} msgs
               </div>
             )}
           </div>
         </div>
+        
+        {/* ✅ CONNECTION ERROR DISPLAY */}
+        {connectionError && (
+          <div className="mt-2 text-xs text-red-600 bg-red-50 px-2 py-1 rounded">
+            ⚠️ {connectionError}
+          </div>
+        )}
       </div>
 
-      {/* ✅ ENHANCED MESSAGES AREA WITH CONDITIONAL ANIMATIONS */}
+      {/* ✅ ENHANCED MESSAGES AREA */}
       <div className="flex-1 overflow-y-auto p-4">
-        {actualMessages.length === 0 ? (
+        {isLoadingMessages ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center space-y-2 animate-fade-in">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+              <p className="text-sm text-gray-500">
+                {isFetchingFallback ? 'Loading messages via HTTP...' : 'Loading messages...'}
+              </p>
+            </div>
+          </div>
+        ) : actualMessages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center space-y-2 animate-fade-in">
               <IconRobot size={48} className="mx-auto text-gray-400 animate-float" />
               <h3 className="text-lg font-semibold text-gray-700">
-                {isCreatingSession ? 'Setting up your new chat...' : 'Ready to chat!'}
+                {isCreatingSession ? 'Setting up your new chat...' : 
+                 !actualIsConnected ? 'Connection lost...' :
+                 'Ready to chat!'}
               </h3>
               <p className="text-sm text-gray-500">
-                {isCreatingSession ? 'Please wait a moment...' : 'Start typing your message or use voice input...'}
+                {isCreatingSession ? 'Please wait a moment...' : 
+                 !actualIsConnected ? 'Please reconnect to start chatting.' :
+                 'Start typing your message or use voice input...'}
               </p>
+              {chatContextAvailable && actualIsConnected && (
+                <p className="text-xs text-blue-600">
+                  ✨ Streaming enabled for real-time responses
+                </p>
+              )}
+              {!actualIsConnected && (
+                <button
+                  onClick={handleReconnect}
+                  className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                >
+                  <IconRefresh size={16} className="inline mr-2" />
+                  Reconnect
+                </button>
+              )}
             </div>
           </div>
         ) : (
@@ -814,7 +755,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
               return (
                 <div key={msg._id || index}>
                   {msg.sender === 'AI' ? (
-                    // ✅ AI RESPONSE WITH CONDITIONAL ANIMATION
+                    // ✅ AI RESPONSE WITH STREAMING SUPPORT
                     <AiResponseWrapper
                       message={msg.message}
                       timestamp={msg.timestamp}
@@ -822,9 +763,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                       fileType={msg.type}
                       messageId={msg._id}
                       shouldAnimate={shouldAnimate}
+                      isStreaming={msg.isStreaming}
                     />
                   ) : (
-                    // ✅ USER MESSAGE WITH CONDITIONAL ANIMATION
+                    // ✅ USER MESSAGE
                     <UserMessage
                       message={msg.message}
                       timestamp={msg.timestamp}
@@ -839,16 +781,13 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                 </div>
               );
             })}
-
-            {/* ✅ ENHANCED AI TYPING INDICATOR WITH STATUS */}
-            <AiResponseStatusIndicator />
             
             <div ref={messagesEndRef} />
           </div>
         )}
       </div>
 
-      {/* ✅ INPUT AREA REMAINS THE SAME */}
+      {/* ✅ ENHANCED INPUT AREA */}
       <div className="border-t border-gray-200 p-4">
         <form onSubmit={handleSubmit} className="flex gap-2 items-center">
           {/* File Upload */}
@@ -861,8 +800,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           />
           <label
             htmlFor="fileUpload"
-            className="cursor-pointer p-2 rounded-lg hover:bg-gray-100 smooth-transition"
-            title="Upload file"
+            className={`cursor-pointer p-2 rounded-lg transition-colors smooth-transition ${
+              !actualIsConnected ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'
+            }`}
+            title={!actualIsConnected ? "Cannot upload - disconnected" : "Upload file"}
           >
             <IconUpload className="text-gray-600" />
           </label>
@@ -871,19 +812,25 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           <button
             type="button"
             onClick={handleVoiceInput}
+            disabled={!browserSupportsSpeechRecognition || !actualIsConnected}
             className={`p-2 rounded-lg transition-all duration-200 smooth-transition ${
               listening 
                 ? 'bg-green-100 hover:bg-green-200 border-2 border-green-300 animate-pulse-glow' 
-                : 'hover:bg-gray-100'
+                : !actualIsConnected || !browserSupportsSpeechRecognition
+                  ? 'opacity-50 cursor-not-allowed'
+                  : 'hover:bg-gray-100'
             }`}
-            title={listening ? "Stop Recording" : "Start Voice Input"}
-            disabled={!browserSupportsSpeechRecognition}
+            title={
+              !actualIsConnected ? "Cannot use voice - disconnected" :
+              !browserSupportsSpeechRecognition ? "Voice not supported" :
+              listening ? "Stop Recording" : "Start Voice Input"
+            }
           >
             {listening ? (
               <IconCheck className="text-green-600 h-5 w-5" />
             ) : (
               <IconMicrophone className={`h-5 w-5 ${
-                browserSupportsSpeechRecognition ? 'text-gray-600' : 'text-gray-400'
+                browserSupportsSpeechRecognition && actualIsConnected ? 'text-gray-600' : 'text-gray-400'
               }`} />
             )}
           </button>
@@ -896,8 +843,8 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             placeholder={
               !actualIsConnected
                 ? "Connection lost - messages may not send..."
-                : isAiResponding
-                  ? "AI is responding... please wait"
+                : isAIStreaming
+                  ? "AI is streaming response... please wait"
                 : listening 
                   ? "Listening to your voice... (or type to override)" 
                   : browserSupportsSpeechRecognition 
@@ -907,27 +854,27 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             className={`flex-1 p-2 border rounded-lg focus:outline-none transition-colors smooth-transition ${
               !actualIsConnected
                 ? 'border-red-300 bg-red-50'
-                : isAiResponding
+                : isAIStreaming
                   ? 'border-purple-300 bg-purple-50'
                 : listening 
                   ? 'border-blue-300 bg-blue-50' 
                   : 'border-gray-300 focus:border-blue-500'
             }`}
-            disabled={isAiResponding}
+            disabled={isAIStreaming}
           />
 
           {/* Send Button */}
           <button
             type="submit"
             className={`px-4 py-2 rounded-lg transition-colors smooth-transition ${
-              !actualIsConnected || isAiResponding
+              !actualIsConnected || isAIStreaming
                 ? 'bg-gray-400 text-white cursor-not-allowed'
                 : 'bg-blue-500 text-white hover:bg-blue-600 hover:shadow-lg transform hover:scale-105'
             } disabled:opacity-50`}
-            disabled={(!input.trim() && !file) || isUploading || !actualIsConnected || isAiResponding}
+            disabled={(!input.trim() && !file) || isUploading || !actualIsConnected || isAIStreaming}
             title={
               !actualIsConnected ? "Cannot send - disconnected" : 
-              isAiResponding ? "Please wait for AI response" : 
+              isAIStreaming ? "Please wait for AI response" : 
               "Send message"
             }
           >
@@ -939,16 +886,22 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           </button>
         </form>
 
-        {/* ✅ ENHANCED STATUS MESSAGES WITH AI RESPONSE STATUS */}
+        {/* ✅ ENHANCED STATUS MESSAGES */}
         {!actualIsConnected && (
-          <div className="mt-2 text-xs text-red-600 bg-red-50 px-2 py-1 rounded animate-slide-up">
-            ⚠️ Connection lost. Messages may not be sent or received.
+          <div className="mt-2 text-xs text-red-600 bg-red-50 px-2 py-1 rounded animate-slide-up flex items-center justify-between">
+            <span>⚠️ Connection lost. Messages may not be sent or received.</span>
+            <button
+              onClick={handleReconnect}
+              className="ml-2 text-xs underline hover:no-underline"
+            >
+              Reconnect
+            </button>
           </div>
         )}
 
-        {isAiResponding && (
+        {isAIStreaming && (
           <div className="mt-2 text-xs text-purple-600 bg-purple-50 px-2 py-1 rounded animate-slide-up">
-            🤖 AI is processing your request...
+            🌊 AI is streaming response in real-time...
             <div className="typing-dots ml-2 inline-flex">
               <div className="typing-dot"></div>
               <div className="typing-dot"></div>
@@ -977,6 +930,15 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
               <div className="typing-dot"></div>
               <div className="typing-dot"></div>
             </div>
+          </div>
+        )}
+
+        {/* ✅ DEBUG INFO (DEV MODE) */}
+        {debug && process.env.NODE_ENV === 'development' && (
+          <div className="mt-2 text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded">
+            🐛 Debug: {debug.totalSessions} sessions, {debug.totalMessages} messages, {debug.activeStreams} active streams
+            <br />
+            Session: {currentSessionId || 'none'}, Messages: {actualMessages.length}, Connected: {actualIsConnected ? 'yes' : 'no'}
           </div>
         )}
       </div>

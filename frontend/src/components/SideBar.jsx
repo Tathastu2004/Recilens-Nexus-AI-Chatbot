@@ -1,8 +1,6 @@
 "use client";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef , useCallback} from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
-import { io } from "socket.io-client";
 import { Sidebar, SidebarBody, SidebarLink } from "./ui/sidebar.jsx";
 import {
   IconArrowLeft,
@@ -14,8 +12,7 @@ import {
 import { motion } from "motion/react";
 import { cn } from "../lib/utils.js";
 import { useUser } from "../context/UserContext.jsx";
-
-const socket = io(import.meta.env.VITE_SOCKET_URL || "http://localhost:3000");
+import { useChat } from "../context/ChatContext.jsx";
 
 const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete }) => {
   const [chats, setChats] = useState([]);
@@ -24,104 +21,108 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
   const [open, setOpen] = useState(true);
   const [hoveredChat, setHoveredChat] = useState(null);
   const [deletingChat, setDeletingChat] = useState(null);
-  const [creatingChat, setCreatingChat] = useState(false); // ✅ ADD STATE FOR CREATING
-  const operationInProgress = useRef(false); // ✅ PREVENT DUPLICATE OPERATIONS
-  const [refreshTrigger, setRefreshTrigger] = useState(0); // ✅ ADD REFRESH TRIGGER STATE
+  const [creatingChat, setCreatingChat] = useState(false);
+  const operationInProgress = useRef(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [error, setError] = useState(null);
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
+  const token = localStorage.getItem("token");
 
-  // ✅ OPTIMIZED FETCH CHATS WITH CACHING
-  const fetchChats = async (useCache = true) => {
+  // ✅ CHAT CONTEXT INTEGRATION
+  let chatContext = null;
+  let chatContextAvailable = false;
+
+  try {
+    chatContext = useChat();
+    chatContextAvailable = true;
+    console.log('✅ [SIDEBAR] ChatContext available:', {
+      hasContext: !!chatContext,
+      currentSessionId: chatContext?.currentSessionId,
+      isConnected: chatContext?.isConnected
+    });
+  } catch (error) {
+    console.log('⚠️ [SIDEBAR] ChatContext not available, using fallback mode:', error.message);
+    chatContextAvailable = false;
+  }
+
+  const {
+    currentSessionId,
+    setSession,
+    isConnected,
+    getSessionMessageCount,
+    isSessionStreaming,
+    debug
+  } = chatContext || {};
+
+  // ✅ ENHANCED FETCH CHATS WITH ERROR HANDLING
+  const fetchChats = useCallback(async (useCache = true) => {
     try {
-      const token = localStorage.getItem("token");
+      setError(null);
       
       if (!token) {
-        console.warn("⚠️ No authentication token found");
+        console.warn("⚠️ [SIDEBAR] No authentication token found");
         setChats([]);
         return;
       }
 
-      console.log("📤 [SideBar] Fetching sessions...");
+      console.log("📤 [SIDEBAR] Fetching sessions...");
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       const res = await fetch(`${backendUrl}/api/chat/sessions`, {
         headers: { 
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         },
-        cache: useCache ? 'default' : 'no-cache'
+        cache: useCache ? 'default' : 'no-cache',
+        signal: controller.signal
       });
 
+      clearTimeout(timeoutId);
+
       if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
+        if (res.status === 401) {
+          throw new Error("Authentication expired. Please log in again.");
+        } else if (res.status === 403) {
+          throw new Error("Access denied. Please check your permissions.");
+        } else {
+          throw new Error(`Failed to load chats (${res.status})`);
+        }
       }
 
       const data = await res.json();
-      console.log("📦 [SideBar] Chat sessions loaded:", data.length);
+      console.log("📦 [SIDEBAR] Chat sessions loaded:", data.length);
 
       if (Array.isArray(data)) {
-        setChats(data);
+        // ✅ SORT BY LAST ACTIVITY
+        const sortedChats = data.sort((a, b) => 
+          new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)
+        );
+        setChats(sortedChats);
       } else {
         setChats([]);
       }
     } catch (error) {
-      console.error("❌ Failed to fetch chat sessions:", error.message);
+      console.error("❌ [SIDEBAR] Failed to fetch chat sessions:", error.message);
+      
+      if (error.name === 'AbortError') {
+        setError('Request timed out. Please check your connection.');
+      } else {
+        setError(error.message || 'Failed to load chats');
+      }
       setChats([]);
     }
-  };
+  }, [backendUrl, token]);
 
   // ✅ INITIAL FETCH
   useEffect(() => {
     fetchChats();
-  }, [backendUrl]);
+  }, [fetchChats]);
 
-  // ✅ OPTIMIZED SOCKET LISTENERS - PREVENT DUPLICATES
-  useEffect(() => {
-    // ✅ IMMEDIATE UI UPDATE FOR NEW SESSIONS
-    const handleNewSession = (newSession) => {
-      console.log("🆕 [SideBar] New session via socket:", newSession);
-      setChats((prevChats) => {
-        // ✅ PREVENT DUPLICATES
-        const exists = prevChats.some(chat => chat._id === newSession._id);
-        if (exists) return prevChats;
-        return [newSession, ...prevChats];
-      });
-    };
-
-    // ✅ IMMEDIATE UI UPDATE FOR SESSION UPDATES
-    const handleSessionUpdate = (updatedSession) => {
-      console.log("📝 [SideBar] Session updated via socket:", updatedSession);
-      setChats((prevChats) => {
-        return prevChats.map((chat) =>
-          chat._id === updatedSession._id ? { ...chat, ...updatedSession } : chat
-        );
-      });
-    };
-
-    // ✅ IMMEDIATE UI UPDATE FOR DELETIONS
-    const handleSessionDelete = (deletedSessionId) => {
-      console.log("🗑️ [SideBar] Session deleted via socket:", deletedSessionId);
-      setChats((prevChats) => prevChats.filter(chat => chat._id !== deletedSessionId));
-      
-      // ✅ NOTIFY PARENT IF SELECTED SESSION WAS DELETED
-      if (selectedSessionId === deletedSessionId && onSessionDelete) {
-        onSessionDelete(deletedSessionId);
-      }
-    };
-
-    socket.on("new-session-created", handleNewSession);
-    socket.on("session-updated", handleSessionUpdate);
-    socket.on("session-deleted", handleSessionDelete);
-
-    return () => {
-      socket.off("new-session-created", handleNewSession);
-      socket.off("session-updated", handleSessionUpdate);
-      socket.off("session-deleted", handleSessionDelete);
-    };
-  }, [selectedSessionId, onSessionDelete]);
-
-  // ✅ OPTIMIZED NEW CHAT CREATION
+  // ✅ ENHANCED NEW CHAT CREATION WITH CHATCONTEXT INTEGRATION
   const handleNewChat = async () => {
-    // ✅ PREVENT MULTIPLE CONCURRENT OPERATIONS
     if (operationInProgress.current || creatingChat) {
       console.log('⚠️ [SIDEBAR] Operation already in progress, skipping...');
       return;
@@ -130,66 +131,84 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     try {
       operationInProgress.current = true;
       setCreatingChat(true);
+      setError(null);
 
-      const token = localStorage.getItem("token");
-      
       if (!token) {
-        console.error("❌ No authentication token found");
-        return;
+        throw new Error("No authentication token found");
       }
 
-      console.log("📤 [SideBar] Creating new chat session...");
+      console.log("📤 [SIDEBAR] Creating new chat session...");
 
-      const res = await axios.post(
-        `${backendUrl}/api/chat/session`,
-        { title: "New Chat" },
-        { 
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          },
-          timeout: 10000 // ✅ ADD TIMEOUT
-        }
-      );
+      const res = await fetch(`${backendUrl}/api/chat/session`, {
+        method: 'POST',
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ title: "New Chat" })
+      });
 
-      const newSession = res.data.session || res.data;
-      console.log("✅ [SideBar] New chat session created:", newSession._id);
+      if (!res.ok) {
+        throw new Error(`Failed to create session (${res.status})`);
+      }
+
+      const result = await res.json();
+      const newSession = result.session || result;
       
-      // ✅ IMMEDIATE UI UPDATE
+      console.log("✅ [SIDEBAR] New chat session created:", newSession._id);
+      
+      // ✅ ADD TO LOCAL STATE IMMEDIATELY
       setChats((prev) => {
-        // ✅ CHECK FOR DUPLICATES
         const exists = prev.some(chat => chat._id === newSession._id);
         if (exists) return prev;
-        return [newSession, ...prev];
+        
+        return [newSession, ...prev].sort((a, b) => 
+          new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)
+        );
       });
       
-      // ✅ EMIT SOCKET EVENT FOR OTHER CLIENTS
-      socket.emit("new-session-created", newSession);
+      // ✅ SET IN CHATCONTEXT
+      if (chatContextAvailable && setSession) {
+        setSession(newSession._id);
+      }
       
-      // ✅ NOTIFY PARENT TO SELECT NEW SESSION
+      // ✅ NOTIFY PARENT COMPONENT
       if (onSelectSession) {
         onSelectSession(newSession._id);
       }
 
-      // ✅ NOTIFY CHAT INTERFACE
+      // ✅ BROADCAST EVENTS FOR OTHER COMPONENTS
+      window.dispatchEvent(new CustomEvent('sessionCreated', { 
+        detail: { 
+          session: newSession,
+          sessionId: newSession._id, 
+          timestamp: new Date().toISOString()
+        }
+      }));
+      
       window.dispatchEvent(new CustomEvent('newSessionCreated', { 
         detail: { sessionId: newSession._id, session: newSession }
       }));
       
     } catch (err) {
-      console.error("❌ Failed to create chat:", err.message);
-      alert("Failed to create new chat. Please try again.");
+      console.error("❌ [SIDEBAR] Failed to create chat:", err.message);
+      setError(`Failed to create new chat: ${err.message}`);
+      
+      // ✅ BROADCAST ERROR EVENT
+      window.dispatchEvent(new CustomEvent('sessionCreationFailed', {
+        detail: { error: err.message }
+      }));
+      
     } finally {
       operationInProgress.current = false;
       setCreatingChat(false);
     }
   };
 
-  // ✅ OPTIMIZED DELETE CHAT
+  // ✅ ENHANCED DELETE CHAT WITH CHATCONTEXT INTEGRATION
   const handleDeleteChat = async (e, chatId) => {
     e.stopPropagation();
     
-    // ✅ PREVENT MULTIPLE OPERATIONS
     if (operationInProgress.current || deletingChat) {
       return;
     }
@@ -201,73 +220,165 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     try {
       operationInProgress.current = true;
       setDeletingChat(chatId);
-      
-      const token = localStorage.getItem("token");
+      setError(null);
       
       if (!token) {
-        console.error("❌ No authentication token found");
-        return;
+        throw new Error("No authentication token found");
       }
 
-      console.log("🗑️ [SideBar] Deleting chat session:", chatId);
+      console.log("🗑️ [SIDEBAR] Deleting chat session:", chatId);
 
-      // ✅ IMMEDIATE UI UPDATE (OPTIMISTIC)
+      // ✅ OPTIMISTIC UPDATE - REMOVE FROM UI IMMEDIATELY
       setChats((prev) => prev.filter(chat => chat._id !== chatId));
+      
+      // ✅ CLEAR FROM CHATCONTEXT IF IT'S CURRENT SESSION
+      if (chatContextAvailable && currentSessionId === chatId) {
+        setSession(null);
+      }
       
       // ✅ NOTIFY PARENT IMMEDIATELY
       if (selectedSessionId === chatId && onSessionDelete) {
         onSessionDelete(chatId);
       }
 
-      const res = await axios.delete(
-        `${backendUrl}/api/chat/session/${chatId}`,
-        { 
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          },
-          timeout: 10000
+      const res = await fetch(`${backendUrl}/api/chat/session/${chatId}`, {
+        method: 'DELETE',
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
         }
-      );
+      });
 
-      console.log("✅ Chat session deleted successfully");
+      if (!res.ok) {
+        throw new Error(`Failed to delete session (${res.status})`);
+      }
+
+      console.log("✅ [SIDEBAR] Chat session deleted successfully");
       
-      // ✅ EMIT SOCKET EVENT FOR OTHER CLIENTS
-      socket.emit("session-deleted", chatId);
+      // ✅ BROADCAST EVENTS
+      window.dispatchEvent(new CustomEvent('sessionDeleted', {
+        detail: { sessionId: chatId }
+      }));
       
     } catch (err) {
-      console.error("❌ Failed to delete chat:", err.message);
+      console.error("❌ [SIDEBAR] Failed to delete chat:", err.message);
+      setError(`Failed to delete chat: ${err.message}`);
       
-      // ✅ ROLLBACK ON ERROR
-      fetchChats(false); // Force refresh from server
-      alert("Failed to delete chat. Please try again.");
+      // ✅ ROLLBACK ON ERROR - REFRESH FROM SERVER
+      fetchChats(false);
+      
     } finally {
       operationInProgress.current = false;
       setDeletingChat(null);
     }
   };
 
-  // ✅ OPTIMIZED CHAT SELECTION
+  // ✅ ENHANCED CHAT SELECTION WITH CHATCONTEXT
   const handleSelectChat = (sessionId) => {
-    if (operationInProgress.current) return; // ✅ PREVENT DURING OPERATIONS
+    if (operationInProgress.current) return;
     
-    console.log("🎯 [SideBar] Selected chat session:", sessionId);
+    console.log("🎯 [SIDEBAR] Selected chat session:", sessionId);
+    
+    // ✅ SET IN CHATCONTEXT
+    if (chatContextAvailable && setSession) {
+      setSession(sessionId);
+    }
+    
+    // ✅ NOTIFY PARENT
     if (onSelectSession) {
       onSelectSession(sessionId);
     }
   };
 
+  // ✅ EVENT LISTENERS FOR GLOBAL UPDATES
+  useEffect(() => {
+    const handleSessionCreated = (event) => {
+      const { session } = event.detail;
+      console.log('🎉 [SIDEBAR] External session created:', session._id);
+      
+      setChats(prevChats => {
+        const exists = prevChats.some(chat => chat._id === session._id);
+        if (exists) return prevChats;
+        
+        return [session, ...prevChats].sort((a, b) => 
+          new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)
+        );
+      });
+      
+      setRefreshTrigger(prev => prev + 1);
+    };
+
+    const handleSessionUpdated = (event) => {
+      const { session } = event.detail;
+      console.log('📝 [SIDEBAR] External session updated:', session._id);
+      
+      setChats(prevChats => 
+        prevChats.map(chat => 
+          chat._id === session._id ? { ...chat, ...session } : chat
+        )
+      );
+    };
+
+    const handleSessionDeleted = (event) => {
+      const { sessionId } = event.detail;
+      console.log('🗑️ [SIDEBAR] External session deleted:', sessionId);
+      
+      setChats(prevChats => prevChats.filter(chat => chat._id !== sessionId));
+    };
+
+    const handleTitleUpdate = (event) => {
+      const { sessionId, title } = event.detail;
+      console.log('📝 [SIDEBAR] External title update:', { sessionId, title });
+      
+      setChats(prevChats => 
+        prevChats.map(chat => 
+          chat._id === sessionId 
+            ? { ...chat, title, updatedAt: new Date().toISOString() }
+            : chat
+        )
+      );
+    };
+
+    const handleSessionCreationFailed = (event) => {
+      const { error } = event.detail;
+      console.error('❌ [SIDEBAR] External session creation failed:', error);
+      setError(`Failed to create session: ${error}`);
+    };
+
+    // ✅ ADD ALL EVENT LISTENERS
+    const events = [
+      ['sessionCreated', handleSessionCreated],
+      ['newSessionCreated', handleSessionCreated],
+      ['sessionUpdated', handleSessionUpdated],
+      ['sessionDeleted', handleSessionDeleted],
+      ['sessionTitleUpdated', handleTitleUpdate],
+      ['sessionCreationFailed', handleSessionCreationFailed]
+    ];
+
+    events.forEach(([event, handler]) => {
+      window.addEventListener(event, handler);
+    });
+    
+    return () => {
+      events.forEach(([event, handler]) => {
+        window.removeEventListener(event, handler);
+      });
+    };
+  }, []);
+
+  // ✅ ENHANCED LOGOUT HANDLER
   const handleLogout = async () => {
     try {
       const result = await logoutUser();
-      console.log("🚪 Logout result:", result);
+      console.log("🚪 [SIDEBAR] Logout result:", result);
       navigate("/signup");
     } catch (error) {
-      console.error("❌ Logout error:", error);
+      console.error("❌ [SIDEBAR] Logout error:", error);
       navigate("/signup");
     }
   };
 
+  // ✅ ENHANCED LINKS WITH STATUS INDICATORS
   const links = [
     {
       label: creatingChat ? "Creating..." : "New Chat",
@@ -298,6 +409,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     },
   ];
 
+  // ✅ ENHANCED PROFILE PICTURE HANDLER
   const getProfilePictureUrl = () => {
     if (!user?.profilePicture) return "https://assets.aceternity.com/manu.png";
     if (user.profilePicture.startsWith("http")) return user.profilePicture;
@@ -305,6 +417,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     return `${baseUrl}${user.profilePicture}`;
   };
 
+  // ✅ ENHANCED TOGGLE HANDLER
   const handleToggle = (newOpenState) => {
     setOpen(newOpenState);
     if (onToggle) {
@@ -312,22 +425,31 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     }
   };
 
-  // ✅ ADD THIS TO YOUR SIDEBAR COMPONENT (if it exists)
-  useEffect(() => {
-    const handleSessionCreated = (event) => {
-      console.log('🎉 [SIDEBAR] New session created, updating UI');
-      // Force re-render or refresh session list
-      setRefreshTrigger(prev => prev + 1); // If you have a refresh trigger state
-    };
+  // ✅ FORMAT CHAT TITLE
+  const formatChatTitle = (chat) => {
+    if (chat.title && chat.title !== 'New Chat') {
+      return chat.title.length > 25 ? `${chat.title.substring(0, 25)}...` : chat.title;
+    }
+    return `Chat ${new Date(chat.createdAt || Date.now()).toLocaleDateString()}`;
+  };
 
-    window.addEventListener('sessionCreated', handleSessionCreated);
-    window.addEventListener('newSessionCreated', handleSessionCreated);
+  // ✅ FORMAT CHAT TIME
+  const formatChatTime = (chat) => {
+    const date = new Date(chat.updatedAt || chat.createdAt || Date.now());
+    const now = new Date();
+    const diffMs = now - date;
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     
-    return () => {
-      window.removeEventListener('sessionCreated', handleSessionCreated);
-      window.removeEventListener('newSessionCreated', handleSessionCreated);
-    };
-  }, []);
+    if (diffDays === 0) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } else if (diffDays === 1) {
+      return 'Yesterday';
+    } else if (diffDays < 7) {
+      return `${diffDays}d ago`;
+    } else {
+      return date.toLocaleDateString();
+    }
+  };
 
   return (
     <div className="h-screen w-full">
@@ -336,65 +458,128 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
           <div className="flex flex-1 flex-col overflow-x-hidden overflow-y-auto">
             <Logo />
 
+            {/* ✅ ENHANCED HEADER WITH STATUS */}
             <div className="mt-8 mb-4">
-              <SidebarLink
-                link={links[0]}
-                onClick={links[0].disabled ? undefined : links[0].onClick}
-                className={`transition-colors ${
-                  links[0].disabled 
-                    ? 'opacity-50 cursor-not-allowed' 
-                    : 'bg-primary/10 hover:bg-primary/20'
-                }`}
-              />
+              <div className="flex items-center justify-between mb-2">
+                <SidebarLink
+                  link={links[0]}
+                  onClick={links[0].disabled ? undefined : links[0].onClick}
+                  className={`transition-colors flex-1 ${
+                    links[0].disabled 
+                      ? 'opacity-50 cursor-not-allowed' 
+                      : 'bg-primary/10 hover:bg-primary/20'
+                  }`}
+                />
+                {/* ✅ CONNECTION STATUS */}
+                {chatContextAvailable && open && (
+                  <div className={`ml-2 text-xs px-2 py-1 rounded-full ${
+                    isConnected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                  }`}>
+                    {isConnected ? '🟢' : '🔴'}
+                  </div>
+                )}
+              </div>
+              
+              {/* ✅ ERROR DISPLAY */}
+              {error && open && (
+                <div className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded mb-2">
+                  {error}
+                  <button
+                    onClick={() => fetchChats(false)}
+                    className="ml-2 underline hover:no-underline"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
             </div>
 
+            {/* ✅ ENHANCED CHAT LIST */}
             <div className="flex-1 overflow-y-auto">
               {open && (
                 <>
-                  <div className="text-sm text-muted-foreground px-2 mb-2">
-                    Previous Chats ({chats.length})
+                  <div className="text-sm text-muted-foreground px-2 mb-2 flex items-center justify-between">
+                    <span>Previous Chats ({chats.length})</span>
+                    {chatContextAvailable && debug && (
+                      <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
+                        {debug.totalMessages} msgs
+                      </span>
+                    )}
                   </div>
+                  
                   <div className="space-y-2">
                     {chats.length === 0 ? (
-                      <div className="text-xs text-gray-500 px-2 py-1">
-                        No previous chats
+                      <div className="text-xs text-gray-500 px-2 py-4 text-center">
+                        <div className="mb-2">📱 No previous chats</div>
+                        <div className="text-xs">Start a conversation to begin</div>
                       </div>
                     ) : (
-                      chats.map((chat) => (
-                        <div
-                          key={chat._id}
-                          onClick={() => handleSelectChat(chat._id)}
-                          onMouseEnter={() => setHoveredChat(chat._id)}
-                          onMouseLeave={() => setHoveredChat(null)}
-                          className={`px-2 py-1 text-sm hover:bg-primary/10 rounded-md cursor-pointer transition-colors flex items-center justify-between group ${
-                            selectedSessionId === chat._id ? 'bg-primary/20 font-medium' : ''
-                          }`}
-                        >
-                          <span className="truncate">
-                            {chat.title || "Untitled Chat"}
-                          </span>
-                          {hoveredChat === chat._id && !operationInProgress.current && (
-                            <button
-                              onClick={(e) => handleDeleteChat(e, chat._id)}
-                              disabled={deletingChat === chat._id}
-                              className="ml-2 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                              title="Delete chat"
-                            >
-                              {deletingChat === chat._id ? (
-                                <div className="w-4 h-4 animate-spin rounded-full border-2 border-red-500 border-t-transparent"></div>
-                              ) : (
-                                <IconTrash className="h-4 w-4 text-red-500 hover:text-red-700" />
-                              )}
-                            </button>
-                          )}
-                        </div>
-                      ))
+                      chats.map((chat) => {
+                        const isCurrentSession = chatContextAvailable ? 
+                          (currentSessionId === chat._id) : 
+                          (selectedSessionId === chat._id);
+                        const isStreaming = chatContextAvailable ? 
+                          isSessionStreaming?.(chat._id) : false;
+                        const messageCount = chatContextAvailable ? 
+                          getSessionMessageCount?.(chat._id) : 0;
+
+                        return (
+                          <div
+                            key={chat._id}
+                            onClick={() => handleSelectChat(chat._id)}
+                            onMouseEnter={() => setHoveredChat(chat._id)}
+                            onMouseLeave={() => setHoveredChat(null)}
+                            className={`px-2 py-2 text-sm hover:bg-primary/10 rounded-md cursor-pointer transition-all duration-150 flex items-center justify-between group border ${
+                              isCurrentSession ? 'bg-primary/20 font-medium border-primary/30' : 'border-transparent'
+                            } ${isStreaming ? 'ring-2 ring-purple-200 animate-pulse' : ''}`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="truncate">
+                                  {formatChatTitle(chat)}
+                                </span>
+                                {isStreaming && (
+                                  <span className="text-xs text-purple-600 animate-pulse">🌊</span>
+                                )}
+                                {isCurrentSession && (
+                                  <span className="text-xs text-blue-600">●</span>
+                                )}
+                              </div>
+                              <div className="text-xs text-gray-500 mt-1 flex items-center justify-between">
+                                <span>{formatChatTime(chat)}</span>
+                                {chatContextAvailable && messageCount > 0 && (
+                                  <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
+                                    {messageCount}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            
+                            {/* ✅ ENHANCED DELETE BUTTON */}
+                            {hoveredChat === chat._id && !operationInProgress.current && (
+                              <button
+                                onClick={(e) => handleDeleteChat(e, chat._id)}
+                                disabled={deletingChat === chat._id}
+                                className="ml-2 p-1 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
+                                title="Delete chat"
+                              >
+                                {deletingChat === chat._id ? (
+                                  <div className="w-4 h-4 animate-spin rounded-full border-2 border-red-500 border-t-transparent"></div>
+                                ) : (
+                                  <IconTrash className="h-4 w-4 text-red-500 hover:text-red-700" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })
                     )}
                   </div>
                 </>
               )}
             </div>
 
+            {/* ✅ ENHANCED NAVIGATION LINKS */}
             <div className="mt-auto pt-4 border-t border-border">
               {links.slice(1).map((link, idx) => (
                 <SidebarLink
@@ -406,6 +591,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
             </div>
           </div>
 
+          {/* ✅ ENHANCED USER PROFILE SECTION */}
           <div>
             <SidebarLink
               link={{
@@ -421,11 +607,31 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
                         (e.target.src = "https://assets.aceternity.com/manu.png")
                       }
                     />
-                    <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border border-white"></div>
+                    <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white ${
+                      chatContextAvailable && isConnected ? 'bg-green-500' : 'bg-gray-400'
+                    }`}></div>
                   </div>
                 ),
               }}
             />
+            
+            {/* ✅ CONNECTION STATUS FOOTER */}
+            {open && chatContextAvailable && (
+              <div className="text-xs text-center mt-2 text-gray-500">
+                {chats.length} chat{chats.length !== 1 ? 's' : ''}
+                {debug && (
+                  <div className="mt-1">
+                    {debug.totalSessions} sessions • {debug.totalMessages} msgs
+                  </div>
+                )}
+                <div className="mt-1 flex items-center justify-center gap-1">
+                  <span className={`inline-block w-2 h-2 rounded-full ${
+                    isConnected ? 'bg-green-500' : 'bg-red-500'
+                  }`}></span>
+                  <span>{isConnected ? 'Streaming Active' : 'Disconnected'}</span>
+                </div>
+              </div>
+            )}
           </div>
         </SidebarBody>
       </Sidebar>
@@ -433,6 +639,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
   );
 };
 
+// ✅ ENHANCED LOGO COMPONENT
 export const Logo = () => {
   return (
     <a
