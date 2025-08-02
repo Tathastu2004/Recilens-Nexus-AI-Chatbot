@@ -2,6 +2,7 @@
 import express from 'express';
 import { verifyToken } from '../middleware/authMiddleware.js';
 import uploadChatFile, { handleUploadErrors, debugUploadRequest } from '../middleware/chatFileUpload.js';
+import ChatSession from '../models/ChatSession.js'; // ✅ ADD THIS MISSING IMPORT
 import {
   createChatSession,
   getUserChatSessions,
@@ -44,12 +45,13 @@ router.post(
   uploadFileHandler
 );
 
-// 🔹 Get individual session metadata
+// 🔹 Get individual session metadata - FIXED
 router.get('/session/:sessionId', verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
     const userId = req.user._id;
 
+    // ✅ Now ChatSession is properly imported
     const session = await ChatSession.findById(sessionId);
 
     if (!session) {
@@ -66,16 +68,22 @@ router.get('/session/:sessionId', verifyToken, async (req, res) => {
       });
     }
 
+    // ✅ Return the session data directly (not nested in success object)
     res.json({
-      success: true,
-      ...session.toObject()
+      _id: session._id,
+      user: session.user,
+      title: session.title,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      lastActivity: session.lastActivity
     });
 
   } catch (error) {
     console.error('❌ [GET SESSION] Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get session'
+      message: 'Failed to get session',
+      error: error.message
     });
   }
 });

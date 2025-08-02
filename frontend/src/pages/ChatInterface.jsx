@@ -4,6 +4,122 @@ import ChatDashBoard from '../components/ChatDashBoard';
 import { useTheme } from '../context/ThemeContext';
 import { IconSun, IconMoon, IconBrain, IconFileText, IconMicrophone } from '@tabler/icons-react';
 
+// ✅ MOVE SessionPersistence OUTSIDE the component - BEFORE the component definition
+const SessionPersistence = {
+  // Get user-specific storage key
+  getUserSessionKey: (userId) => `nexus_session_${userId}`,
+  
+  // Save session with metadata
+  saveSession: (userId, sessionId, metadata = {}) => {
+    if (!userId || !sessionId) return false;
+    
+    const sessionData = {
+      sessionId,
+      userId,
+      timestamp: Date.now(),
+      url: window.location.href,
+      metadata
+    };
+    
+    try {
+      // Save to multiple locations for redundancy
+      localStorage.setItem(SessionPersistence.getUserSessionKey(userId), JSON.stringify(sessionData));
+      localStorage.setItem('nexus_last_session', JSON.stringify(sessionData));
+      localStorage.setItem('currentChatSession', sessionId); // ChatDashBoard compatibility
+      
+      console.log('💾 [PERSISTENCE] Session saved:', { userId, sessionId, timestamp: sessionData.timestamp });
+      return true;
+    } catch (error) {
+      console.error('❌ [PERSISTENCE] Save failed:', error);
+      return false;
+    }
+  },
+  
+  // Load session with validation
+  loadSession: (userId) => {
+    if (!userId) return null;
+    
+    try {
+      // Try user-specific storage first
+      const userKey = SessionPersistence.getUserSessionKey(userId);
+      let sessionData = localStorage.getItem(userKey);
+      
+      if (!sessionData) {
+        // Fallback to global storage
+        sessionData = localStorage.getItem('nexus_last_session');
+      }
+      
+      if (!sessionData) return null;
+      
+      const parsed = JSON.parse(sessionData);
+      
+      // Validate session data
+      if (!parsed.sessionId || !parsed.userId || parsed.userId !== userId) {
+        console.log('⚠️ [PERSISTENCE] Invalid session data, clearing');
+        SessionPersistence.clearSession(userId);
+        return null;
+      }
+      
+      // Check if session is too old (7 days)
+      const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+      if (Date.now() - parsed.timestamp > maxAge) {
+        console.log('⚠️ [PERSISTENCE] Session expired, clearing');
+        SessionPersistence.clearSession(userId);
+        return null;
+      }
+      
+      console.log('✅ [PERSISTENCE] Session loaded:', { 
+        sessionId: parsed.sessionId, 
+        age: Math.round((Date.now() - parsed.timestamp) / 1000 / 60), 
+        minutes: 'minutes ago' 
+      });
+      
+      return parsed;
+    } catch (error) {
+      console.error('❌ [PERSISTENCE] Load failed:', error);
+      SessionPersistence.clearSession(userId);
+      return null;
+    }
+  },
+  
+  // Clear session data
+  clearSession: (userId) => {
+    try {
+      if (userId) {
+        localStorage.removeItem(SessionPersistence.getUserSessionKey(userId));
+      }
+      localStorage.removeItem('nexus_last_session');
+      localStorage.removeItem('currentChatSession');
+      console.log('🧹 [PERSISTENCE] Session cleared');
+    } catch (error) {
+      console.error('❌ [PERSISTENCE] Clear failed:', error);
+    }
+  },
+  
+  // Get session from URL
+  getSessionFromURL: () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('session');
+  },
+  
+  // Update URL with session
+  updateURL: (sessionId) => {
+    try {
+      const url = new URL(window.location);
+      if (sessionId) {
+        url.searchParams.set('session', sessionId);
+      } else {
+        url.searchParams.delete('session');
+      }
+      window.history.replaceState({}, '', url);
+      console.log('🔗 [PERSISTENCE] URL updated:', url.toString());
+    } catch (error) {
+      console.error('❌ [PERSISTENCE] URL update failed:', error);
+    }
+  }
+};
+
+// ✅ NOW the ChatInterface component can use SessionPersistence
 const ChatInterface = () => {
   const [selectedSession, setSelectedSession] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -12,9 +128,9 @@ const ChatInterface = () => {
   const [sessionVerified, setSessionVerified] = useState(false);
   const { isDark, toggleTheme } = useTheme();
 
-  // ✅ ENHANCED PERSISTENT SESSION RESTORATION WITH PROPER VERIFICATION
+  // ✅ REFRESH-PROOF SESSION RESTORATION - Now SessionPersistence is available
   useEffect(() => {
-    const initializeSession = async () => {
+    const restoreSessionOnRefresh = async () => {
       // Check authentication first
       const token = localStorage.getItem("token");
       const user = localStorage.getItem("user");
@@ -39,105 +155,72 @@ const ChatInterface = () => {
         return;
       }
 
-      // ✅ MULTIPLE SESSION RESTORATION SOURCES - PRIORITY ORDER
-      const urlParams = new URLSearchParams(window.location.search);
-      const urlSession = urlParams.get('session');
-      const userSessionKey = `lastSelectedSession_${parsedUser._id}`;
-      const localStorageSession = localStorage.getItem(userSessionKey);
-      const fallbackSession = localStorage.getItem('currentChatSession'); // ChatDashBoard persistence
+      console.log('🔄 [REFRESH] Starting session restoration for user:', parsedUser._id);
+
+      // ✅ MULTIPLE SOURCE SESSION DETECTION
+      const urlSession = SessionPersistence.getSessionFromURL();
+      const persistedSession = SessionPersistence.loadSession(parsedUser._id);
       
-      console.log('🔄 [CHAT INTERFACE] Session restoration sources:', {
-        userId: parsedUser._id,
+      console.log('🔍 [REFRESH] Session sources:', {
         urlSession,
-        localStorageSession,
-        fallbackSession,
-        currentUrl: window.location.href
+        persistedSessionId: persistedSession?.sessionId,
+        persistedAge: persistedSession ? Math.round((Date.now() - persistedSession.timestamp) / 1000 / 60) + ' min ago' : 'none'
       });
 
-      // ✅ DETERMINE SESSION TO RESTORE (URL takes highest priority)
-      let sessionToRestore = urlSession || localStorageSession || fallbackSession;
+      // ✅ DETERMINE SESSION TO RESTORE (URL takes priority)
+      let sessionToRestore = urlSession || persistedSession?.sessionId;
       
-      // Clean up old non-user-specific data
-      if (localStorage.getItem('lastSelectedSession')) {
-        console.log('🧹 [CHAT INTERFACE] Cleaning old non-user-specific session data');
-        localStorage.removeItem('lastSelectedSession');
-      }
-      
-      if (sessionToRestore && 
-          sessionToRestore !== 'null' && 
-          sessionToRestore !== 'undefined' && 
-          sessionToRestore.trim() !== '' &&
-          sessionToRestore.match(/^[0-9a-fA-F]{24}$/)) {
+      if (sessionToRestore && sessionToRestore.match(/^[0-9a-fA-F]{24}$/)) {
+        console.log('✅ [REFRESH] Valid session found, verifying:', sessionToRestore);
         
-        console.log('✅ [CHAT INTERFACE] Valid session found, verifying:', sessionToRestore);
-        
-        // ✅ VERIFY SESSION EXISTS AND BELONGS TO USER
-        const isValid = await verifyAndRestoreSession(sessionToRestore, parsedUser._id, userSessionKey);
+        // ✅ VERIFY SESSION WITH SERVER
+        const isValid = await verifySessionWithServer(sessionToRestore, parsedUser._id);
         
         if (isValid) {
-          console.log('✅ [CHAT INTERFACE] Session verified and restored:', sessionToRestore);
+          console.log('✅ [REFRESH] Session verified, restoring:', sessionToRestore);
+          
+          // ✅ RESTORE SESSION STATE
           setSelectedSession(sessionToRestore);
           setSessionVerified(true);
           
-          // ✅ ENSURE URL AND STORAGE ARE SYNCED
-          if (!urlSession) {
-            // Update URL if session came from localStorage
-            const url = new URL(window.location);
-            url.searchParams.set('session', sessionToRestore);
-            window.history.replaceState({}, '', url);
-          }
-          
-          // ✅ ENSURE USER-SPECIFIC STORAGE IS UPDATED
-          localStorage.setItem(userSessionKey, sessionToRestore);
-          localStorage.setItem('currentChatSession', sessionToRestore); // For ChatDashBoard
+          // ✅ SYNC ALL PERSISTENCE LOCATIONS
+          SessionPersistence.saveSession(parsedUser._id, sessionToRestore, {
+            restored: true,
+            source: urlSession ? 'url' : 'localStorage'
+          });
+          SessionPersistence.updateURL(sessionToRestore);
           
         } else {
-          console.log('❌ [CHAT INTERFACE] Session verification failed, clearing');
+          console.log('❌ [REFRESH] Session verification failed, clearing');
           setSelectedSession(null);
           setSessionVerified(false);
-          
-          // Clear invalid session from all sources
-          localStorage.removeItem(userSessionKey);
-          localStorage.removeItem('currentChatSession');
-          
-          // Remove from URL
-          const url = new URL(window.location);
-          url.searchParams.delete('session');
-          window.history.replaceState({}, '', url);
+          SessionPersistence.clearSession(parsedUser._id);
+          SessionPersistence.updateURL(null);
         }
       } else {
-        console.log('ℹ️ [CHAT INTERFACE] No valid session to restore');
+        console.log('ℹ️ [REFRESH] No valid session to restore');
         setSelectedSession(null);
         setSessionVerified(false);
-        
-        // Clean up URL if it has invalid session
-        if (urlSession) {
-          const url = new URL(window.location);
-          url.searchParams.delete('session');
-          window.history.replaceState({}, '', url);
-        }
+        SessionPersistence.clearSession(parsedUser._id);
+        SessionPersistence.updateURL(null);
       }
       
       setIsLoading(false);
     };
 
-    initializeSession();
+    restoreSessionOnRefresh();
   }, []); // ✅ Run only once on mount
 
   // ✅ ENHANCED SESSION VERIFICATION
-  const verifyAndRestoreSession = async (sessionId, userId, storageKey) => {
+  const verifySessionWithServer = async (sessionId, userId) => {
     try {
       const token = localStorage.getItem("token");
       const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
       
-      console.log('🔍 [CHAT INTERFACE] Verifying session:', {
-        sessionId,
-        userId,
-        backendUrl: backendUrl + '/api/chat/session/' + sessionId
-      });
+      console.log('🔍 [VERIFY] Checking session with server:', sessionId);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
       
       const res = await fetch(`${backendUrl}/api/chat/session/${sessionId}`, {
         headers: {
@@ -151,84 +234,179 @@ const ChatInterface = () => {
 
       if (res.ok) {
         const sessionData = await res.json();
-        console.log('📋 [CHAT INTERFACE] Session verification response:', {
+        const isValid = sessionData.user === userId;
+        
+        console.log('📋 [VERIFY] Server response:', {
           sessionId: sessionData._id,
           sessionUser: sessionData.user,
           currentUser: userId,
           title: sessionData.title,
-          isValid: sessionData.user === userId
+          isValid
         });
         
-        // ✅ VERIFY SESSION BELONGS TO CURRENT USER
-        if (sessionData.user === userId) {
-          return true;
-        } else {
-          console.log('⚠️ [CHAT INTERFACE] Session belongs to different user');
-          return false;
-        }
+        return isValid;
       } else {
-        console.log('⚠️ [CHAT INTERFACE] Session not found or invalid:', {
-          status: res.status,
-          statusText: res.statusText
-        });
+        console.log('⚠️ [VERIFY] Session not found:', res.status);
         return false;
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        console.error('⏱️ [CHAT INTERFACE] Session verification timeout');
+        console.error('⏱️ [VERIFY] Verification timeout');
       } else {
-        console.error('❌ [CHAT INTERFACE] Session verification failed:', error);
+        console.error('❌ [VERIFY] Verification failed:', error);
       }
       return false;
     }
   };
 
-  // ✅ ENHANCED SESSION SELECTION WITH PROPER PERSISTENCE
+  // ✅ ENHANCED SESSION PERSISTENCE UTILITY
+  const SessionPersistence = {
+    // Get user-specific storage key
+    getUserSessionKey: (userId) => `nexus_session_${userId}`,
+    
+    // Save session with metadata
+    saveSession: (userId, sessionId, metadata = {}) => {
+      if (!userId || !sessionId) return false;
+      
+      const sessionData = {
+        sessionId,
+        userId,
+        timestamp: Date.now(),
+        url: window.location.href,
+        metadata
+      };
+      
+      try {
+        // Save to multiple locations for redundancy
+        localStorage.setItem(SessionPersistence.getUserSessionKey(userId), JSON.stringify(sessionData));
+        localStorage.setItem('nexus_last_session', JSON.stringify(sessionData));
+        localStorage.setItem('currentChatSession', sessionId); // ChatDashBoard compatibility
+        
+        console.log('💾 [PERSISTENCE] Session saved:', { userId, sessionId, timestamp: sessionData.timestamp });
+        return true;
+      } catch (error) {
+        console.error('❌ [PERSISTENCE] Save failed:', error);
+        return false;
+      }
+    },
+    
+    // Load session with validation
+    loadSession: (userId) => {
+      if (!userId) return null;
+      
+      try {
+        // Try user-specific storage first
+        const userKey = SessionPersistence.getUserSessionKey(userId);
+        let sessionData = localStorage.getItem(userKey);
+        
+        if (!sessionData) {
+          // Fallback to global storage
+          sessionData = localStorage.getItem('nexus_last_session');
+        }
+        
+        if (!sessionData) return null;
+        
+        const parsed = JSON.parse(sessionData);
+        
+        // Validate session data
+        if (!parsed.sessionId || !parsed.userId || parsed.userId !== userId) {
+          console.log('⚠️ [PERSISTENCE] Invalid session data, clearing');
+          SessionPersistence.clearSession(userId);
+          return null;
+        }
+        
+        // Check if session is too old (7 days)
+        const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+        if (Date.now() - parsed.timestamp > maxAge) {
+          console.log('⚠️ [PERSISTENCE] Session expired, clearing');
+          SessionPersistence.clearSession(userId);
+          return null;
+        }
+        
+        console.log('✅ [PERSISTENCE] Session loaded:', { 
+          sessionId: parsed.sessionId, 
+          age: Math.round((Date.now() - parsed.timestamp) / 1000 / 60), 
+          minutes: 'minutes ago' 
+        });
+        
+        return parsed;
+      } catch (error) {
+        console.error('❌ [PERSISTENCE] Load failed:', error);
+        SessionPersistence.clearSession(userId);
+        return null;
+      }
+    },
+    
+    // Clear session data
+    clearSession: (userId) => {
+      try {
+        if (userId) {
+          localStorage.removeItem(SessionPersistence.getUserSessionKey(userId));
+        }
+        localStorage.removeItem('nexus_last_session');
+        localStorage.removeItem('currentChatSession');
+        console.log('🧹 [PERSISTENCE] Session cleared');
+      } catch (error) {
+        console.error('❌ [PERSISTENCE] Clear failed:', error);
+      }
+    },
+    
+    // Get session from URL
+    getSessionFromURL: () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      return urlParams.get('session');
+    },
+    
+    // Update URL with session
+    updateURL: (sessionId) => {
+      try {
+        const url = new URL(window.location);
+        if (sessionId) {
+          url.searchParams.set('session', sessionId);
+        } else {
+          url.searchParams.delete('session');
+        }
+        window.history.replaceState({}, '', url);
+        console.log('🔗 [PERSISTENCE] URL updated:', url.toString());
+      } catch (error) {
+        console.error('❌ [PERSISTENCE] URL update failed:', error);
+      }
+    }
+  };
+
+  // ✅ ENHANCED SESSION SELECTION WITH PERSISTENCE
   const handleSessionSelect = (sessionId) => {
-    console.log('🎯 [CHAT INTERFACE] Session selected:', {
-      sessionId,
-      previous: selectedSession,
-      isValid: sessionId && sessionId.match(/^[0-9a-fA-F]{24}$/)
-    });
+    console.log('🎯 [SELECT] Session selected:', sessionId);
     
     const user = JSON.parse(localStorage.getItem("user"));
-    const userSessionKey = `lastSelectedSession_${user._id}`;
     
-    // ✅ VALIDATE SESSION ID
     if (!sessionId || sessionId === 'null' || sessionId === 'undefined') {
-      console.log('⚠️ [CHAT INTERFACE] Invalid session ID, clearing selection');
+      console.log('⚠️ [SELECT] Clearing session selection');
       setSelectedSession(null);
       setSessionVerified(false);
-      
-      // Clear from storage and URL
-      localStorage.removeItem(userSessionKey);
-      localStorage.removeItem('currentChatSession');
-      
-      const url = new URL(window.location);
-      url.searchParams.delete('session');
-      window.history.replaceState({}, '', url);
+      SessionPersistence.clearSession(user._id);
+      SessionPersistence.updateURL(null);
       return;
     }
     
-    // ✅ UPDATE STATE AND PERSISTENCE
+    // ✅ VALIDATE SESSION ID FORMAT
+    if (!sessionId.match(/^[0-9a-fA-F]{24}$/)) {
+      console.log('❌ [SELECT] Invalid session ID format:', sessionId);
+      return;
+    }
+    
+    // ✅ UPDATE STATE AND PERSIST
     setSelectedSession(sessionId);
-    setSessionVerified(true); // ✅ Set verified immediately for valid sessions
+    setSessionVerified(true);
     
-    // ✅ PERSIST TO MULTIPLE LOCATIONS
-    localStorage.setItem(userSessionKey, sessionId);
-    localStorage.setItem('currentChatSession', sessionId); // For ChatDashBoard compatibility
-    
-    // ✅ UPDATE URL
-    const url = new URL(window.location);
-    url.searchParams.set('session', sessionId);
-    window.history.replaceState({}, '', url);
-    
-    console.log('✅ [CHAT INTERFACE] Session selection persisted:', {
-      sessionId,
-      url: url.toString(),
-      userStorage: userSessionKey,
-      globalStorage: 'currentChatSession'
+    // ✅ SAVE TO PERSISTENT STORAGE
+    SessionPersistence.saveSession(user._id, sessionId, {
+      selectedAt: Date.now(),
+      source: 'user_selection'
     });
+    SessionPersistence.updateURL(sessionId);
+    
+    console.log('✅ [SELECT] Session selection completed and persisted');
   };
 
   const handleSidebarToggle = (isOpen) => {
@@ -256,10 +434,9 @@ const ChatInterface = () => {
   // ✅ HANDLE BROWSER NAVIGATION (BACK/FORWARD)
   useEffect(() => {
     const handlePopState = () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const urlSession = urlParams.get('session');
+      const urlSession = SessionPersistence.getSessionFromURL();
       
-      console.log('🔙 [CHAT INTERFACE] Browser navigation detected:', {
+      console.log('🔙 [NAVIGATION] Browser navigation detected:', {
         urlSession,
         currentSelected: selectedSession
       });
@@ -321,16 +498,7 @@ const ChatInterface = () => {
       }
 
       const parsedUser = JSON.parse(user);
-      if (!parsedUser._id) {
-        setAuthError('Invalid user data. Please log in again.');
-        return;
-      }
-
-      console.log('🆕 [CHAT INTERFACE] Creating new chat session...');
-
-      // ✅ SHOW IMMEDIATE FEEDBACK
-      const tempSessionId = `temp-${Date.now()}`;
-      handleSessionSelect(tempSessionId);
+      console.log('🆕 [CREATE] Creating new chat session...');
 
       const response = await fetch(`${backendUrl}/api/chat/session`, {
         method: 'POST',
@@ -345,66 +513,34 @@ const ChatInterface = () => {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
       }
 
       const data = await response.json();
-      
-      // Handle both response formats
-      let sessionData;
-      if (data.success && data.session) {
-        sessionData = data.session;
-      } else if (data._id && data.title) {
-        sessionData = data;
-      } else {
-        throw new Error('Invalid response format from server');
-      }
-
+      const sessionData = data.success ? data.session : data;
       const newSessionId = sessionData._id;
-      console.log('✅ [CHAT INTERFACE] New session created:', newSessionId);
+      
+      console.log('✅ [CREATE] New session created:', newSessionId);
       
       // ✅ DISPATCH EVENTS
       window.dispatchEvent(new CustomEvent('sessionCreated', {
-        detail: { 
-          session: sessionData,
-          sessionId: newSessionId,
-          timestamp: new Date().toISOString()
-        }
+        detail: { session: sessionData, sessionId: newSessionId }
       }));
       
-      window.dispatchEvent(new CustomEvent('newSessionCreated', {
-        detail: { 
-          session: sessionData,
-          sessionId: newSessionId
-        }
-      }));
-      
-      // ✅ SELECT NEW SESSION
+      // ✅ SELECT AND PERSIST NEW SESSION
       handleSessionSelect(newSessionId);
       
       return sessionData;
       
     } catch (error) {
-      console.error('❌ [CHAT INTERFACE] Failed to create new chat:', error);
+      console.error('❌ [CREATE] Failed to create new chat:', error);
       
-      // Clear temp session
-      handleSessionSelect(null);
-      
-      // Handle specific errors
       if (error.message.includes('401')) {
         setAuthError('Session expired. Please log in again.');
         localStorage.clear();
       } else {
         alert(`Failed to create new chat: ${error.message}`);
       }
-      
-      window.dispatchEvent(new CustomEvent('sessionCreationFailed', {
-        detail: { 
-          error: error.message,
-          timestamp: new Date().toISOString()
-        }
-      }));
     }
   };
 
