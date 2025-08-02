@@ -19,17 +19,16 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   // ✅ THEME CONTEXT
   const { theme, isDark, toggleTheme, isTransitioning } = useTheme();
 
-  // ✅ SIMPLIFIED PERSISTENT SESSION STATE - No longer overrides parent
-  const [persistentSessionId, setPersistentSessionId] = useState(null);
+  // ✅ SIMPLIFIED SESSION STATE - Only use prop from parent
+  const [lastProcessedSession, setLastProcessedSession] = useState(null);
 
   // ✅ USE SELECTED SESSION AS PRIMARY SOURCE
-  const activeSessionId = selectedSession || persistentSessionId;
+  const activeSessionId = selectedSession || lastProcessedSession;
 
   // ✅ STATE MANAGEMENT
   const [input, setInput] = useState("");
   const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [lastProcessedSession, setLastProcessedSession] = useState(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [hasInitialized, setHasInitialized] = useState(false);
   
@@ -66,7 +65,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
 
   // ✅ CONNECTION STATUS
   const actualIsConnected = chatContextAvailable ? (isConnected ?? false) : false;
-  const isAIStreaming = chatContextAvailable ? (isSessionStreaming ? isSessionStreaming(persistentSessionId || currentSessionId) : false) : false;
+  const isAIStreaming = chatContextAvailable ? (isSessionStreaming ? isSessionStreaming(lastProcessedSession || currentSessionId) : false) : false;
 
   // ✅ PERSIST SESSION TO LOCALSTORAGE AND URL
   const persistSession = useCallback((sessionId) => {
@@ -74,7 +73,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     
     if (sessionId && sessionId !== 'null' && sessionId !== 'undefined') {
       localStorage.setItem('currentChatSession', sessionId);
-      setPersistentSessionId(sessionId);
+      setLastProcessedSession(sessionId);
       
       // Update URL without refreshing page
       const url = new URL(window.location);
@@ -84,7 +83,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       console.log('✅ Session persisted:', sessionId);
     } else {
       localStorage.removeItem('currentChatSession');
-      setPersistentSessionId(null);
+      setLastProcessedSession(null);
       
       // Remove session from URL
       const url = new URL(window.location);
@@ -100,44 +99,27 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     if (hasInitialized) return;
     
     const initializeSession = async () => {
-      console.log('🚀 Initializing ChatDashBoard...', {
-        selectedSession,
-        chatContextAvailable,
-        currentSessionId
-      });
+      console.log('🚀 [DASHBOARD] Initializing with session:', selectedSession);
       
-      // ✅ ONLY USE SELECTED SESSION FROM PARENT
       if (selectedSession && selectedSession !== 'null' && selectedSession !== 'undefined') {
-        console.log('🔄 Using session from parent:', selectedSession);
+        console.log('🔄 [DASHBOARD] Using session from parent:', selectedSession);
         
         // Sync with context if available
         if (chatContextAvailable && setSession && selectedSession !== currentSessionId) {
-          console.log('📡 Setting session in context:', selectedSession);
+          console.log('📡 [DASHBOARD] Setting session in context:', selectedSession);
           setSession(selectedSession);
         }
         
-        // Update local state
-        setPersistentSessionId(selectedSession);
-        
         // Fetch messages for the session
-        console.log('📨 Fetching messages for session:', selectedSession);
+        console.log('📨 [DASHBOARD] Fetching messages for session:', selectedSession);
         await fetchMessagesViaHTTP(selectedSession);
-        
-        // ✅ REMOVED: Don't call onSessionUpdate here - it causes conflicts
-        
-      } else {
-        console.log('❌ No valid session from parent');
-        setPersistentSessionId(null);
-        if (chatContextAvailable && setSession) {
-          setSession(null);
-        }
       }
       
       setHasInitialized(true);
     };
 
     initializeSession();
-  }, [selectedSession, chatContextAvailable, setSession, currentSessionId]); // ✅ Listen to selectedSession changes
+  }, [selectedSession, chatContextAvailable, setSession, currentSessionId]);
 
   // ✅ HANDLE BROWSER BACK/FORWARD
   useEffect(() => {
@@ -145,8 +127,8 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       const urlSession = new URLSearchParams(window.location.search).get('session');
       console.log('🔙 Browser navigation detected:', urlSession);
       
-      if (urlSession && urlSession !== persistentSessionId) {
-        setPersistentSessionId(urlSession);
+      if (urlSession && urlSession !== lastProcessedSession) {
+        setLastProcessedSession(urlSession);
         if (chatContextAvailable && setSession) {
           setSession(urlSession);
         }
@@ -158,7 +140,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [persistentSessionId, chatContextAvailable, setSession, onSessionUpdate]);
+  }, [lastProcessedSession, chatContextAvailable, setSession, onSessionUpdate]);
 
   // ✅ FALLBACK FETCH FUNCTION
   const fetchMessagesViaHTTP = useCallback(async (sessionId) => {
@@ -531,25 +513,19 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   }, [input, file, selectedSession, isAIStreaming, actualMessages.length, userId, resetTranscript, backendUrl, token, chatContextAvailable, setSessionMessages, getCurrentSessionMessages, sendMessage, updateSessionTitle]);
 
-  // ✅ HANDLE SESSION SELECTION FROM PARENT - Simplified
+  // ✅ HANDLE SESSION CHANGES FROM PARENT
   useEffect(() => {
     if (!hasInitialized) return;
     if (selectedSession === lastProcessedSession) return;
 
-    console.log('🔄 Processing session selection from parent:', { 
-      selectedSession, 
-      lastProcessedSession, 
-      persistentSessionId,
-      currentSessionId
+    console.log('🔄 [DASHBOARD] Processing session change:', { 
+      from: lastProcessedSession,
+      to: selectedSession
     });
 
-    // ✅ ALWAYS FOLLOW PARENT'S SESSION SELECTION
+    setLastProcessedSession(selectedSession);
+
     if (selectedSession && selectedSession !== 'null' && selectedSession !== 'undefined') {
-      console.log('✅ Following parent session selection:', selectedSession);
-      
-      setLastProcessedSession(selectedSession);
-      setPersistentSessionId(selectedSession);
-      
       // Sync with context
       if (chatContextAvailable && setSession && selectedSession !== currentSessionId) {
         setSession(selectedSession);
@@ -559,13 +535,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       if (!actualIsConnected || selectedSession !== currentSessionId) {
         fetchMessagesViaHTTP(selectedSession);
       }
-      
     } else {
-      console.log('❌ Parent cleared session selection');
-      setLastProcessedSession(null);
-      setPersistentSessionId(null);
+      // Clear state
       setFallbackMessages([]);
-      
       if (chatContextAvailable && setSession) {
         setSession(null);
       }
@@ -574,7 +546,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
 
   // ✅ FALLBACK TRIGGER - Only for active sessions without messages
   useEffect(() => {
-    const activeSessionId = persistentSessionId;
+    const activeSessionId = lastProcessedSession;
     
     if (activeSessionId && 
         !actualIsConnected && 
@@ -584,7 +556,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       console.log('🔄 Triggering fallback fetch for:', activeSessionId);
       fetchMessagesViaHTTP(activeSessionId);
     }
-  }, [persistentSessionId, actualIsConnected, actualMessages.length, isFetchingFallback, hasInitialized, fetchMessagesViaHTTP]);
+  }, [lastProcessedSession, actualIsConnected, actualMessages.length, isFetchingFallback, hasInitialized, fetchMessagesViaHTTP]);
 
   // ✅ AUTO-SCROLL
   useEffect(() => {
@@ -603,14 +575,14 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   // ✅ DEBUG LOGGING
   useEffect(() => {
     console.log('🔍 Session state:', {
-      persistentSessionId,
+      lastProcessedSession,
       currentSessionId,
       selectedSession,
       hasInitialized,
       actualIsConnected,
       messagesCount: actualMessages.length
     });
-  }, [persistentSessionId, currentSessionId, selectedSession, hasInitialized, actualIsConnected, actualMessages.length]);
+  }, [lastProcessedSession, currentSessionId, selectedSession, hasInitialized, actualIsConnected, actualMessages.length]);
 
   // ✅ MAIN RENDER WITH THEME INTEGRATION
   return (
