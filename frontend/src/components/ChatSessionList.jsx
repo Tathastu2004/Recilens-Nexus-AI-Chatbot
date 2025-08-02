@@ -1,7 +1,8 @@
 "use client";
 import React, { useEffect, useState, useCallback } from "react";
-import { IconPlus, IconTrash, IconEdit, IconCheck, IconX } from "@tabler/icons-react";
+import { IconPlus, IconTrash, IconEdit, IconCheck, IconX, IconRobot, IconMessage, IconBolt } from "@tabler/icons-react";
 import { useChat } from '../context/ChatContext';
+import { useTheme } from '../context/ThemeContext';
 
 const ChatSessionList = ({ onSelect }) => {
   const [sessions, setSessions] = useState([]);
@@ -14,6 +15,9 @@ const ChatSessionList = ({ onSelect }) => {
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
   const token = localStorage.getItem("token");
 
+  // ✅ THEME CONTEXT
+  const { isDark } = useTheme();
+
   // ✅ CHAT CONTEXT INTEGRATION
   let chatContext = null;
   let chatContextAvailable = false;
@@ -21,13 +25,7 @@ const ChatSessionList = ({ onSelect }) => {
   try {
     chatContext = useChat();
     chatContextAvailable = true;
-    console.log('✅ [SESSION LIST] ChatContext available:', {
-      hasContext: !!chatContext,
-      currentSessionId: chatContext?.currentSessionId,
-      totalSessions: chatContext?.debug?.totalSessions || 0
-    });
   } catch (error) {
-    console.log('⚠️ [SESSION LIST] ChatContext not available, using fallback mode:', error.message);
     chatContextAvailable = false;
   }
 
@@ -35,7 +33,6 @@ const ChatSessionList = ({ onSelect }) => {
     currentSessionId, 
     setSession, 
     isConnected,
-    getSessionMessageCount,
     isSessionStreaming,
     debug 
   } = chatContext || {};
@@ -50,10 +47,8 @@ const ChatSessionList = ({ onSelect }) => {
         throw new Error("No authentication token found");
       }
 
-      console.log('📤 [SESSION LIST] Fetching sessions...');
-
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000); // Increased timeout
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       const res = await fetch(`${backendUrl}/api/chat/sessions`, {
         headers: {
@@ -78,12 +73,9 @@ const ChatSessionList = ({ onSelect }) => {
       const data = await res.json();
       const sessionList = Array.isArray(data) ? data : [];
       
-      console.log('✅ [SESSION LIST] Fetched', sessionList.length, 'sessions');
       setSessions(sessionList);
       
     } catch (err) {
-      console.error('❌ [SESSION LIST] Fetch error:', err);
-      
       if (err.name === 'AbortError') {
         setError('Request timed out. Please check your connection.');
       } else {
@@ -100,8 +92,6 @@ const ChatSessionList = ({ onSelect }) => {
     if (loading) return;
     
     try {
-      console.log('🆕 [SESSION LIST] Creating new session...');
-      
       const response = await fetch(`${backendUrl}/api/chat/session`, {
         method: 'POST',
         headers: {
@@ -121,9 +111,7 @@ const ChatSessionList = ({ onSelect }) => {
       
       if (result.success || result._id) {
         const newSession = result.session || result;
-        console.log('✅ [SESSION LIST] New session created:', newSession._id);
         
-        // ✅ ADD TO LIST IMMEDIATELY
         setSessions(prevSessions => {
           const exists = prevSessions.some(s => s._id === newSession._id);
           if (exists) return prevSessions;
@@ -133,17 +121,14 @@ const ChatSessionList = ({ onSelect }) => {
           );
         });
         
-        // ✅ SET AS CURRENT SESSION
         if (chatContextAvailable && setSession) {
           setSession(newSession._id);
         }
         
-        // ✅ NOTIFY PARENT
         if (onSelect) {
           onSelect(newSession._id);
         }
         
-        // ✅ BROADCAST EVENT
         window.dispatchEvent(new CustomEvent('sessionCreated', {
           detail: { 
             session: newSession,
@@ -157,9 +142,6 @@ const ChatSessionList = ({ onSelect }) => {
         throw new Error('Invalid response from server');
       }
     } catch (error) {
-      console.error('❌ [SESSION LIST] Failed to create session:', error);
-      
-      // ✅ BROADCAST ERROR EVENT
       window.dispatchEvent(new CustomEvent('sessionCreationFailed', {
         detail: { error: error.message }
       }));
@@ -174,8 +156,6 @@ const ChatSessionList = ({ onSelect }) => {
     if (!sessionId || !newTitle.trim()) return false;
     
     try {
-      console.log('📝 [SESSION LIST] Updating session title:', { sessionId, newTitle });
-      
       const response = await fetch(`${backendUrl}/api/chat/session/${sessionId}`, {
         method: 'PATCH',
         headers: {
@@ -192,7 +172,6 @@ const ChatSessionList = ({ onSelect }) => {
       const result = await response.json();
       
       if (result.success) {
-        // ✅ UPDATE LOCAL STATE
         setSessions(prevSessions => 
           prevSessions.map(session => 
             session._id === sessionId 
@@ -201,20 +180,15 @@ const ChatSessionList = ({ onSelect }) => {
           )
         );
         
-        // ✅ BROADCAST EVENT
         window.dispatchEvent(new CustomEvent('sessionTitleUpdated', {
           detail: { sessionId, title: newTitle.trim() }
         }));
         
-        console.log('✅ [SESSION LIST] Title updated successfully');
         return true;
       } else {
         throw new Error('Invalid response from server');
       }
     } catch (error) {
-      console.error('❌ [SESSION LIST] Failed to update title:', error);
-      
-      // ✅ BROADCAST ERROR EVENT
       window.dispatchEvent(new CustomEvent('sessionTitleUpdateFailed', {
         detail: { sessionId, error: error.message }
       }));
@@ -229,7 +203,6 @@ const ChatSessionList = ({ onSelect }) => {
     
     try {
       setDeletingSessionId(sessionId);
-      console.log('🗑️ [SESSION LIST] Deleting session:', sessionId);
       
       const response = await fetch(`${backendUrl}/api/chat/session/${sessionId}`, {
         method: 'DELETE',
@@ -246,12 +219,10 @@ const ChatSessionList = ({ onSelect }) => {
       const result = await response.json();
       
       if (result.success) {
-        // ✅ REMOVE FROM LOCAL STATE
         setSessions(prevSessions => 
           prevSessions.filter(session => session._id !== sessionId)
         );
         
-        // ✅ CLEAR SESSION IF IT'S CURRENT
         if (sessionId === currentSessionId) {
           if (chatContextAvailable && setSession) {
             setSession(null);
@@ -261,18 +232,15 @@ const ChatSessionList = ({ onSelect }) => {
           }
         }
         
-        // ✅ BROADCAST EVENT
         window.dispatchEvent(new CustomEvent('sessionDeleted', {
           detail: { sessionId }
         }));
         
-        console.log('✅ [SESSION LIST] Session deleted successfully');
         return true;
       } else {
         throw new Error('Invalid response from server');
       }
     } catch (error) {
-      console.error('❌ [SESSION LIST] Failed to delete session:', error);
       setError(`Failed to delete chat: ${error.message}`);
       return false;
     } finally {
@@ -287,21 +255,16 @@ const ChatSessionList = ({ onSelect }) => {
 
   // ✅ EVENT LISTENERS FOR GLOBAL UPDATES
   useEffect(() => {
-    // ✅ SESSION UPDATE HANDLER
     const handleSessionUpdate = (event) => {
-      console.log('🔄 [SESSION LIST] Session updated, refreshing list:', event.detail);
       fetchSessions();
     };
 
-    // ✅ NEW SESSION CREATED HANDLER
     const handleSessionCreated = (event) => {
       const { session } = event.detail;
-      console.log('🆕 [SESSION LIST] External session created:', session._id);
       
       setSessions(prevSessions => {
         const exists = prevSessions.some(s => s._id === session._id);
         if (exists) {
-          console.log('⚠️ [SESSION LIST] Session already exists in list');
           return prevSessions;
         }
         
@@ -312,10 +275,8 @@ const ChatSessionList = ({ onSelect }) => {
       });
     };
 
-    // ✅ TITLE UPDATE HANDLER
     const handleTitleUpdate = (event) => {
       const { sessionId, title } = event.detail;
-      console.log('📝 [SESSION LIST] External title update:', { sessionId, title });
       
       setSessions(prevSessions => 
         prevSessions.map(session => 
@@ -326,35 +287,27 @@ const ChatSessionList = ({ onSelect }) => {
       );
     };
 
-    // ✅ TITLE UPDATE FAILURE HANDLER
     const handleTitleUpdateFailed = (event) => {
-      const { sessionId, error } = event.detail;
-      console.error('❌ [SESSION LIST] External title update failed:', { sessionId, error });
-      fetchSessions(); // Refresh from server
+      fetchSessions();
     };
 
-    // ✅ SESSION DELETION HANDLER
     const handleSessionDeleted = (event) => {
       const { sessionId } = event.detail;
-      console.log('🗑️ [SESSION LIST] External session deleted:', sessionId);
       
       setSessions(prevSessions => 
         prevSessions.filter(session => session._id !== sessionId)
       );
     };
 
-    // ✅ SESSION CREATION ERROR HANDLER
     const handleSessionCreationFailed = (event) => {
       const { error } = event.detail;
-      console.error('❌ [SESSION LIST] External session creation failed:', error);
       setError(`Failed to create session: ${error}`);
     };
 
-    // ✅ ADD ALL EVENT LISTENERS
     const events = [
       ['sessionUpdated', handleSessionUpdate],
       ['sessionCreated', handleSessionCreated],
-      ['newSessionCreated', handleSessionCreated], // Backward compatibility
+      ['newSessionCreated', handleSessionCreated],
       ['sessionTitleUpdated', handleTitleUpdate],
       ['sessionTitleUpdateFailed', handleTitleUpdateFailed],
       ['sessionDeleted', handleSessionDeleted],
@@ -372,29 +325,12 @@ const ChatSessionList = ({ onSelect }) => {
     };
   }, [fetchSessions]);
 
-  // ✅ ENHANCED FORMATTING FUNCTIONS
+  // ✅ FORMATTING FUNCTIONS - SIMPLIFIED (NO TIME/DATE)
   const formatSessionTitle = useCallback((session) => {
     if (session.title && session.title !== 'New Chat') {
       return session.title.length > 30 ? `${session.title.substring(0, 30)}...` : session.title;
     }
-    return `Chat ${new Date(session.createdAt).toLocaleDateString()}`;
-  }, []);
-
-  const formatSessionTime = useCallback((session) => {
-    const date = new Date(session.updatedAt || session.createdAt);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    
-    if (diffDays === 0) {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } else if (diffDays === 1) {
-      return 'Yesterday';
-    } else if (diffDays < 7) {
-      return `${diffDays} days ago`;
-    } else {
-      return date.toLocaleDateString();
-    }
+    return 'New Chat';
   }, []);
 
   // ✅ EDIT HANDLERS
@@ -420,198 +356,324 @@ const ChatSessionList = ({ onSelect }) => {
 
   // ✅ SESSION SELECTION HANDLER
   const handleSessionSelect = useCallback((sessionId) => {
-    console.log('📋 [SESSION LIST] Session selected:', sessionId);
-    
-    // ✅ VALIDATE SESSION ID
     if (!sessionId || typeof sessionId !== 'string' || sessionId.length !== 24) {
-      console.error('❌ [SESSION LIST] Invalid session ID:', sessionId);
       return;
     }
 
-    // ✅ SET IN CONTEXT
     if (chatContextAvailable && setSession) {
       setSession(sessionId);
     }
     
-    // ✅ NOTIFY PARENT
     if (onSelect) {
       onSelect(sessionId);
     }
   }, [chatContextAvailable, setSession, onSelect]);
 
-  // ✅ MAIN RENDER
+  // ✅ AI-THEMED DARK SIDEBAR RENDER
   return (
-    <div className="space-y-2">
-      {/* ✅ ENHANCED HEADER WITH CREATE BUTTON */}
-      <div className="flex items-center justify-between p-2 border-b border-gray-200">
-        <h3 className="text-sm font-semibold text-gray-700">Chat Sessions</h3>
-        <div className="flex items-center gap-2">
-          {chatContextAvailable && (
-            <div className={`text-xs px-2 py-1 rounded-full ${
-              isConnected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-            }`}>
-              {isConnected ? '🟢' : '🔴'}
+    <div className={`h-full flex flex-col transition-all duration-300 ${
+      isDark 
+        ? 'bg-gradient-to-b from-gray-800 via-gray-900 to-black' 
+        : 'bg-gradient-to-b from-gray-100 via-gray-200 to-gray-300'
+    }`}>
+      
+      {/* ✅ AI-STYLED HEADER */}
+      <div className={`p-4 border-b transition-all duration-300 ${
+        isDark 
+          ? 'border-gray-700/50 bg-gray-800/50 backdrop-blur-sm' 
+          : 'border-gray-300/50 bg-white/50 backdrop-blur-sm'
+      }`}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-6 h-6 bg-gradient-to-br from-purple-500 via-blue-500 to-cyan-500 rounded-lg flex items-center justify-center shadow-lg">
+              <IconMessage size={14} className="text-white" />
             </div>
-          )}
-          <button
-            onClick={createNewSession}
-            disabled={loading}
-            className="p-1 rounded-md hover:bg-blue-50 transition-colors disabled:opacity-50"
-            title="Create new chat"
-          >
-            <IconPlus size={16} className="text-blue-600" />
-          </button>
+            <h2 className={`text-sm font-bold transition-colors ${
+              isDark 
+                ? 'bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent' 
+                : 'bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent'
+            }`}>
+              Chat Sessions
+            </h2>
+          </div>
+          
+          {/* ✅ CONNECTION STATUS & CREATE BUTTON */}
+          <div className="flex items-center gap-2">
+            {chatContextAvailable && (
+              <div className={`text-xs px-2 py-1 rounded-full font-medium transition-all ${
+                isConnected 
+                  ? isDark 
+                    ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-500/30' 
+                    : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                  : isDark 
+                    ? 'bg-red-900/30 text-red-400 border border-red-500/30' 
+                    : 'bg-red-100 text-red-700 border border-red-200'
+              }`}>
+                {isConnected ? '⚡ Live' : '🔄 Sync'}
+              </div>
+            )}
+            
+            <button
+              onClick={createNewSession}
+              disabled={loading}
+              className={`p-2 rounded-xl transition-all duration-200 disabled:opacity-50 group ${
+                isDark 
+                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white shadow-lg hover:shadow-xl' 
+                  : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white shadow-md hover:shadow-lg'
+              } transform hover:scale-105`}
+              title="Create new chat"
+            >
+              <IconPlus size={14} className="group-hover:rotate-90 transition-transform duration-200" />
+            </button>
+          </div>
+        </div>
+        
+        {/* ✅ SESSIONS COUNT - SIMPLIFIED */}
+        <div className={`text-xs flex items-center gap-2 ${
+          isDark ? 'text-gray-400' : 'text-gray-600'
+        }`}>
+          <IconRobot size={12} />
+          <span>{sessions.length} conversations</span>
         </div>
       </div>
 
-      {/* ✅ ENHANCED LOADING STATE */}
-      {loading ? (
-        <div className="flex items-center justify-center py-6">
-          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
-          <span className="ml-2 text-sm text-gray-500">Loading sessions...</span>
-        </div>
-      ) : error ? (
-        <div className="text-sm text-red-500 p-3 bg-red-50 rounded-md border border-red-200">
-          <div className="font-medium flex items-center gap-2">
-            ⚠️ Error
+      {/* ✅ SESSIONS LIST */}
+      <div className="flex-1 overflow-hidden">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-8 px-4">
+            <div className="relative mb-4">
+              <div className={`w-8 h-8 rounded-full animate-spin ${
+                isDark 
+                  ? 'border-2 border-gray-700 border-t-blue-400' 
+                  : 'border-2 border-gray-300 border-t-blue-500'
+              }`}></div>
+              <div className="absolute inset-0 w-8 h-8 bg-gradient-to-r from-blue-500 via-purple-500 to-cyan-500 rounded-full animate-ping opacity-20"></div>
+            </div>
+            <span className={`text-sm font-medium ${
+              isDark ? 'text-gray-300' : 'text-gray-700'
+            }`}>Loading conversations...</span>
+            <span className={`text-xs mt-1 ${
+              isDark ? 'text-gray-500' : 'text-gray-500'
+            }`}>Syncing with AI brain</span>
           </div>
-          <div className="text-xs mt-1">{error}</div>
-          <button
-            onClick={fetchSessions}
-            className="text-xs mt-2 px-2 py-1 bg-red-100 hover:bg-red-200 rounded transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      ) : sessions.length === 0 ? (
-        <div className="text-sm text-gray-500 p-4 text-center">
-          <div className="mb-2">📱 No chat sessions yet</div>
-          <div className="text-xs mb-3">Start a conversation to begin</div>
-          <button
-            onClick={createNewSession}
-            className="text-xs px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded transition-colors"
-          >
-            Create New Chat
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-1 max-h-96 overflow-y-auto">
-          {sessions.map((session) => {
-            const isCurrentSession = session._id === currentSessionId;
-            const isStreaming = chatContextAvailable ? isSessionStreaming?.(session._id) : false;
-            const messageCount = chatContextAvailable ? getSessionMessageCount?.(session._id) : 0;
-            const isEditing = editingSessionId === session._id;
-            const isDeleting = deletingSessionId === session._id;
-
-            return (
-              <div
-                key={session._id}
-                className={`group relative px-3 py-2 text-sm rounded-md cursor-pointer border transition-all duration-150 ${
-                  isCurrentSession
-                    ? 'bg-blue-100 border-blue-300 text-blue-900'
-                    : 'hover:bg-gray-50 border-transparent hover:border-gray-200'
-                } ${isStreaming ? 'ring-2 ring-purple-200 animate-pulse' : ''}`}
-              >
-                <div className="flex items-center justify-between">
-                  <div 
-                    className="flex-1 min-w-0"
-                    onClick={() => !isEditing && !isDeleting && handleSessionSelect(session._id)}
-                  >
-                    {isEditing ? (
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="text"
-                          value={editingTitle}
-                          onChange={(e) => setEditingTitle(e.target.value)}
-                          className="flex-1 text-xs p-1 border rounded focus:outline-none focus:border-blue-500"
-                          placeholder="Session title..."
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') saveEdit();
-                            if (e.key === 'Escape') cancelEditing();
-                          }}
-                          autoFocus
-                        />
-                        <button
-                          onClick={saveEdit}
-                          className="p-1 text-green-600 hover:bg-green-50 rounded"
-                        >
-                          <IconCheck size={12} />
-                        </button>
-                        <button
-                          onClick={cancelEditing}
-                          className="p-1 text-red-600 hover:bg-red-50 rounded"
-                        >
-                          <IconX size={12} />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col">
-                        <div className="font-medium text-gray-800 truncate flex items-center gap-2">
-                          {formatSessionTitle(session)}
-                          {isStreaming && (
-                            <span className="text-xs text-purple-600 animate-pulse">🌊</span>
-                          )}
-                          {isCurrentSession && (
-                            <span className="text-xs text-blue-600">●</span>
-                          )}
-                        </div>
-                        <div className="text-xs text-gray-500 mt-1 flex items-center justify-between">
-                          <span>{formatSessionTime(session)}</span>
-                          {chatContextAvailable && messageCount > 0 && (
-                            <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
-                              {messageCount} msgs
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* ✅ ACTION BUTTONS */}
-                  {!isEditing && (
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          startEditing(session._id, session.title);
-                        }}
-                        className="p-1 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded"
-                        title="Edit title"
-                      >
-                        <IconEdit size={12} />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm('Are you sure you want to delete this chat session?')) {
-                            deleteSession(session._id);
-                          }
-                        }}
-                        disabled={isDeleting}
-                        className="p-1 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded disabled:opacity-50"
-                        title="Delete session"
-                      >
-                        {isDeleting ? (
-                          <div className="animate-spin rounded-full h-3 w-3 border-b border-red-600"></div>
-                        ) : (
-                          <IconTrash size={12} />
-                        )}
-                      </button>
-                    </div>
-                  )}
-                </div>
+        ) : error ? (
+          <div className={`m-4 p-4 rounded-xl border transition-all ${
+            isDark 
+              ? 'bg-red-900/20 border-red-500/30 text-red-400' 
+              : 'bg-red-50 border-red-200 text-red-600'
+          }`}>
+            <div className="font-medium flex items-center gap-2 mb-2">
+              <span className="text-lg">⚠️</span>
+              <span>Connection Error</span>
+            </div>
+            <div className="text-xs opacity-90 mb-3">{error}</div>
+            <button
+              onClick={fetchSessions}
+              className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                isDark 
+                  ? 'bg-red-500/20 hover:bg-red-500/30 text-red-300' 
+                  : 'bg-red-100 hover:bg-red-200 text-red-700'
+              }`}
+            >
+              Retry Connection
+            </button>
+          </div>
+        ) : sessions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 px-6 text-center">
+            <div className="relative mb-4">
+              <div className="w-16 h-16 bg-gradient-to-br from-purple-500 via-blue-500 to-cyan-500 rounded-2xl flex items-center justify-center shadow-xl">
+                <IconRobot size={28} className="text-white" />
               </div>
-            );
-          })}
-        </div>
-      )}
+              <div className="absolute -top-2 -right-2 w-6 h-6 bg-gradient-to-r from-green-400 to-emerald-500 rounded-full flex items-center justify-center">
+                <IconBolt size={12} className="text-white" />
+              </div>
+            </div>
+            <h3 className={`text-base font-bold mb-2 ${
+              isDark 
+                ? 'bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent' 
+                : 'bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent'
+            }`}>
+              Ready to Chat!
+            </h3>
+            <p className={`text-sm mb-4 leading-relaxed ${
+              isDark ? 'text-gray-400' : 'text-gray-600'
+            }`}>
+              No conversations yet. Start your first AI chat session and explore the possibilities.
+            </p>
+            <button
+              onClick={createNewSession}
+              className={`px-4 py-2 rounded-xl font-medium transition-all duration-200 ${
+                isDark 
+                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white' 
+                  : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
+              } shadow-lg hover:shadow-xl transform hover:scale-105`}
+            >
+              Start New Chat
+            </button>
+          </div>
+        ) : (
+          <div className="overflow-y-auto px-3 py-2 space-y-1">
+            {sessions.map((session, index) => {
+              const isCurrentSession = session._id === currentSessionId;
+              const isStreaming = chatContextAvailable ? isSessionStreaming?.(session._id) : false;
+              const isEditing = editingSessionId === session._id;
+              const isDeleting = deletingSessionId === session._id;
 
-      {/* ✅ DEBUG INFO (DEV MODE) */}
+              return (
+                <div
+                  key={session._id}
+                  className={`group relative rounded-xl transition-all duration-200 border ${
+                    isCurrentSession
+                      ? isDark 
+                        ? 'bg-gradient-to-r from-blue-900/40 to-purple-900/40 border-blue-500/50 shadow-lg shadow-blue-500/20' 
+                        : 'bg-gradient-to-r from-blue-100 to-purple-100 border-blue-300 shadow-md'
+                      : isDark 
+                        ? 'hover:bg-gray-700/30 border-gray-700/50 hover:border-gray-600/50' 
+                        : 'hover:bg-white/70 border-gray-200 hover:border-gray-300'
+                  } ${isStreaming ? 'animate-pulse ring-2 ring-purple-500/30' : ''}`}
+                >
+                  <div className="p-3">
+                    <div className="flex items-center justify-between">
+                      <div 
+                        className="flex-1 min-w-0 cursor-pointer"
+                        onClick={() => !isEditing && !isDeleting && handleSessionSelect(session._id)}
+                      >
+                        {isEditing ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              className={`flex-1 text-sm p-2 border rounded-lg focus:outline-none transition-colors ${
+                                isDark 
+                                  ? 'bg-gray-800 border-gray-600 text-gray-200 focus:border-blue-400' 
+                                  : 'bg-white border-gray-300 text-gray-800 focus:border-blue-500'
+                              }`}
+                              placeholder="Session title..."
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveEdit();
+                                if (e.key === 'Escape') cancelEditing();
+                              }}
+                              autoFocus
+                            />
+                            <button
+                              onClick={saveEdit}
+                              className={`p-1.5 rounded-lg transition-colors ${
+                                isDark 
+                                  ? 'text-emerald-400 hover:bg-emerald-500/20' 
+                                  : 'text-emerald-600 hover:bg-emerald-100'
+                              }`}
+                            >
+                              <IconCheck size={14} />
+                            </button>
+                            <button
+                              onClick={cancelEditing}
+                              className={`p-1.5 rounded-lg transition-colors ${
+                                isDark 
+                                  ? 'text-red-400 hover:bg-red-500/20' 
+                                  : 'text-red-600 hover:bg-red-100'
+                              }`}
+                            >
+                              <IconX size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${
+                              isCurrentSession 
+                                ? 'bg-gradient-to-r from-blue-400 to-purple-400 shadow-lg' 
+                                : isDark 
+                                  ? 'bg-gray-600' 
+                                  : 'bg-gray-400'
+                            }`}></div>
+                            <span className={`font-medium text-sm truncate transition-colors ${
+                              isCurrentSession 
+                                ? isDark 
+                                  ? 'text-blue-300' 
+                                  : 'text-blue-700'
+                                : isDark 
+                                  ? 'text-gray-200' 
+                                  : 'text-gray-800'
+                            }`}>
+                              {formatSessionTitle(session)}
+                            </span>
+                            {isStreaming && (
+                              <div className="flex items-center gap-1 ml-auto">
+                                <div className="w-1 h-1 bg-purple-400 rounded-full animate-pulse"></div>
+                                <div className="w-1 h-1 bg-blue-400 rounded-full animate-pulse" style={{animationDelay: '0.2s'}}></div>
+                                <div className="w-1 h-1 bg-cyan-400 rounded-full animate-pulse" style={{animationDelay: '0.4s'}}></div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* ✅ ACTION BUTTONS */}
+                      {!isEditing && (
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startEditing(session._id, session.title);
+                            }}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              isDark 
+                                ? 'text-gray-400 hover:text-blue-400 hover:bg-blue-500/20' 
+                                : 'text-gray-500 hover:text-blue-600 hover:bg-blue-100'
+                            }`}
+                            title="Edit title"
+                          >
+                            <IconEdit size={12} />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (confirm('Are you sure you want to delete this chat session?')) {
+                                deleteSession(session._id);
+                              }
+                            }}
+                            disabled={isDeleting}
+                            className={`p-1.5 rounded-lg transition-colors disabled:opacity-50 ${
+                              isDark 
+                                ? 'text-gray-400 hover:text-red-400 hover:bg-red-500/20' 
+                                : 'text-gray-500 hover:text-red-600 hover:bg-red-100'
+                            }`}
+                            title="Delete session"
+                          >
+                            {isDeleting ? (
+                              <div className={`animate-spin rounded-full h-3 w-3 border ${
+                                isDark ? 'border-red-400 border-t-transparent' : 'border-red-600 border-t-transparent'
+                              }`}></div>
+                            ) : (
+                              <IconTrash size={12} />
+                            )}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ✅ AI-THEMED FOOTER */}
       {debug && process.env.NODE_ENV === 'development' && (
-        <div className="mt-2 text-xs text-gray-500 bg-gray-50 p-2 rounded border-t">
-          🐛 Debug: {sessions.length} sessions loaded, current: {currentSessionId || 'none'}
-          <br />
-          Context: {debug.totalSessions} sessions, {debug.totalMessages} messages
+        <div className={`p-3 border-t text-xs transition-all ${
+          isDark 
+            ? 'border-gray-700/50 bg-gray-800/30 text-gray-500' 
+            : 'border-gray-300/50 bg-gray-100/50 text-gray-600'
+        }`}>
+          <div className="flex items-center gap-2 mb-1">
+            <IconBolt size={12} />
+            <span className="font-medium">Debug Mode</span>
+          </div>
+          <div className="space-y-0.5">
+            <div>Sessions: {sessions.length} loaded, current: {currentSessionId ? '✓' : '✗'}</div>
+            <div>Context: {debug.totalSessions} sessions, {debug.totalMessages} messages</div>
+          </div>
         </div>
       )}
     </div>

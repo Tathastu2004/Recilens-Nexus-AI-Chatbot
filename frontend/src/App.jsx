@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { UserProvider } from './context/UserContext';
 import { ChatProvider } from './context/ChatContext';
+import { ThemeProvider } from './context/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
 
 // Pages & Components
@@ -30,15 +31,15 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-100">
-          <div className="text-center p-8 bg-white rounded-lg shadow-lg">
-            <h1 className="text-2xl font-bold text-red-600 mb-4">Something went wrong</h1>
-            <p className="text-gray-600 mb-4">
+        <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
+          <div className="text-center p-8 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700">
+            <h1 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-4">Something went wrong</h1>
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
               {this.state.error?.message || 'An unexpected error occurred'}
             </p>
             <button 
               onClick={() => window.location.reload()} 
-              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
             >
               Reload Page
             </button>
@@ -54,54 +55,56 @@ class ErrorBoundary extends React.Component {
 function App() {
   return (
     <ErrorBoundary>
-      <UserProvider>
-        <ChatProvider>
-          <Router>
-            <div className="App">
-              <Routes>
-                {/* Public Routes (No ChatProvider needed) */}
-                <Route path="/" element={<Navigate to="/signup" replace />} />
-                <Route path="/signup" element={<SignUpPage />} />
-                <Route path="/reset-password" element={<ResetPasswordPage />} />
-                <Route path="/verify-email" element={<VerifyEmailPage />} />
+      <ThemeProvider>
+        <UserProvider>
+          <ChatProvider>
+            <Router>
+              <div className="App min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300">
+                <Routes>
+                  {/* Public Routes */}
+                  <Route path="/" element={<Navigate to="/signup" replace />} />
+                  <Route path="/signup" element={<SignUpPage />} />
+                  <Route path="/reset-password" element={<ResetPasswordPage />} />
+                  <Route path="/verify-email" element={<VerifyEmailPage />} />
 
-                {/* ✅ Chat Route with ChatProvider - This is your main chat interface */}
-                <Route
-                  path="/chat"
-                  element={
-                    <ProtectedRoute clientOnly={true}>
-                      <ChatInterface />
-                    </ProtectedRoute>
-                  }
-                />
+                  {/* ✅ Chat Route with ChatProvider */}
+                  <Route
+                    path="/chat"
+                    element={
+                      <ProtectedRoute clientOnly={true}>
+                        <ChatInterface />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* ✅ Optional: Dashboard route (if you want a separate dashboard) */}
-                <Route
-                  path="/dashboard"
-                  element={
-                    <ProtectedRoute clientOnly={true}>
-                      <ChatInterface />
-                    </ProtectedRoute>
-                  }
-                />
+                  {/* ✅ Optional: Dashboard route */}
+                  <Route
+                    path="/dashboard"
+                    element={
+                      <ProtectedRoute clientOnly={true}>
+                        <ChatInterface />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* Profile Page (No ChatProvider needed) */}
-                <Route
-                  path="/profile"
-                  element={
-                    <ProtectedRoute>
-                      <Profile />
-                    </ProtectedRoute>
-                  }
-                />
+                  {/* Profile Page */}
+                  <Route
+                    path="/profile"
+                    element={
+                      <ProtectedRoute>
+                        <Profile />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* Fallback route */}
-                <Route path="*" element={<Navigate to="/signup" replace />} />
-              </Routes>
-            </div>
-          </Router>
-        </ChatProvider>
-      </UserProvider>
+                  {/* Fallback route */}
+                  <Route path="*" element={<Navigate to="/signup" replace />} />
+                </Routes>
+              </div>
+            </Router>
+          </ChatProvider>
+        </UserProvider>
+      </ThemeProvider>
     </ErrorBoundary>
   );
 }

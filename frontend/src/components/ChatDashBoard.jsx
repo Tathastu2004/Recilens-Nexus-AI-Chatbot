@@ -1,13 +1,13 @@
 "use client";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { IconSend, IconRobot, IconUpload, IconMicrophone, IconCheck, IconRefresh } from "@tabler/icons-react";
+import { IconSend, IconRobot, IconUpload, IconMicrophone, IconCheck, IconPaperclip, IconUser, IconSun, IconMoon } from "@tabler/icons-react";
 import axios from "axios";
 import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 import { useChat } from '../context/ChatContext';
+import { useTheme } from '../context/ThemeContext';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import AiResponse from './AiResponse';
 import '../styles/animations.css';
 
 const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) => {
@@ -16,19 +16,22 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const token = localStorage.getItem("token");
   const userId = JSON.parse(localStorage.getItem("user"))?._id;
 
-  // ✅ SIMPLIFIED STATE - Most state is now in ChatContext
+  // ✅ THEME CONTEXT
+  const { theme, isDark, toggleTheme, isTransitioning } = useTheme();
+
+  // ✅ SIMPLIFIED PERSISTENT SESSION STATE - No longer overrides parent
+  const [persistentSessionId, setPersistentSessionId] = useState(null);
+
+  // ✅ USE SELECTED SESSION AS PRIMARY SOURCE
+  const activeSessionId = selectedSession || persistentSessionId;
+
+  // ✅ STATE MANAGEMENT
   const [input, setInput] = useState("");
   const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [lastProcessedSession, setLastProcessedSession] = useState(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  const [connectionError, setConnectionError] = useState(null);
-  
-  // ✅ ANIMATION AND UI STATE
-  const [animatedMessages, setAnimatedMessages] = useState(new Set());
-  const [lastMessageCount, setLastMessageCount] = useState(0);
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [hasInitialized, setHasInitialized] = useState(false);
   
   const messagesEndRef = useRef(null);
 
@@ -39,18 +42,11 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   try {
     chatContext = useChat();
     chatContextAvailable = true;
-    console.log('✅ [CHAT DASHBOARD] ChatContext available:', {
-      hasContext: !!chatContext,
-      isConnected: chatContext?.isConnected,
-      currentSessionId: chatContext?.currentSessionId,
-      connectionStatus: chatContext?.connectionStatus
-    });
   } catch (error) {
-    console.log('⚠️ [CHAT DASHBOARD] ChatContext not available, using fallback mode:', error.message);
     chatContextAvailable = false;
   }
 
-  // ✅ DESTRUCTURE CONTEXT VALUES WITH FALLBACKS
+  // ✅ DESTRUCTURE CONTEXT VALUES
   const {
     currentSessionId,
     setSession,
@@ -58,31 +54,123 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     getCurrentSessionMessages,
     setSessionMessages,
     isConnected,
-    connectionStatus,
     fetchSessionMessages,
     isSessionStreaming,
-    cancelStream,
-    streamingStates,
     initializeContext,
-    reconnect,
-    debug
+    reconnect
   } = chatContext || {};
 
-  // ✅ FALLBACK MESSAGE FETCHING (when ChatContext is disconnected)
+  // ✅ FALLBACK MESSAGE FETCHING
   const [fallbackMessages, setFallbackMessages] = useState([]);
   const [isFetchingFallback, setIsFetchingFallback] = useState(false);
 
-  // ✅ CALCULATE CONNECTION STATUS AND STREAMING STATE FIRST
+  // ✅ CONNECTION STATUS
   const actualIsConnected = chatContextAvailable ? (isConnected ?? false) : false;
-  const isAIStreaming = chatContextAvailable ? (isSessionStreaming ? isSessionStreaming(currentSessionId) : false) : false;
+  const isAIStreaming = chatContextAvailable ? (isSessionStreaming ? isSessionStreaming(persistentSessionId || currentSessionId) : false) : false;
+
+  // ✅ PERSIST SESSION TO LOCALSTORAGE AND URL
+  const persistSession = useCallback((sessionId) => {
+    console.log('💾 Persisting session:', sessionId);
+    
+    if (sessionId && sessionId !== 'null' && sessionId !== 'undefined') {
+      localStorage.setItem('currentChatSession', sessionId);
+      setPersistentSessionId(sessionId);
+      
+      // Update URL without refreshing page
+      const url = new URL(window.location);
+      url.searchParams.set('session', sessionId);
+      window.history.replaceState({}, '', url);
+      
+      console.log('✅ Session persisted:', sessionId);
+    } else {
+      localStorage.removeItem('currentChatSession');
+      setPersistentSessionId(null);
+      
+      // Remove session from URL
+      const url = new URL(window.location);
+      url.searchParams.delete('session');
+      window.history.replaceState({}, '', url);
+      
+      console.log('✅ Session cleared');
+    }
+  }, []);
+
+  // ✅ INITIALIZE SESSION ON MOUNT - FIXED to set context session
+  useEffect(() => {
+    if (hasInitialized) return;
+    
+    const initializeSession = async () => {
+      console.log('🚀 Initializing ChatDashBoard...', {
+        selectedSession,
+        chatContextAvailable,
+        currentSessionId
+      });
+      
+      // ✅ ONLY USE SELECTED SESSION FROM PARENT
+      if (selectedSession && selectedSession !== 'null' && selectedSession !== 'undefined') {
+        console.log('🔄 Using session from parent:', selectedSession);
+        
+        // Sync with context if available
+        if (chatContextAvailable && setSession && selectedSession !== currentSessionId) {
+          console.log('📡 Setting session in context:', selectedSession);
+          setSession(selectedSession);
+        }
+        
+        // Update local state
+        setPersistentSessionId(selectedSession);
+        
+        // Fetch messages for the session
+        console.log('📨 Fetching messages for session:', selectedSession);
+        await fetchMessagesViaHTTP(selectedSession);
+        
+        // ✅ REMOVED: Don't call onSessionUpdate here - it causes conflicts
+        
+      } else {
+        console.log('❌ No valid session from parent');
+        setPersistentSessionId(null);
+        if (chatContextAvailable && setSession) {
+          setSession(null);
+        }
+      }
+      
+      setHasInitialized(true);
+    };
+
+    initializeSession();
+  }, [selectedSession, chatContextAvailable, setSession, currentSessionId]); // ✅ Listen to selectedSession changes
+
+  // ✅ HANDLE BROWSER BACK/FORWARD
+  useEffect(() => {
+    const handlePopState = () => {
+      const urlSession = new URLSearchParams(window.location.search).get('session');
+      console.log('🔙 Browser navigation detected:', urlSession);
+      
+      if (urlSession && urlSession !== persistentSessionId) {
+        setPersistentSessionId(urlSession);
+        if (chatContextAvailable && setSession) {
+          setSession(urlSession);
+        }
+        if (onSessionUpdate) {
+          onSessionUpdate(urlSession);
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [persistentSessionId, chatContextAvailable, setSession, onSessionUpdate]);
 
   // ✅ FALLBACK FETCH FUNCTION
   const fetchMessagesViaHTTP = useCallback(async (sessionId) => {
-    if (!sessionId || !token) return;
+    if (!sessionId || !token) {
+      console.log('❌ Cannot fetch messages - missing sessionId or token');
+      return;
+    }
+    
+    console.log('📡 Fetching messages via HTTP for session:', sessionId);
     
     try {
       setIsFetchingFallback(true);
-      console.log('📥 [FALLBACK] Fetching messages via HTTP for session:', sessionId);
       
       const response = await axios.get(`${backendUrl}/api/chat/session/${sessionId}/messages`, {
         headers: {
@@ -93,43 +181,32 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       
       if (response.data.success) {
         const messages = response.data.messages || [];
-        console.log('✅ [FALLBACK] Messages fetched via HTTP:', messages.length);
         setFallbackMessages(messages);
+        console.log('✅ Fetched messages via HTTP:', messages.length);
         return messages;
       } else {
-        console.error('❌ [FALLBACK] Failed to fetch messages:', response.data.message);
+        console.log('❌ HTTP fetch failed:', response.data.message);
         setFallbackMessages([]);
       }
     } catch (error) {
-      console.error('❌ [FALLBACK] Error fetching messages via HTTP:', error);
+      console.error('❌ HTTP fetch error:', error);
       setFallbackMessages([]);
     } finally {
       setIsFetchingFallback(false);
     }
   }, [backendUrl, token]);
 
-  // ✅ GET CURRENT MESSAGES (NOW actualIsConnected IS DEFINED)
+  // ✅ GET CURRENT MESSAGES
   const actualMessages = useMemo(() => {
     if (chatContextAvailable && actualIsConnected && getCurrentSessionMessages) {
-      // Use ChatContext when connected
       const contextMessages = getCurrentSessionMessages();
-      console.log('📋 [MESSAGES] Using ChatContext messages:', contextMessages.length);
+      console.log('📋 Using context messages:', contextMessages.length);
       return contextMessages;
     } else {
-      // Use HTTP fallback when disconnected
-      console.log('📋 [MESSAGES] Using HTTP fallback messages:', fallbackMessages.length);
+      console.log('📋 Using fallback messages:', fallbackMessages.length);
       return fallbackMessages;
     }
   }, [chatContextAvailable, actualIsConnected, getCurrentSessionMessages, fallbackMessages]);
-
-  console.log('📋 [CHAT DASHBOARD] Current state:', {
-    selectedSession,
-    currentSessionId,
-    messagesCount: actualMessages.length,
-    isConnected: actualIsConnected,
-    connectionStatus,
-    isStreaming: isAIStreaming
-  });
 
   // ✅ SPEECH RECOGNITION
   const {
@@ -142,252 +219,166 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const [isManuallyEditing, setIsManuallyEditing] = useState(false);
   const [hasStoppedListening, setHasStoppedListening] = useState(false);
 
-  // ✅ CONNECTION RECOVERY
-  const handleReconnect = useCallback(async () => {
-    console.log('🔄 [RECONNECT] Attempting to reconnect...');
-    setConnectionError(null);
-    
-    if (chatContextAvailable && reconnect) {
-      try {
-        await reconnect();
-        console.log('✅ [RECONNECT] Reconnection successful');
-      } catch (error) {
-        console.error('❌ [RECONNECT] Reconnection failed:', error);
-        setConnectionError('Failed to reconnect. Please refresh the page.');
-      }
-    } else if (chatContextAvailable && initializeContext) {
-      try {
-        await initializeContext();
-        console.log('✅ [RECONNECT] Context reinitialized');
-      } catch (error) {
-        console.error('❌ [RECONNECT] Context reinitialization failed:', error);
-        setConnectionError('Failed to initialize. Please refresh the page.');
-      }
-    }
-  }, [chatContextAvailable, reconnect, initializeContext]);
-
-  // ✅ LOAD SESSION MESSAGES
-  const loadSessionMessages = useCallback(async (sessionId) => {
-    if (!sessionId || !chatContextAvailable || !fetchSessionMessages) {
-      console.log('⚠️ [LOAD MESSAGES] Cannot load - missing requirements:', {
-        sessionId: !!sessionId,
-        contextAvailable: chatContextAvailable,
-        fetchFunction: !!fetchSessionMessages
-      });
-      return;
-    }
-
-    try {
-      setIsLoadingMessages(true);
-      console.log('📥 [LOAD MESSAGES] Loading messages for session:', sessionId);
-      
-      const result = await fetchSessionMessages(sessionId);
-      
-      if (result.success) {
-        console.log('✅ [LOAD MESSAGES] Messages loaded successfully:', result.messages?.length || 0);
-      } else {
-        console.error('❌ [LOAD MESSAGES] Failed to load messages:', result.error);
-      }
-    } catch (error) {
-      console.error('❌ [LOAD MESSAGES] Error loading messages:', error);
-    } finally {
-      setIsLoadingMessages(false);
-    }
-  }, [chatContextAvailable, fetchSessionMessages]);
-
-  // ✅ TRACK NEW MESSAGES FOR ANIMATION
-  useEffect(() => {
-    const currentMessageCount = actualMessages.length;
-    
-    // If this is initial load (refresh), don't animate existing messages
-    if (isInitialLoad) {
-      console.log('🔄 [ANIMATION] Initial load - marking all messages as non-animated');
-      const allMessageIds = new Set(actualMessages.map(msg => msg._id));
-      setAnimatedMessages(allMessageIds);
-      setIsInitialLoad(false);
-      setLastMessageCount(currentMessageCount);
-      return;
-    }
-
-    // Only animate new messages (when count increases)
-    if (currentMessageCount > lastMessageCount) {
-      console.log('📝 [ANIMATION] New messages detected:', {
-        previous: lastMessageCount,
-        current: currentMessageCount,
-        newMessages: currentMessageCount - lastMessageCount
-      });
-      
-      // Get the new messages (ones that should be animated)
-      const newMessages = actualMessages.slice(lastMessageCount);
-      console.log('✨ [ANIMATION] Animating new messages:', newMessages.map(m => m._id));
-      
-      // Don't add them to animated set immediately - let them animate first
-      setTimeout(() => {
-        setAnimatedMessages(prev => {
-          const updated = new Set(prev);
-          newMessages.forEach(msg => updated.add(msg._id));
-          return updated;
-        });
-      }, 500); // After animation completes
-    }
-    
-    setLastMessageCount(currentMessageCount);
-  }, [actualMessages.length, isInitialLoad]);
-
-  // ✅ RESET ANIMATION TRACKING WHEN SESSION CHANGES
-  useEffect(() => {
-    console.log('🔄 [SESSION CHANGE] Resetting animation tracking for session:', currentSessionId);
-    setAnimatedMessages(new Set());
-    setIsInitialLoad(true);
-    setLastMessageCount(0);
-  }, [currentSessionId]);
-
-  // ✅ ENHANCED USER MESSAGE COMPONENT
-  const UserMessage = ({ message, timestamp, status, optimistic, fileUrl, type, messageId, shouldAnimate }) => (
-    <div className="flex justify-end mb-4">
-      <div className={`max-w-xs lg:max-w-md xl:max-w-lg px-4 py-3 rounded-2xl shadow-sm transition-all duration-300 ${
-        shouldAnimate ? 'message-enter message-enter-active' : ''
-      } ${
-        status === 'failed'
-          ? 'bg-red-50 text-red-800 border border-red-300'
-          : 'bg-blue-500 text-white'
-      }`}>
-        <div className="flex items-center gap-2 mb-2">
-          <div className="text-xs font-medium">👤 You</div>
-          {status === 'failed' && <span className="text-red-500">⚠️</span>}
-          {optimistic && <span className="text-blue-200">⏳</span>}
+  // ✅ MODERN USER MESSAGE COMPONENT - BETTER SPACING
+  const UserMessage = ({ message, timestamp, status, fileUrl, type }) => (
+    <div className="flex justify-end mb-4 animate-fade-in px-4">
+      <div className="flex items-start gap-2 max-w-[85%]">
+        <div className={`px-4 py-3 rounded-2xl shadow-sm transition-all duration-300 ${
+          status === 'failed'
+            ? 'bg-red-500/10 text-red-600 border border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800'
+            : 'bg-gradient-to-br from-blue-600 to-purple-600 text-white shadow-lg'
+        }`}>
+          <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+            {message}
+          </div>
+          
+          {fileUrl && (
+            <div className="mt-3 pt-2 border-t border-white/20">
+              {type === 'image' ? (
+                <img 
+                  src={fileUrl} 
+                  alt="Uploaded" 
+                  className="max-w-full h-auto rounded-lg shadow-md"
+                />
+              ) : (
+                <a 
+                  href={fileUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="inline-flex items-center gap-2 text-sm text-white/90 hover:text-white transition-colors"
+                >
+                  <IconPaperclip size={16} />
+                  View attachment
+                </a>
+              )}
+            </div>
+          )}
+          
+          <div className="text-xs text-white/70 mt-2">
+            {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
         </div>
         
-        <div className="text-sm whitespace-pre-wrap break-words">
-          {message}
-        </div>
-        
-        {fileUrl && (
-          <div className="mt-3 pt-2 border-t border-blue-400">
-            {type === 'image' ? (
-              <img 
-                src={fileUrl} 
-                alt="Uploaded" 
-                className={`max-w-full h-auto rounded border ${shouldAnimate ? 'animate-fade-in' : ''}`}
-              />
-            ) : (
-              <a 
-                href={fileUrl} 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                className="inline-flex items-center gap-1 text-sm text-blue-200 hover:underline"
-              >
-                📎 View File
-              </a>
-            )}
-          </div>
-        )}
-        
-        <div className="flex items-center justify-between mt-2 pt-1">
-          <div className="text-xs opacity-70 text-blue-100">
-            {new Date(timestamp).toLocaleTimeString()}
-          </div>
-          {status === 'failed' && (
-            <span className="text-xs text-red-200">Failed to send</span>
-          )}
-          {status === 'sending' && (
-            <span className="text-xs text-blue-200">Sending...</span>
-          )}
+        <div className="flex-shrink-0 w-7 h-7 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center shadow-md">
+          <IconUser size={14} className="text-white" />
         </div>
       </div>
     </div>
   );
 
-  // ✅ AI RESPONSE WRAPPER WITH STREAMING SUPPORT
-  const AiResponseWrapper = ({ message, timestamp, fileUrl, fileType, messageId, shouldAnimate, isStreaming = false }) => (
-    <div className={shouldAnimate ? 'message-enter message-enter-active' : ''}>
-      <AiResponse
-        isTyping={isStreaming}
-        message={message}
-        animationType={isStreaming ? "thinking" : "dots"}
-        showAnimation={true}
-        timestamp={timestamp}
-        fileUrl={fileUrl}
-        fileType={fileType}
-        shouldAnimate={shouldAnimate}
-        customResponseText={isStreaming ? "AI is streaming response..." : null}
-      />
+  // ✅ MODERN AI RESPONSE COMPONENT - BETTER SPACING  
+  const AiMessage = ({ message, timestamp, fileUrl, fileType, isStreaming = false }) => (
+    <div className="flex items-start gap-2 mb-4 animate-fade-in px-4">
+      <div className="flex-shrink-0 w-7 h-7 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-full flex items-center justify-center shadow-md">
+        <IconRobot size={14} className="text-white" />
+      </div>
+      
+      <div className="flex-1 max-w-[85%]">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl px-4 py-3 shadow-sm border border-gray-200 dark:border-gray-700">
+          {isStreaming ? (
+            <div className="flex items-center gap-3">
+              <div className="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <span className="text-sm text-gray-500 dark:text-gray-400">AI is thinking...</span>
+            </div>
+          ) : (
+            <div className="prose prose-sm max-w-none text-gray-800 dark:text-gray-200">
+              <ReactMarkdown
+                components={{
+                  code({node, inline, className, children, ...props}) {
+                    const match = /language-(\w+)/.exec(className || '');
+                    return !inline && match ? (
+                      <SyntaxHighlighter
+                        style={oneDark}
+                        language={match[1]}
+                        PreTag="div"
+                        className="rounded-lg my-3"
+                        {...props}
+                      >
+                        {String(children).replace(/\n$/, '')}
+                      </SyntaxHighlighter>
+                    ) : (
+                      <code className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded text-sm font-mono" {...props}>
+                        {children}
+                      </code>
+                    );
+                  },
+                  p: ({children}) => <p className="mb-2 leading-relaxed">{children}</p>,
+                  h1: ({children}) => <h1 className="text-lg font-bold mb-2 text-gray-900 dark:text-gray-100">{children}</h1>,
+                  h2: ({children}) => <h2 className="text-base font-bold mb-2 text-gray-900 dark:text-gray-100">{children}</h2>,
+                  h3: ({children}) => <h3 className="text-sm font-bold mb-2 text-gray-900 dark:text-gray-100">{children}</h3>,
+                  ul: ({children}) => <ul className="list-disc pl-4 mb-2 space-y-1">{children}</ul>,
+                  ol: ({children}) => <ol className="list-decimal pl-4 mb-2 space-y-1">{children}</ol>,
+                  blockquote: ({children}) => (
+                    <blockquote className="border-l-4 border-emerald-500 pl-3 py-1 my-3 bg-gray-50 dark:bg-gray-700/30 rounded-r-lg">
+                      {children}
+                    </blockquote>
+                  )
+                }}
+              >
+                {message}
+              </ReactMarkdown>
+            </div>
+          )}
+          
+          {fileUrl && !isStreaming && (
+            <div className="mt-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+              {fileType === 'image' ? (
+                <img 
+                  src={fileUrl} 
+                  alt="AI Generated" 
+                  className="max-w-full h-auto rounded-lg shadow-md"
+                />
+              ) : (
+                <a 
+                  href={fileUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="inline-flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors"
+                >
+                  <IconPaperclip size={16} />
+                  View attachment
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+        
+        {!isStreaming && (
+          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 px-1">
+            {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
+        )}
+      </div>
     </div>
   );
 
-  // ✅ CREATE NEW SESSION
-  const createNewSession = useCallback(async () => {
-    if (isCreatingSession) {
-      console.log('⚠️ [CREATE SESSION] Already creating a session, skipping...');
-      return;
-    }
+  // ✅ LOAD SESSION MESSAGES
+  const loadSessionMessages = useCallback(async (sessionId) => {
+    if (!sessionId || !chatContextAvailable || !fetchSessionMessages) return;
 
     try {
-      setIsCreatingSession(true);
-      console.log('🆕 [CREATE SESSION] Creating new chat session...');
-
-      const response = await axios.post(
-        `${backendUrl}/api/chat/session`,
-        {
-          title: 'New Chat',
-          userId: userId
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          }
-        }
-      );
-
-      if (response.data.success) {
-        const newSession = response.data.session;
-        console.log('✅ [CREATE SESSION] New session created:', newSession._id);
-
-        // ✅ NOTIFY COMPONENTS
-        window.dispatchEvent(new CustomEvent('sessionCreated', {
-          detail: { 
-            session: newSession,
-            sessionId: newSession._id,
-            timestamp: new Date().toISOString()
-          }
-        }));
-
-        // ✅ SET SESSION IN CONTEXT
-        if (chatContextAvailable && setSession) {
-          setSession(newSession._id);
-        }
-
-        if (onSessionUpdate) {
-          console.log('📢 [CREATE SESSION] Notifying parent component');
-          onSessionUpdate(newSession);
-        }
-
-        return newSession;
-      } else {
-        throw new Error(response.data.message || 'Failed to create session');
-      }
+      setIsLoadingMessages(true);
+      console.log('📡 Loading messages from context for session:', sessionId);
+      await fetchSessionMessages(sessionId);
     } catch (error) {
-      console.error('❌ [CREATE SESSION] Failed:', error);
-      return null;
+      console.error('❌ Error loading messages from context:', error);
     } finally {
-      setIsCreatingSession(false);
+      setIsLoadingMessages(false);
     }
-  }, [isCreatingSession, backendUrl, userId, token, chatContextAvailable, setSession, onSessionUpdate]);
+  }, [chatContextAvailable, fetchSessionMessages]);
 
   // ✅ UPDATE SESSION TITLE
   const updateSessionTitle = useCallback(async (sessionId, firstMessage) => {
-    if (!sessionId || !sessionId.match(/^[0-9a-fA-F]{24}$/)) {
-      console.log('⚠️ [UPDATE TITLE] Invalid session ID:', sessionId);
-      return;
-    }
+    if (!sessionId || !sessionId.match(/^[0-9a-fA-F]{24}$/)) return;
 
     try {
       const title = firstMessage.length > 30 
         ? `${firstMessage.substring(0, 30)}...` 
         : firstMessage;
-
-      console.log('📝 [UPDATE TITLE] Updating session title:', { sessionId, title });
 
       const res = await axios.patch(
         `${backendUrl}/api/chat/session/${sessionId}`,
@@ -400,16 +391,12 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         }
       );
       
-      const updatedSession = res.data.session;
-      console.log('✅ [UPDATE TITLE] Session title updated:', updatedSession);
-      
-      // ✅ NOTIFY COMPONENTS
       window.dispatchEvent(new CustomEvent('sessionUpdated', {
-        detail: { session: updatedSession }
+        detail: { session: res.data.session }
       }));
       
     } catch (err) {
-      console.error('❌ [UPDATE TITLE] Failed to update session title:', err);
+      console.error('Failed to update session title:', err);
     }
   }, [backendUrl, token]);
 
@@ -421,11 +408,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
     
     if (listening) {
-      console.log('🎤 [VOICE] Stopping voice input');
       SpeechRecognition.stopListening();
       setHasStoppedListening(true);
     } else {
-      console.log('🎤 [VOICE] Starting voice input');
       resetTranscript();
       setInput("");
       setIsManuallyEditing(false);
@@ -442,30 +427,26 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     setInput(newValue);
     
     if (listening) {
-      console.log('✏️ [INPUT] User manually editing while listening');
       setIsManuallyEditing(true);
       SpeechRecognition.stopListening();
       setHasStoppedListening(true);
     }
   }, [listening]);
 
-  // ✅ ENHANCED SUBMIT HANDLER WITH STREAMING SUPPORT
+  // ✅ SUBMIT HANDLER - Use activeSessionId
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
     if (!input.trim() && !file) return;
-    if (!currentSessionId) return;
-    if (isAIStreaming) {
-      console.log('⚠️ [SUBMIT] AI is currently streaming, blocking new message');
+    
+    // ✅ Use selectedSession as primary source
+    const sessionToUse = selectedSession;
+    if (!sessionToUse || isAIStreaming) {
+      console.log('❌ Cannot submit - no session or AI is streaming');
       return;
     }
 
-    console.log('📤 [SUBMIT] Starting message submission:', {
-      sessionId: currentSessionId,
-      messageLength: input.trim().length,
-      hasFile: !!file,
-      isStreaming: isAIStreaming
-    });
-
+    console.log('📤 Submitting message to session:', sessionToUse);
+    
     setIsManuallyEditing(false);
     setHasStoppedListening(false);
     
@@ -473,14 +454,14 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     const tempMessageId = `temp-${Date.now()}-${Math.random()}`;
     const isFirstMessage = actualMessages.length === 0;
     
-    // ✅ CLEAR INPUT IMMEDIATELY
+    // Clear input immediately
     setInput("");
     setFile(null);
     resetTranscript();
     const fileInput = document.getElementById("fileUpload");
     if (fileInput) fileInput.value = "";
 
-    // ✅ HANDLE FILE UPLOAD FIRST
+    // Handle file upload
     let fileUrl = null;
     let fileType = null;
 
@@ -502,14 +483,13 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           fileType = file.type.startsWith("image") ? "image" : "document";
         }
       } catch (err) {
-        console.error('❌ [SUBMIT] File upload failed:', err);
-        // Continue without file
+        console.error('File upload failed:', err);
       } finally {
         setIsUploading(false);
       }
     }
 
-    // ✅ CREATE USER MESSAGE AND ADD TO CONTEXT
+    // Create user message
     const userMessage = {
       _id: tempMessageId,
       message: originalInput,
@@ -521,15 +501,15 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       status: 'sent'
     };
 
-    // ✅ ADD USER MESSAGE TO SESSION
+    // Add user message to session
     if (chatContextAvailable && setSessionMessages) {
       const currentMessages = getCurrentSessionMessages();
-      setSessionMessages(currentSessionId, [...currentMessages, userMessage]);
+      setSessionMessages(sessionToUse, [...currentMessages, userMessage]);
     }
 
-    // ✅ PREPARE MESSAGE PAYLOAD FOR CONTEXT
+    // Send message
     const messagePayload = {
-      sessionId: currentSessionId,
+      sessionId: sessionToUse,
       senderId: userId,
       message: originalInput,
       type: fileType || "text",
@@ -539,83 +519,74 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     };
 
     try {
-      // ✅ SEND MESSAGE THROUGH CONTEXT (HANDLES STREAMING)
       if (chatContextAvailable && sendMessage) {
-        console.log('🌊 [SUBMIT] Sending message through streaming context...');
         const result = await sendMessage(messagePayload);
         
-        if (result.success) {
-          console.log('✅ [SUBMIT] Message sent successfully:', result);
-          
-          // ✅ UPDATE SESSION TITLE FOR FIRST MESSAGE
-          if (isFirstMessage && originalInput.trim()) {
-            updateSessionTitle(currentSessionId, originalInput.trim());
-          }
-        } else {
-          console.error('❌ [SUBMIT] Failed to send message:', result.error);
+        if (result.success && isFirstMessage && originalInput.trim()) {
+          updateSessionTitle(sessionToUse, originalInput.trim());
         }
-      } else {
-        console.log('⚠️ [SUBMIT] ChatContext not available, cannot send message');
       }
     } catch (error) {
-      console.error('❌ [SUBMIT] Error during message submission:', error);
+      console.error('Error during message submission:', error);
     }
-  }, [input, file, currentSessionId, isAIStreaming, actualMessages.length, userId, resetTranscript, backendUrl, token, chatContextAvailable, setSessionMessages, getCurrentSessionMessages, sendMessage, updateSessionTitle]);
+  }, [input, file, selectedSession, isAIStreaming, actualMessages.length, userId, resetTranscript, backendUrl, token, chatContextAvailable, setSessionMessages, getCurrentSessionMessages, sendMessage, updateSessionTitle]);
 
-  // ✅ HANDLE SESSION SELECTION
+  // ✅ HANDLE SESSION SELECTION FROM PARENT - Simplified
   useEffect(() => {
-    console.log('🔄 [SESSION SELECTION] Effect triggered:', {
-      selectedSession,
-      lastProcessedSession,
-      currentSessionId,
-      isConnected: actualIsConnected
+    if (!hasInitialized) return;
+    if (selectedSession === lastProcessedSession) return;
+
+    console.log('🔄 Processing session selection from parent:', { 
+      selectedSession, 
+      lastProcessedSession, 
+      persistentSessionId,
+      currentSessionId
     });
 
-    if (selectedSession === lastProcessedSession) {
-      return;
-    }
-
-    if (!selectedSession || selectedSession === 'null' || selectedSession === 'undefined') {
-      console.log('🧹 [SESSION SELECTION] Clearing session - invalid or empty:', selectedSession);
+    // ✅ ALWAYS FOLLOW PARENT'S SESSION SELECTION
+    if (selectedSession && selectedSession !== 'null' && selectedSession !== 'undefined') {
+      console.log('✅ Following parent session selection:', selectedSession);
+      
       setLastProcessedSession(selectedSession);
-      setFallbackMessages([]); // Clear fallback messages
-    
+      setPersistentSessionId(selectedSession);
+      
+      // Sync with context
+      if (chatContextAvailable && setSession && selectedSession !== currentSessionId) {
+        setSession(selectedSession);
+      }
+      
+      // Fetch messages if needed
+      if (!actualIsConnected || selectedSession !== currentSessionId) {
+        fetchMessagesViaHTTP(selectedSession);
+      }
+      
+    } else {
+      console.log('❌ Parent cleared session selection');
+      setLastProcessedSession(null);
+      setPersistentSessionId(null);
+      setFallbackMessages([]);
+      
       if (chatContextAvailable && setSession) {
         setSession(null);
       }
-      return;
     }
+  }, [selectedSession, hasInitialized, lastProcessedSession, currentSessionId, actualIsConnected, chatContextAvailable, setSession, fetchMessagesViaHTTP]);
 
-    setLastProcessedSession(selectedSession);
-
-    // ✅ SET SESSION IN CONTEXT FIRST
-    if (chatContextAvailable && setSession) {
-      setSession(selectedSession);
-    }
-    
-    // ✅ ALWAYS FETCH VIA HTTP FALLBACK WHEN NOT CONNECTED OR DIFFERENT SESSION
-    if (!actualIsConnected || selectedSession !== currentSessionId) {
-      console.log('🔗 [SESSION SELECTION] Fetching messages via HTTP fallback for session:', selectedSession);
-      fetchMessagesViaHTTP(selectedSession);
-    }
-
-    // ✅ ALSO TRY CHATCONTEXT IF AVAILABLE AND CONNECTED
-    if (chatContextAvailable && fetchSessionMessages && actualIsConnected) {
-      console.log('🌊 [SESSION SELECTION] Also trying ChatContext fetch...');
-      loadSessionMessages(selectedSession);
-    }
-  }, [selectedSession, currentSessionId, lastProcessedSession, actualIsConnected, chatContextAvailable, setSession, fetchMessagesViaHTTP, loadSessionMessages, fetchSessionMessages]);
-
-  // ✅ ADD A SEPARATE EFFECT TO TRIGGER FALLBACK WHEN SESSION CHANGES BUT NO MESSAGES
+  // ✅ FALLBACK TRIGGER - Only for active sessions without messages
   useEffect(() => {
-    // If we have a session, context is disconnected, and no messages - trigger fallback
-    if (currentSessionId && !actualIsConnected && actualMessages.length === 0 && !isFetchingFallback) {
-      console.log('🚨 [FALLBACK TRIGGER] No messages and disconnected, fetching via HTTP:', currentSessionId);
-      fetchMessagesViaHTTP(currentSessionId);
+    const activeSessionId = persistentSessionId;
+    
+    if (activeSessionId && 
+        !actualIsConnected && 
+        actualMessages.length === 0 && 
+        !isFetchingFallback && 
+        hasInitialized) {
+      console.log('🔄 Triggering fallback fetch for:', activeSessionId);
+      fetchMessagesViaHTTP(activeSessionId);
     }
-  }, [currentSessionId, actualIsConnected, actualMessages.length, isFetchingFallback, fetchMessagesViaHTTP]);
+  }, [persistentSessionId, actualIsConnected, actualMessages.length, isFetchingFallback, hasInitialized, fetchMessagesViaHTTP]);
 
-  // ✅ AUTO-SCROLL WHEN MESSAGES CHANGE
+  // ✅ AUTO-SCROLL
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
@@ -629,318 +600,243 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   }, [transcript, listening, isManuallyEditing, hasStoppedListening]);
 
-  // ✅ CONNECTION STATUS MONITORING
+  // ✅ DEBUG LOGGING
   useEffect(() => {
-    if (!actualIsConnected && chatContextAvailable) {
-      setConnectionError('Connection lost. Some features may not work properly.');
-    } else {
-      setConnectionError(null);
-    }
-  }, [actualIsConnected, chatContextAvailable]);
+    console.log('🔍 Session state:', {
+      persistentSessionId,
+      currentSessionId,
+      selectedSession,
+      hasInitialized,
+      actualIsConnected,
+      messagesCount: actualMessages.length
+    });
+  }, [persistentSessionId, currentSessionId, selectedSession, hasInitialized, actualIsConnected, actualMessages.length]);
 
-  // ✅ MAIN RENDER
+  // ✅ MAIN RENDER WITH THEME INTEGRATION
   return (
-    <div className="flex flex-col h-screen bg-white">
-      {/* ✅ ENHANCED HEADER WITH STREAMING STATUS */}
-      <div className="border-b border-gray-200 p-4">
+    <div className={`flex flex-col h-screen transition-all duration-300 ${
+      isDark 
+        ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900' 
+        : 'bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50'
+    } ${isTransitioning ? 'animate-pulse' : ''}`}>
+      
+      {/* ✅ HEADER WITH THEME TOGGLE */}
+      <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-b border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-800">
-            {currentSessionId ? (
-              currentSessionId.startsWith('temp-') ? 'New Chat (Creating...)' :
-              currentSessionId.startsWith('new-') ? 'New Chat (Preparing...)' :
-              'Chat Dashboard'
-            ) : 'Chat Dashboard'}
-          </h2>
-          <div className="flex items-center gap-2">
-            <div className={`text-xs px-2 py-1 rounded-full ${
-              actualIsConnected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-            }`}>
-              {actualIsConnected ? '🟢 Connected' : '🔴 Disconnected'}
+          <div className="flex items-center gap-3">
+            <div className="w-7 h-7 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-lg flex items-center justify-center">
+              <IconRobot size={16} className="text-white" />
             </div>
-            <div className={`text-xs px-2 py-1 rounded-full ${
-              chatContextAvailable ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'
-            }`}>
-              {chatContextAvailable ? '⚡ Streaming' : '🔧 Basic'}
-            </div>
-            {isCreatingSession && (
-              <div className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800">
-                🔄 Creating...
+            <h1 className="text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
+              Nexus AI Assistant
+            </h1>
+          </div>
+          
+          <div className="flex items-center gap-3">
+            {/* Connection indicator */}
+            {!actualIsConnected && (
+              <div className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2">
+                <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></div>
+                Reconnecting...
               </div>
             )}
-            {isLoadingMessages && (
-              <div className="text-xs px-2 py-1 rounded-full bg-purple-100 text-purple-800">
-                📥 Loading...
-              </div>
-            )}
-            {isAIStreaming && (
-              <div className="text-xs px-2 py-1 rounded-full bg-purple-100 text-purple-800 animate-pulse">
-                🌊 AI Streaming...
-              </div>
-            )}
-            {/* ✅ RECONNECT BUTTON */}
-            {!actualIsConnected && chatContextAvailable && (
-              <button
-                onClick={handleReconnect}
-                className="text-xs px-2 py-1 rounded-full bg-orange-100 text-orange-800 hover:bg-orange-200 transition-colors"
-                title="Reconnect"
-              >
-                <IconRefresh size={12} className="inline mr-1" />
-                Reconnect
-              </button>
-            )}
-            {/* ✅ DEBUG INFO */}
-            {debug && (
-              <div className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
-                📊 {debug.totalMessages} msgs
-              </div>
-            )}
+            
+            {/* ✅ THEME TOGGLE BUTTON */}
+            <button
+              onClick={toggleTheme}
+              className={`p-2 rounded-lg transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                isTransitioning ? 'animate-spin' : ''
+              }`}
+              title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+            >
+              {isDark ? (
+                <IconSun size={18} className="text-yellow-500" />
+              ) : (
+                <IconMoon size={18} className="text-gray-600" />
+              )}
+            </button>
           </div>
         </div>
-        
-        {/* ✅ CONNECTION ERROR DISPLAY */}
-        {connectionError && (
-          <div className="mt-2 text-xs text-red-600 bg-red-50 px-2 py-1 rounded">
-            ⚠️ {connectionError}
-          </div>
-        )}
       </div>
 
-      {/* ✅ ENHANCED MESSAGES AREA */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {isLoadingMessages ? (
+      {/* ✅ MESSAGES AREA - REDUCED PADDING */}
+      <div className="flex-1 overflow-y-auto py-4">
+        {(isFetchingFallback || isLoadingMessages) ? (
           <div className="flex items-center justify-center h-full">
-            <div className="text-center space-y-2 animate-fade-in">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
-              <p className="text-sm text-gray-500">
-                {isFetchingFallback ? 'Loading messages via HTTP...' : 'Loading messages...'}
-              </p>
+            <div className="text-center space-y-3">
+              <div className="relative">
+                <div className="w-10 h-10 bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-500 rounded-full animate-pulse"></div>
+                <div className="absolute inset-0 w-10 h-10 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 rounded-full animate-ping opacity-20"></div>
+              </div>
+              <p className="text-sm text-gray-600 dark:text-gray-400 font-medium">Loading conversation...</p>
             </div>
           </div>
         ) : actualMessages.length === 0 ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center space-y-2 animate-fade-in">
-              <IconRobot size={48} className="mx-auto text-gray-400 animate-float" />
-              <h3 className="text-lg font-semibold text-gray-700">
-                {isCreatingSession ? 'Setting up your new chat...' : 
-                 !actualIsConnected ? 'Connection lost...' :
-                 'Ready to chat!'}
-              </h3>
-              <p className="text-sm text-gray-500">
-                {isCreatingSession ? 'Please wait a moment...' : 
-                 !actualIsConnected ? 'Please reconnect to start chatting.' :
-                 'Start typing your message or use voice input...'}
-              </p>
-              {chatContextAvailable && actualIsConnected && (
-                <p className="text-xs text-blue-600">
-                  ✨ Streaming enabled for real-time responses
+          <div className="flex items-center justify-center h-full px-4">
+            <div className="text-center space-y-4 max-w-md">
+              <div className="relative">
+                <div className="w-16 h-16 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-2xl flex items-center justify-center shadow-xl">
+                  <IconRobot size={32} className="text-white" />
+                </div>
+                <div className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-br from-green-400 to-green-500 rounded-full flex items-center justify-center shadow-lg">
+                  <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <h2 className="text-xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
+                  Hello! I'm your AI assistant
+                </h2>
+                <p className="text-gray-600 dark:text-gray-400 leading-relaxed text-sm">
+                  I'm here to help you with coding, writing, analysis, and much more. 
+                  Start a conversation by typing a message below.
                 </p>
-              )}
-              {!actualIsConnected && (
-                <button
-                  onClick={handleReconnect}
-                  className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-                >
-                  <IconRefresh size={16} className="inline mr-2" />
-                  Reconnect
-                </button>
-              )}
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="p-3 bg-white/60 dark:bg-gray-800/60 rounded-xl border border-gray-200/50 dark:border-gray-700/50 backdrop-blur-sm">
+                  <div className="text-xl mb-1">💭</div>
+                  <div className="font-medium text-gray-700 dark:text-gray-300 text-xs">Ask Questions</div>
+                  <div className="text-gray-500 dark:text-gray-400 text-xs mt-1">Get instant answers</div>
+                </div>
+                
+                <div className="p-3 bg-white/60 dark:bg-gray-800/60 rounded-xl border border-gray-200/50 dark:border-gray-700/50 backdrop-blur-sm">
+                  <div className="text-xl mb-1">🎤</div>
+                  <div className="font-medium text-gray-700 dark:text-gray-300 text-xs">Voice Input</div>
+                  <div className="text-gray-500 dark:text-gray-400 text-xs mt-1">Speak naturally</div>
+                </div>
+              </div>
             </div>
           </div>
         ) : (
-          <div className="space-y-4">
-            {actualMessages.map((msg, index) => {
-              // ✅ CHECK IF MESSAGE SHOULD BE ANIMATED
-              const shouldAnimate = !animatedMessages.has(msg._id);
-              
-              return (
-                <div key={msg._id || index}>
-                  {msg.sender === 'AI' ? (
-                    // ✅ AI RESPONSE WITH STREAMING SUPPORT
-                    <AiResponseWrapper
-                      message={msg.message}
-                      timestamp={msg.timestamp}
-                      fileUrl={msg.fileUrl}
-                      fileType={msg.type}
-                      messageId={msg._id}
-                      shouldAnimate={shouldAnimate}
-                      isStreaming={msg.isStreaming}
-                    />
-                  ) : (
-                    // ✅ USER MESSAGE
-                    <UserMessage
-                      message={msg.message}
-                      timestamp={msg.timestamp}
-                      status={msg.status}
-                      optimistic={msg.optimistic}
-                      fileUrl={msg.fileUrl}
-                      type={msg.type}
-                      messageId={msg._id}
-                      shouldAnimate={shouldAnimate}
-                    />
-                  )}
-                </div>
-              );
-            })}
-            
+          <div className="max-w-4xl mx-auto">
+            {actualMessages.map((msg, index) => (
+              <div key={msg._id || index}>
+                {msg.sender === 'AI' ? (
+                  <AiMessage
+                    message={msg.message}
+                    timestamp={msg.timestamp}
+                    fileUrl={msg.fileUrl}
+                    fileType={msg.type}
+                    isStreaming={msg.isStreaming}
+                  />
+                ) : (
+                  <UserMessage
+                    message={msg.message}
+                    timestamp={msg.timestamp}
+                    status={msg.status}
+                    fileUrl={msg.fileUrl}
+                    type={msg.type}
+                  />
+                )}
+              </div>
+            ))}
             <div ref={messagesEndRef} />
           </div>
         )}
       </div>
 
-      {/* ✅ ENHANCED INPUT AREA */}
-      <div className="border-t border-gray-200 p-4">
-        <form onSubmit={handleSubmit} className="flex gap-2 items-center">
-          {/* File Upload */}
-          <input
-            type="file"
-            onChange={(e) => setFile(e.target.files[0])}
-            className="hidden"
-            id="fileUpload"
-            accept="image/*,.pdf,.doc,.docx,.txt"
-          />
-          <label
-            htmlFor="fileUpload"
-            className={`cursor-pointer p-2 rounded-lg transition-colors smooth-transition ${
-              !actualIsConnected ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'
-            }`}
-            title={!actualIsConnected ? "Cannot upload - disconnected" : "Upload file"}
-          >
-            <IconUpload className="text-gray-600" />
-          </label>
+      {/* ✅ COMPACT INPUT AREA */}
+      <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-t border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
+        <div className="max-w-4xl mx-auto">
+          <form onSubmit={handleSubmit} className="relative">
+            <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-2xl shadow-sm border border-gray-200/50 dark:border-gray-600/50 px-3 py-2">
+              {/* File Upload */}
+              <input
+                type="file"
+                onChange={(e) => setFile(e.target.files[0])}
+                className="hidden"
+                id="fileUpload"
+                accept="image/*,.pdf,.doc,.docx,.txt"
+              />
+              <label
+                htmlFor="fileUpload"
+                className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors cursor-pointer group"
+                title="Upload file"
+              >
+                <IconUpload size={18} className="text-gray-500 group-hover:text-gray-700 dark:text-gray-400 dark:group-hover:text-gray-200 transition-colors" />
+              </label>
 
-          {/* Voice Input */}
-          <button
-            type="button"
-            onClick={handleVoiceInput}
-            disabled={!browserSupportsSpeechRecognition || !actualIsConnected}
-            className={`p-2 rounded-lg transition-all duration-200 smooth-transition ${
-              listening 
-                ? 'bg-green-100 hover:bg-green-200 border-2 border-green-300 animate-pulse-glow' 
-                : !actualIsConnected || !browserSupportsSpeechRecognition
-                  ? 'opacity-50 cursor-not-allowed'
-                  : 'hover:bg-gray-100'
-            }`}
-            title={
-              !actualIsConnected ? "Cannot use voice - disconnected" :
-              !browserSupportsSpeechRecognition ? "Voice not supported" :
-              listening ? "Stop Recording" : "Start Voice Input"
-            }
-          >
-            {listening ? (
-              <IconCheck className="text-green-600 h-5 w-5" />
-            ) : (
-              <IconMicrophone className={`h-5 w-5 ${
-                browserSupportsSpeechRecognition && actualIsConnected ? 'text-gray-600' : 'text-gray-400'
-              }`} />
-            )}
-          </button>
+              {/* Voice Input */}
+              {browserSupportsSpeechRecognition && (
+                <button
+                  type="button"
+                  onClick={handleVoiceInput}
+                  className={`p-2 rounded-lg transition-all duration-200 ${
+                    listening 
+                      ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-md' 
+                      : 'hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 dark:text-gray-400'
+                  }`}
+                  title={listening ? "Stop recording" : "Start voice input"}
+                >
+                  {listening ? <IconCheck size={18} /> : <IconMicrophone size={18} />}
+                </button>
+              )}
 
-          {/* Text Input */}
-          <input
-            type="text"
-            value={input}
-            onChange={handleInputChange}
-            placeholder={
-              !actualIsConnected
-                ? "Connection lost - messages may not send..."
-                : isAIStreaming
-                  ? "AI is streaming response... please wait"
-                : listening 
-                  ? "Listening to your voice... (or type to override)" 
-                  : browserSupportsSpeechRecognition 
-                    ? "Type a message or use voice input..."
-                    : "Type a message..."
-            }
-            className={`flex-1 p-2 border rounded-lg focus:outline-none transition-colors smooth-transition ${
-              !actualIsConnected
-                ? 'border-red-300 bg-red-50'
-                : isAIStreaming
-                  ? 'border-purple-300 bg-purple-50'
-                : listening 
-                  ? 'border-blue-300 bg-blue-50' 
-                  : 'border-gray-300 focus:border-blue-500'
-            }`}
-            disabled={isAIStreaming}
-          />
+              {/* Text Input */}
+              <input
+                type="text"
+                value={input}
+                onChange={handleInputChange}
+                placeholder={listening ? "Listening..." : "Ask me anything..."}
+                className="flex-1 bg-transparent border-none outline-none text-gray-800 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-400 text-sm py-1"
+                disabled={isAIStreaming}
+              />
 
-          {/* Send Button */}
-          <button
-            type="submit"
-            className={`px-4 py-2 rounded-lg transition-colors smooth-transition ${
-              !actualIsConnected || isAIStreaming
-                ? 'bg-gray-400 text-white cursor-not-allowed'
-                : 'bg-blue-500 text-white hover:bg-blue-600 hover:shadow-lg transform hover:scale-105'
-            } disabled:opacity-50`}
-            disabled={(!input.trim() && !file) || isUploading || !actualIsConnected || isAIStreaming}
-            title={
-              !actualIsConnected ? "Cannot send - disconnected" : 
-              isAIStreaming ? "Please wait for AI response" : 
-              "Send message"
-            }
-          >
-            {isUploading ? (
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-            ) : (
-              <IconSend size={20} />
-            )}
-          </button>
-        </form>
-
-        {/* ✅ ENHANCED STATUS MESSAGES */}
-        {!actualIsConnected && (
-          <div className="mt-2 text-xs text-red-600 bg-red-50 px-2 py-1 rounded animate-slide-up flex items-center justify-between">
-            <span>⚠️ Connection lost. Messages may not be sent or received.</span>
-            <button
-              onClick={handleReconnect}
-              className="ml-2 text-xs underline hover:no-underline"
-            >
-              Reconnect
-            </button>
-          </div>
-        )}
-
-        {isAIStreaming && (
-          <div className="mt-2 text-xs text-purple-600 bg-purple-50 px-2 py-1 rounded animate-slide-up">
-            🌊 AI is streaming response in real-time...
-            <div className="typing-dots ml-2 inline-flex">
-              <div className="typing-dot"></div>
-              <div className="typing-dot"></div>
-              <div className="typing-dot"></div>
+              {/* Send Button */}
+              <button
+                type="submit"
+                className={`p-2 rounded-lg transition-all duration-200 ${
+                  (!input.trim() && !file) || isUploading || isAIStreaming
+                    ? 'bg-gray-200 dark:bg-gray-600 text-gray-400 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 shadow-md hover:shadow-lg transform hover:scale-105'
+                }`}
+                disabled={(!input.trim() && !file) || isUploading || isAIStreaming}
+                title="Send message"
+              >
+                {isUploading ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                ) : (
+                  <IconSend size={18} />
+                )}
+              </button>
             </div>
-          </div>
-        )}
+          </form>
 
-        {file && (
-          <div className="mt-2 text-sm text-gray-600 animate-slide-up">
-            📎 {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
-          </div>
-        )}
-
-        {!browserSupportsSpeechRecognition && (
-          <div className="mt-2 text-xs text-gray-500 animate-slide-up">
-            Voice input not supported in this browser. Try Chrome or Edge.
-          </div>
-        )}
-
-        {listening && (
-          <div className="mt-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded animate-slide-up">
-            🎤 Listening... (Tap the microphone to stop)
-            <div className="typing-dots ml-2 inline-flex">
-              <div className="typing-dot"></div>
-              <div className="typing-dot"></div>
-              <div className="typing-dot"></div>
+          {/* ✅ COMPACT STATUS INDICATORS */}
+          {(file || listening) && (
+            <div className="flex items-center gap-4 mt-2 px-2 text-xs">
+              {file && (
+                <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                  <IconPaperclip size={12} />
+                  <span>{file.name}</span>
+                </div>
+              )}
+              
+              {listening && (
+                <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+                  <div className="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                  <span>Listening...</span>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* ✅ DEBUG INFO (DEV MODE) */}
-        {debug && process.env.NODE_ENV === 'development' && (
-          <div className="mt-2 text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded">
-            🐛 Debug: {debug.totalSessions} sessions, {debug.totalMessages} messages, {debug.activeStreams} active streams
-            <br />
-            Session: {currentSessionId || 'none'}, Messages: {actualMessages.length}, Connected: {actualIsConnected ? 'yes' : 'no'}
-          </div>
-        )}
+          {/* AI Status */}
+          {isAIStreaming && (
+            <div className="text-xs text-blue-500 dark:text-blue-400 mt-2 px-2 flex items-center gap-2">
+              <div className="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              AI is responding...
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
