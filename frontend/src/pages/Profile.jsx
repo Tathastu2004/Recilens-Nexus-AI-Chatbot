@@ -1,7 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { IconPencil, IconCheck, IconX, IconTrash, IconCamera, IconLogout } from '@tabler/icons-react';
+import { 
+  IconPencil, 
+  IconCheck, 
+  IconX, 
+  IconTrash, 
+  IconCamera, 
+  IconLogout, 
+  IconArrowLeft,
+  IconUser,
+  IconMail,
+  IconShield,
+  IconSettings,
+  IconUpload,
+  IconRobot
+} from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../context/UserContext';
+import { useTheme } from '../context/ThemeContext';
 
 const Profile = () => {
   const { 
@@ -13,6 +28,7 @@ const Profile = () => {
     logoutUser 
   } = useUser();
   
+  const { isDark, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
   const [isEditing, setIsEditing] = useState({
@@ -51,20 +67,6 @@ const Profile = () => {
       return () => clearTimeout(timer);
     }
   }, [successMessage, errors]);
-
-  // Debug logging for user data
-  useEffect(() => {
-    console.log('🐛 Profile component - user data:', {
-      user,
-      loading,
-      userKeys: user ? Object.keys(user) : 'No user',
-      name: user?.name,
-      email: user?.email,
-      role: user?.role,
-      isVerified: user?.isVerified,
-      profilePicture: user?.profilePicture
-    });
-  }, [user, loading]);
 
   const handleEdit = (field) => {
     setIsEditing(prev => ({ ...prev, [field]: true }));
@@ -204,13 +206,39 @@ const Profile = () => {
     }
   };
 
+  const handleBackToChat = () => {
+    navigate('/chat');
+  };
+
   // Show loading state while user data is being fetched
   if (loading && !user) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          <p className="text-gray-600">Loading profile...</p>
+      <div className={`min-h-screen flex items-center justify-center transition-all duration-300 ${
+        isDark 
+          ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-black' 
+          : 'bg-gradient-to-br from-blue-50 via-white to-purple-50'
+      }`}>
+        <div className="text-center space-y-6">
+          <div className="relative">
+            <div className={`w-16 h-16 rounded-full border-4 border-t-4 animate-spin mx-auto ${
+              isDark 
+                ? 'border-gray-700 border-t-blue-400' 
+                : 'border-gray-200 border-t-blue-500'
+            }`}></div>
+          </div>
+          
+          <div className="space-y-2">
+            <div className={`text-xl font-semibold ${
+              isDark ? 'text-white' : 'text-gray-900'
+            }`}>
+              Loading Profile
+            </div>
+            <div className={`text-sm ${
+              isDark ? 'text-gray-400' : 'text-gray-600'
+            }`}>
+              Fetching your account details...
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -219,12 +247,30 @@ const Profile = () => {
   // Show error if no user data
   if (!user) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-red-600 mb-4">Failed to load profile data</p>
+      <div className={`min-h-screen flex items-center justify-center ${
+        isDark ? 'bg-gray-900' : 'bg-gray-50'
+      }`}>
+        <div className={`text-center space-y-6 p-8 rounded-2xl border ${
+          isDark 
+            ? 'bg-gray-800 border-gray-700 text-white' 
+            : 'bg-white border-gray-200 text-gray-900'
+        }`}>
+          <div className="text-6xl">⚠️</div>
+          
+          <div className="space-y-3">
+            <div className="text-xl font-bold">
+              Profile Load Error
+            </div>
+            <div className={`max-w-md mx-auto leading-relaxed ${
+              isDark ? 'text-gray-300' : 'text-gray-600'
+            }`}>
+              Failed to load your profile data. Please try again.
+            </div>
+          </div>
+          
           <button 
             onClick={() => window.location.reload()} 
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            className="px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-xl transition-colors"
           >
             Retry
           </button>
@@ -234,233 +280,441 @@ const Profile = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-2xl mx-auto bg-white rounded-lg shadow p-8">
-        {/* Header with Logout Button */}
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-2xl font-bold">Profile Settings</h1>
-          <button
-            onClick={handleLogout}
-            disabled={logoutLoading}
-            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {logoutLoading ? (
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-            ) : (
-              <IconLogout className="w-4 h-4" />
-            )}
-            {logoutLoading ? 'Logging out...' : 'Logout'}
-          </button>
-        </div>
+    <div className={`min-h-screen transition-all duration-300 ${
+      isDark 
+        ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-black' 
+        : 'bg-gradient-to-br from-blue-50 via-white to-purple-50'
+    }`}>
+      {/* ✅ MODERN HEADER WITH NAVIGATION */}
+      <div className={`sticky top-0 z-50 backdrop-blur-sm border-b transition-all ${
+        isDark 
+          ? 'bg-gray-900/80 border-gray-700/50' 
+          : 'bg-white/80 border-gray-200/50'
+      }`}>
+        <div className="max-w-4xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            {/* ✅ BACK TO CHAT BUTTON */}
+            <button
+              onClick={handleBackToChat}
+              className={`group flex items-center gap-3 px-4 py-2 rounded-xl transition-all hover:scale-105 ${
+                isDark 
+                  ? 'text-gray-300 hover:text-white hover:bg-gray-800' 
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <IconArrowLeft size={20} className="transition-transform group-hover:-translate-x-1" />
+              <span className="font-medium">Back to Chat</span>
+            </button>
 
-        {/* Success Message */}
+            {/* ✅ PAGE TITLE */}
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-xl ${
+                isDark ? 'bg-blue-900/30' : 'bg-blue-100'
+              }`}>
+                <IconSettings size={20} className={isDark ? 'text-blue-400' : 'text-blue-600'} />
+              </div>
+              <h1 className={`text-xl font-bold ${
+                isDark ? 'text-white' : 'text-gray-900'
+              }`}>
+                Profile Settings
+              </h1>
+            </div>
+
+            {/* ✅ THEME TOGGLE & LOGOUT */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={toggleTheme}
+                className={`p-2 rounded-xl transition-all hover:scale-105 ${
+                  isDark 
+                    ? 'text-yellow-400 hover:bg-gray-800' 
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+                title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+              >
+                {isDark ? '☀️' : '🌙'}
+              </button>
+
+              <button
+                onClick={handleLogout}
+                disabled={logoutLoading}
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+              >
+                {logoutLoading ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <IconLogout size={16} />
+                )}
+                <span className="font-medium hidden sm:block">
+                  {logoutLoading ? 'Logging out...' : 'Logout'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ✅ MAIN CONTENT */}
+      <div className="max-w-4xl mx-auto px-6 py-8">
+        {/* ✅ SUCCESS MESSAGE */}
         {successMessage && (
-          <div className="mb-6 p-4 bg-green-100 border border-green-400 text-green-700 rounded-md">
-            {successMessage}
+          <div className={`mb-8 p-4 rounded-2xl border-l-4 ${
+            isDark 
+              ? 'bg-green-900/20 border-green-400 text-green-300' 
+              : 'bg-green-50 border-green-400 text-green-700'
+          }`}>
+            <div className="flex items-center gap-3">
+              <IconCheck size={20} />
+              <span className="font-medium">{successMessage}</span>
+            </div>
           </div>
         )}
 
-        {/* Profile Picture */}
-        <div className="mb-8 text-center">
-          <div className="relative inline-block">
-            <img
-              src={
-                user.profilePicture 
-                  ? `${import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000'}${user.profilePicture}` 
-                  : 'https://assets.aceternity.com/manu.png'
-              }
-              alt="Profile"
-              className="w-32 h-32 rounded-full object-cover border-4 border-gray-200"
-              onError={(e) => {
-                console.log('🖼️ Image load error, falling back to default');
-                e.target.src = 'https://assets.aceternity.com/manu.png';
-              }}
-            />
-            
-            {/* Upload/Camera Button */}
-            <label className="absolute bottom-0 right-0 bg-blue-500 p-2 rounded-full cursor-pointer hover:bg-blue-600 shadow-lg">
-              {photoLoading ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-              ) : (
-                <IconCamera className="w-4 h-4 text-white" />
+        {/* ✅ PROFILE CARDS LAYOUT */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          
+          {/* ✅ PROFILE PICTURE CARD */}
+          <div className={`lg:col-span-1 p-8 rounded-3xl border transition-all ${
+            isDark 
+              ? 'bg-gray-800/50 border-gray-700/50 backdrop-blur-sm' 
+              : 'bg-white/70 border-gray-200/50 backdrop-blur-sm'
+          } shadow-xl hover:shadow-2xl`}>
+            <div className="text-center space-y-6">
+              <div className="relative inline-block">
+                {/* ✅ PROFILE IMAGE WITH GLOW EFFECT */}
+                <div className={`relative p-1 rounded-full bg-gradient-to-r from-blue-500 via-purple-500 to-cyan-500 ${
+                  photoLoading ? 'animate-pulse' : ''
+                }`}>
+                  <img
+                    src={
+                      user.profilePicture 
+                        ? `${import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000'}${user.profilePicture}` 
+                        : 'https://assets.aceternity.com/manu.png'
+                    }
+                    alt="Profile"
+                    className={`w-32 h-32 rounded-full object-cover ${
+                      isDark ? 'bg-gray-700' : 'bg-gray-100'
+                    }`}
+                    onError={(e) => {
+                      e.target.src = 'https://assets.aceternity.com/manu.png';
+                    }}
+                  />
+                </div>
+                
+                {/* ✅ UPLOAD BUTTON */}
+                <label className={`absolute bottom-2 right-2 p-3 rounded-full cursor-pointer shadow-lg transition-all hover:scale-110 ${
+                  isDark 
+                    ? 'bg-blue-600 hover:bg-blue-500' 
+                    : 'bg-blue-500 hover:bg-blue-600'
+                }`}>
+                  {photoLoading ? (
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    <IconCamera size={20} className="text-white" />
+                  )}
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                    disabled={photoLoading}
+                  />
+                </label>
+
+                {/* ✅ DELETE BUTTON */}
+                {user.profilePicture && (
+                  <button
+                    onClick={handleDeletePhoto}
+                    disabled={photoLoading}
+                    className="absolute top-2 right-2 p-2 bg-red-500 hover:bg-red-600 rounded-full shadow-lg transition-all hover:scale-110 disabled:opacity-50"
+                    title="Delete photo"
+                  >
+                    <IconTrash size={14} className="text-white" />
+                  </button>
+                )}
+
+                {/* ✅ STATUS INDICATOR */}
+                <div className={`absolute bottom-2 left-2 w-6 h-6 rounded-full border-4 ${
+                  isDark ? 'border-gray-800' : 'border-white'
+                } ${
+                  user.isVerified ? 'bg-green-500' : 'bg-yellow-500'
+                } shadow-lg`}></div>
+              </div>
+
+              {/* ✅ USER NAME & ROLE */}
+              <div className="space-y-3">
+                <h2 className={`text-2xl font-bold ${
+                  isDark ? 'text-white' : 'text-gray-900'
+                }`}>
+                  {user.name || 'User Name'}
+                </h2>
+                
+                <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium ${
+                  user.role === 'admin' 
+                    ? isDark 
+                      ? 'bg-purple-900/30 text-purple-400 border border-purple-500/30' 
+                      : 'bg-purple-100 text-purple-800 border border-purple-200'
+                    : isDark 
+                      ? 'bg-blue-900/30 text-blue-400 border border-blue-500/30' 
+                      : 'bg-blue-100 text-blue-800 border border-blue-200'
+                }`}>
+                  <IconShield size={16} />
+                  {user.role?.charAt(0).toUpperCase() + user.role?.slice(1)}
+                </div>
+              </div>
+
+              {/* ✅ PHOTO ERROR */}
+              {errors.photo && (
+                <div className={`p-3 rounded-xl text-sm ${
+                  isDark 
+                    ? 'bg-red-900/20 text-red-400 border border-red-500/30' 
+                    : 'bg-red-50 text-red-700 border border-red-200'
+                }`}>
+                  {errors.photo}
+                </div>
               )}
-              <input
-                type="file"
-                className="hidden"
-                accept="image/*"
-                onChange={handleImageChange}
-                disabled={photoLoading}
-              />
-            </label>
 
-            {/* Delete Photo Button */}
-            {user.profilePicture && (
-              <button
-                onClick={handleDeletePhoto}
-                disabled={photoLoading}
-                className="absolute top-0 right-0 bg-red-500 p-1 rounded-full hover:bg-red-600 shadow-lg"
-                title="Delete photo"
-              >
-                <IconTrash className="w-3 h-3 text-white" />
-              </button>
-            )}
-          </div>
-
-          {/* Photo Error */}
-          {errors.photo && (
-            <p className="mt-2 text-sm text-red-600">{errors.photo}</p>
-          )}
-
-          <p className="mt-2 text-sm text-gray-500">
-            Click camera icon to upload new photo
-          </p>
-          
-          {/* Debug info - remove in production */}
-          {user.profilePicture && (
-            <p className="mt-1 text-xs text-gray-400">
-              Photo URL: {user.profilePicture}
-            </p>
-          )}
-        </div>
-
-        {/* User Role Badge */}
-        <div className="mb-6 text-center">
-          <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
-            user.role === 'admin' 
-              ? 'bg-purple-100 text-purple-800' 
-              : 'bg-blue-100 text-blue-800'
-          }`}>
-            {user.role?.charAt(0).toUpperCase() + user.role?.slice(1)}
-          </span>
-        </div>
-
-        {/* Name Field */}
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Full Name
-          </label>
-          <div className="flex items-center gap-2">
-            {isEditing.name ? (
-              <>
-                <input
-                  type="text"
-                  value={tempValues.name}
-                  onChange={(e) => setTempValues(prev => ({ ...prev, name: e.target.value }))}
-                  className={`flex-1 p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.name ? 'border-red-300' : 'border-gray-300'
-                  }`}
-                  placeholder="Enter your full name"
-                  disabled={updateLoading}
-                />
-                <button
-                  onClick={() => handleSave('name')}
-                  disabled={updateLoading}
-                  className="p-2 text-green-600 hover:text-green-700 disabled:opacity-50"
-                >
-                  {updateLoading ? (
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-green-600"></div>
-                  ) : (
-                    <IconCheck className="w-5 h-5" />
-                  )}
-                </button>
-                <button
-                  onClick={() => handleCancel('name')}
-                  disabled={updateLoading}
-                  className="p-2 text-red-600 hover:text-red-700 disabled:opacity-50"
-                >
-                  <IconX className="w-5 h-5" />
-                </button>
-              </>
-            ) : (
-              <>
-                <span className="flex-1 text-gray-900">{user.name || 'Not set'}</span>
-                <button
-                  onClick={() => handleEdit('name')}
-                  className="p-2 text-gray-600 hover:text-gray-700"
-                >
-                  <IconPencil className="w-5 h-5" />
-                </button>
-              </>
-            )}
-          </div>
-          {errors.name && (
-            <p className="mt-1 text-sm text-red-600">{errors.name}</p>
-          )}
-        </div>
-
-        {/* Email Field */}
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Email Address
-          </label>
-          <div className="flex items-center gap-2">
-            {isEditing.email ? (
-              <>
-                <input
-                  type="email"
-                  value={tempValues.email}
-                  onChange={(e) => setTempValues(prev => ({ ...prev, email: e.target.value }))}
-                  className={`flex-1 p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.email ? 'border-red-300' : 'border-gray-300'
-                  }`}
-                  placeholder="Enter your email address"
-                  disabled={updateLoading}
-                />
-                <button
-                  onClick={() => handleSave('email')}
-                  disabled={updateLoading}
-                  className="p-2 text-green-600 hover:text-green-700 disabled:opacity-50"
-                >
-                  {updateLoading ? (
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-green-600"></div>
-                  ) : (
-                    <IconCheck className="w-5 h-5" />
-                  )}
-                </button>
-                <button
-                  onClick={() => handleCancel('email')}
-                  disabled={updateLoading}
-                  className="p-2 text-red-600 hover:text-red-700 disabled:opacity-50"
-                >
-                  <IconX className="w-5 h-5" />
-                </button>
-              </>
-            ) : (
-              <>
-                <span className="flex-1 text-gray-900">{user.email || 'Not set'}</span>
-                <button
-                  onClick={() => handleEdit('email')}
-                  className="p-2 text-gray-600 hover:text-gray-700"
-                >
-                  <IconPencil className="w-5 h-5" />
-                </button>
-              </>
-            )}
-          </div>
-          {errors.email && (
-            <p className="mt-1 text-sm text-red-600">{errors.email}</p>
-          )}
-        </div>
-
-        {/* Account Info */}
-        <div className="border-t pt-6">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Account Information</h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div>
-              <span className="text-gray-500">Account Status:</span>
-              <span className={`ml-2 inline-block px-2 py-1 rounded text-xs ${
-                user.isVerified 
-                  ? 'bg-green-100 text-green-800' 
-                  : 'bg-yellow-100 text-yellow-800'
+              {/* ✅ UPLOAD TIP */}
+              <div className={`text-sm ${
+                isDark ? 'text-gray-400' : 'text-gray-500'
               }`}>
-                {user.isVerified ? 'Verified' : 'Pending Verification'}
-              </span>
+                Click the camera icon to upload a new photo
+              </div>
             </div>
+          </div>
+
+          {/* ✅ PROFILE DETAILS CARD */}
+          <div className={`lg:col-span-2 p-8 rounded-3xl border transition-all ${
+            isDark 
+              ? 'bg-gray-800/50 border-gray-700/50 backdrop-blur-sm' 
+              : 'bg-white/70 border-gray-200/50 backdrop-blur-sm'
+          } shadow-xl hover:shadow-2xl`}>
             
-            <div>
-              <span className="text-gray-500">User ID:</span>
-              <span className="ml-2 text-gray-900 font-mono text-xs">{user._id || user.id}</span>
+            <div className="space-y-8">
+              {/* ✅ SECTION HEADER */}
+              <div className="flex items-center gap-3 pb-6 border-b border-gray-200/20">
+                <div className={`p-2 rounded-xl ${
+                  isDark ? 'bg-blue-900/30' : 'bg-blue-100'
+                }`}>
+                  <IconUser size={20} className={isDark ? 'text-blue-400' : 'text-blue-600'} />
+                </div>
+                <h3 className={`text-xl font-bold ${
+                  isDark ? 'text-white' : 'text-gray-900'
+                }`}>
+                  Personal Information
+                </h3>
+              </div>
+
+              {/* ✅ NAME FIELD */}
+              <div className="space-y-3">
+                <label className={`flex items-center gap-2 text-sm font-medium ${
+                  isDark ? 'text-gray-300' : 'text-gray-700'
+                }`}>
+                  <IconUser size={16} />
+                  Full Name
+                </label>
+                
+                <div className="flex items-center gap-3">
+                  {isEditing.name ? (
+                    <>
+                      <input
+                        type="text"
+                        value={tempValues.name}
+                        onChange={(e) => setTempValues(prev => ({ ...prev, name: e.target.value }))}
+                        className={`flex-1 p-4 border rounded-2xl transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          errors.name 
+                            ? 'border-red-300' 
+                            : isDark 
+                              ? 'border-gray-600 bg-gray-700 text-white' 
+                              : 'border-gray-300 bg-white'
+                        }`}
+                        placeholder="Enter your full name"
+                        disabled={updateLoading}
+                      />
+                      <button
+                        onClick={() => handleSave('name')}
+                        disabled={updateLoading}
+                        className="p-4 text-green-600 hover:text-green-700 hover:bg-green-100 rounded-2xl transition-all disabled:opacity-50"
+                      >
+                        {updateLoading ? (
+                          <div className="w-5 h-5 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
+                        ) : (
+                          <IconCheck size={20} />
+                        )}
+                      </button>
+                      <button
+                        onClick={() => handleCancel('name')}
+                        disabled={updateLoading}
+                        className="p-4 text-red-600 hover:text-red-700 hover:bg-red-100 rounded-2xl transition-all disabled:opacity-50"
+                      >
+                        <IconX size={20} />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className={`flex-1 p-4 rounded-2xl border ${
+                        isDark 
+                          ? 'border-gray-600 bg-gray-700/50 text-white' 
+                          : 'border-gray-200 bg-gray-50 text-gray-900'
+                      }`}>
+                        {user.name || 'Not set'}
+                      </div>
+                      <button
+                        onClick={() => handleEdit('name')}
+                        className={`p-4 rounded-2xl transition-all hover:scale-105 ${
+                          isDark 
+                            ? 'text-gray-400 hover:text-white hover:bg-gray-700' 
+                            : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                        }`}
+                      >
+                        <IconPencil size={20} />
+                      </button>
+                    </>
+                  )}
+                </div>
+                
+                {errors.name && (
+                  <div className={`p-3 rounded-xl text-sm ${
+                    isDark 
+                      ? 'bg-red-900/20 text-red-400' 
+                      : 'bg-red-50 text-red-700'
+                  }`}>
+                    {errors.name}
+                  </div>
+                )}
+              </div>
+
+              {/* ✅ EMAIL FIELD */}
+              <div className="space-y-3">
+                <label className={`flex items-center gap-2 text-sm font-medium ${
+                  isDark ? 'text-gray-300' : 'text-gray-700'
+                }`}>
+                  <IconMail size={16} />
+                  Email Address
+                </label>
+                
+                <div className="flex items-center gap-3">
+                  {isEditing.email ? (
+                    <>
+                      <input
+                        type="email"
+                        value={tempValues.email}
+                        onChange={(e) => setTempValues(prev => ({ ...prev, email: e.target.value }))}
+                        className={`flex-1 p-4 border rounded-2xl transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          errors.email 
+                            ? 'border-red-300' 
+                            : isDark 
+                              ? 'border-gray-600 bg-gray-700 text-white' 
+                              : 'border-gray-300 bg-white'
+                        }`}
+                        placeholder="Enter your email address"
+                        disabled={updateLoading}
+                      />
+                      <button
+                        onClick={() => handleSave('email')}
+                        disabled={updateLoading}
+                        className="p-4 text-green-600 hover:text-green-700 hover:bg-green-100 rounded-2xl transition-all disabled:opacity-50"
+                      >
+                        {updateLoading ? (
+                          <div className="w-5 h-5 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
+                        ) : (
+                          <IconCheck size={20} />
+                        )}
+                      </button>
+                      <button
+                        onClick={() => handleCancel('email')}
+                        disabled={updateLoading}
+                        className="p-4 text-red-600 hover:text-red-700 hover:bg-red-100 rounded-2xl transition-all disabled:opacity-50"
+                      >
+                        <IconX size={20} />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className={`flex-1 p-4 rounded-2xl border ${
+                        isDark 
+                          ? 'border-gray-600 bg-gray-700/50 text-white' 
+                          : 'border-gray-200 bg-gray-50 text-gray-900'
+                      }`}>
+                        {user.email || 'Not set'}
+                      </div>
+                      <button
+                        onClick={() => handleEdit('email')}
+                        className={`p-4 rounded-2xl transition-all hover:scale-105 ${
+                          isDark 
+                            ? 'text-gray-400 hover:text-white hover:bg-gray-700' 
+                            : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                        }`}
+                      >
+                        <IconPencil size={20} />
+                      </button>
+                    </>
+                  )}
+                </div>
+                
+                {errors.email && (
+                  <div className={`p-3 rounded-xl text-sm ${
+                    isDark 
+                      ? 'bg-red-900/20 text-red-400' 
+                      : 'bg-red-50 text-red-700'
+                  }`}>
+                    {errors.email}
+                  </div>
+                )}
+              </div>
+
+              {/* ✅ ACCOUNT INFO SECTION */}
+              <div className="pt-6 border-t border-gray-200/20">
+                <h4 className={`text-lg font-semibold mb-6 ${
+                  isDark ? 'text-white' : 'text-gray-900'
+                }`}>
+                  Account Information
+                </h4>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  {/* ✅ VERIFICATION STATUS */}
+                  <div className={`p-4 rounded-2xl border ${
+                    isDark 
+                      ? 'border-gray-600 bg-gray-700/30' 
+                      : 'border-gray-200 bg-gray-50'
+                  }`}>
+                    <div className={`text-sm font-medium mb-2 ${
+                      isDark ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
+                      Account Status
+                    </div>
+                    <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium ${
+                      user.isVerified 
+                        ? isDark 
+                          ? 'bg-green-900/30 text-green-400' 
+                          : 'bg-green-100 text-green-800'
+                        : isDark 
+                          ? 'bg-yellow-900/30 text-yellow-400' 
+                          : 'bg-yellow-100 text-yellow-800'
+                    }`}>
+                      {user.isVerified ? '✅' : '⏳'}
+                      {user.isVerified ? 'Verified' : 'Pending'}
+                    </div>
+                  </div>
+                  
+                  {/* ✅ USER ID */}
+                  <div className={`p-4 rounded-2xl border ${
+                    isDark 
+                      ? 'border-gray-600 bg-gray-700/30' 
+                      : 'border-gray-200 bg-gray-50'
+                  }`}>
+                    <div className={`text-sm font-medium mb-2 ${
+                      isDark ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
+                      User ID
+                    </div>
+                    <div className={`text-xs font-mono truncate ${
+                      isDark ? 'text-gray-400' : 'text-gray-600'
+                    }`}>
+                      {user._id || user.id}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
