@@ -6,7 +6,8 @@ const ResetPasswordPage = () => {
   return (
     <AuthLayout 
       title="Reset Password" 
-      subtitle="Enter your email to receive reset instructions"
+      subtitle="Secure password reset in just a few steps"
+      useSlideshow={true}
     >
       <ResetPassword />
     </AuthLayout>

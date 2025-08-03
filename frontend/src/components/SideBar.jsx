@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef , useCallback} from "react";
 import { useNavigate } from "react-router-dom";
 import { Sidebar, SidebarBody, SidebarLink } from "./ui/sidebar.jsx";
+import {Link} from "react-router-dom";
 import {
   IconArrowLeft,
   IconSettings,
@@ -462,22 +463,39 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
           : 'bg-gradient-to-b from-white via-gray-50 to-gray-100 border-r border-gray-200'
       } overflow-hidden`}>
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* ✅ LOGO - FASTER ANIMATION */}
+          {/* ✅ LOGO - FIXED: Remove duplicate div and add proper routing */}
           <div className={`relative z-20 flex items-center py-6 text-sm font-normal transition-all duration-300 ${
             open ? 'justify-start px-6' : 'justify-center px-3'
           }`}>
-            <div className="w-8 h-8 bg-gradient-to-br from-purple-500 via-blue-500 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg shrink-0">
-              <IconRobot size={18} className="text-white" />
-            </div>
-            {open && (
-              <span className={`font-bold text-lg ml-3 truncate transition-all duration-200 ${
-                isDark 
-                  ? 'bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent' 
-                  : 'bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent'
-              }`}>
-                Nexus AI
-              </span>
-            )}
+            <Link 
+              to="/chat" 
+              className="flex items-center gap-3 cursor-pointer"
+              onClick={() => {
+                // ✅ CLEAR SESSION TO GO TO WELCOME PAGE
+                if (chatContextAvailable && setSession) {
+                  setSession(null);
+                }
+                // ✅ CLEAR PARENT SELECTION
+                if (onSelectSession) {
+                  onSelectSession(null);
+                }
+                // ✅ NAVIGATE TO CHAT INTERFACE (WELCOME SCREEN)
+                navigate('/chat');
+              }}
+            >
+              <div className="w-8 h-8 bg-gradient-to-br from-purple-500 via-blue-500 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg shrink-0">
+                <IconRobot size={18} className="text-white" />
+              </div>
+              {open && (
+                <span className={`font-bold text-lg ml-3 truncate transition-all duration-200 ${
+                  isDark 
+                    ? 'bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent' 
+                    : 'bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent'
+                }`}>
+                  Nexus AI
+                </span>
+              )}
+            </Link>
           </div>
 
           {/* ✅ NEW CHAT BUTTON - FASTER ANIMATION */}
