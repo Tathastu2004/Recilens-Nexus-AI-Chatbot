@@ -8,15 +8,15 @@ import {
 } from '@tabler/icons-react';
 
 const ImageSlideshow = () => {
-  // ✅ ENHANCED SLIDES WITH VALID ICONS
+  // ✅ ENHANCED SLIDES WITH DARKER THEME
   const slides = [
     {
       id: 1,
       title: "Smart AI Conversations",
       subtitle: "Experience the future of intelligent chat",
       description: "Our advanced AI understands context and provides meaningful responses to help you accomplish more.",
-      icon: <IconRobot size={48} className="text-blue-400" />,
-      gradient: "from-blue-600 via-blue-700 to-indigo-800",
+      icon: <IconRobot size={48} className="text-blue-300" />,
+      gradient: "from-gray-900 via-gray-800 to-blue-900",
       features: ["Real-time responses", "Context awareness", "Multi-format support"]
     },
     {
@@ -24,8 +24,8 @@ const ImageSlideshow = () => {
       title: "Powered by Advanced AI",
       subtitle: "Cutting-edge technology at your fingertips",
       description: "Built with the latest AI models to understand complex queries and provide accurate, helpful responses.",
-      icon: <IconBrain size={48} className="text-purple-400" />,
-      gradient: "from-purple-600 via-purple-700 to-indigo-800",
+      icon: <IconBrain size={48} className="text-purple-300" />,
+      gradient: "from-gray-900 via-gray-800 to-purple-900",
       features: ["Latest AI models", "Complex reasoning", "Accurate responses"]
     },
     {
@@ -33,8 +33,8 @@ const ImageSlideshow = () => {
       title: "Seamless Communication",
       subtitle: "Chat naturally with AI assistance",
       description: "Engage in natural conversations with our AI that remembers context and provides personalized assistance.",
-      icon: <IconMessages size={48} className="text-green-400" />,
-      gradient: "from-green-600 via-teal-600 to-blue-700",
+      icon: <IconMessages size={48} className="text-emerald-300" />,
+      gradient: "from-gray-900 via-gray-800 to-emerald-900",
       features: ["Natural language", "Memory retention", "Personalized help"]
     },
     {
@@ -42,8 +42,8 @@ const ImageSlideshow = () => {
       title: "Secure & Private",
       subtitle: "Your data protection is our priority",
       description: "Enterprise-grade security with end-to-end encryption ensures your conversations remain private and secure.",
-      icon: <IconShield size={48} className="text-yellow-400" />,
-      gradient: "from-yellow-600 via-orange-600 to-red-700",
+      icon: <IconShield size={48} className="text-yellow-300" />,
+      gradient: "from-gray-900 via-gray-800 to-orange-900",
       features: ["End-to-end encryption", "Privacy first", "Secure storage"]
     },
     {
@@ -51,8 +51,8 @@ const ImageSlideshow = () => {
       title: "Lightning Fast",
       subtitle: "Instant responses when you need them",
       description: "Optimized infrastructure delivers lightning-fast responses without compromising on quality or accuracy.",
-      icon: <IconBolt size={48} className="text-cyan-400" />,
-      gradient: "from-cyan-600 via-blue-600 to-purple-700",
+      icon: <IconBolt size={48} className="text-cyan-300" />,
+      gradient: "from-gray-900 via-gray-800 to-cyan-900",
       features: ["Sub-second responses", "Global infrastructure", "99.9% uptime"]
     }
   ];
@@ -79,31 +79,31 @@ const ImageSlideshow = () => {
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
     >
-      {/* ✅ BACKGROUND PATTERN */}
-      <div className="absolute inset-0 opacity-10">
+      {/* ✅ DARKER BACKGROUND PATTERN */}
+      <div className="absolute inset-0 opacity-5">
         <div className="absolute inset-0 bg-repeat animate-pulse" style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.15'%3E%3Ccircle cx='30' cy='30' r='2'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`
+          backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.1'%3E%3Ccircle cx='30' cy='30' r='2'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`
         }}></div>
       </div>
 
-      {/* ✅ FLOATING ELEMENTS */}
+      {/* ✅ SUBTLE FLOATING ELEMENTS */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-20 left-10 w-4 h-4 bg-white/20 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
-        <div className="absolute top-40 right-20 w-6 h-6 bg-white/10 rounded-full animate-bounce" style={{ animationDelay: '1s' }}></div>
-        <div className="absolute bottom-40 left-20 w-3 h-3 bg-white/15 rounded-full animate-bounce" style={{ animationDelay: '2s' }}></div>
-        <div className="absolute bottom-20 right-10 w-5 h-5 bg-white/10 rounded-full animate-bounce" style={{ animationDelay: '0.5s' }}></div>
-        <div className="absolute top-1/2 left-1/4 w-2 h-2 bg-white/10 rounded-full animate-ping" style={{ animationDelay: '3s' }}></div>
-        <div className="absolute top-1/3 right-1/3 w-3 h-3 bg-white/15 rounded-full animate-ping" style={{ animationDelay: '1.5s' }}></div>
+        <div className="absolute top-20 left-10 w-3 h-3 bg-white/10 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
+        <div className="absolute top-40 right-20 w-4 h-4 bg-white/5 rounded-full animate-bounce" style={{ animationDelay: '1s' }}></div>
+        <div className="absolute bottom-40 left-20 w-2 h-2 bg-white/10 rounded-full animate-bounce" style={{ animationDelay: '2s' }}></div>
+        <div className="absolute bottom-20 right-10 w-3 h-3 bg-white/5 rounded-full animate-bounce" style={{ animationDelay: '0.5s' }}></div>
+        <div className="absolute top-1/2 left-1/4 w-1 h-1 bg-white/10 rounded-full animate-ping" style={{ animationDelay: '3s' }}></div>
+        <div className="absolute top-1/3 right-1/3 w-2 h-2 bg-white/5 rounded-full animate-ping" style={{ animationDelay: '1.5s' }}></div>
       </div>
 
       {/* ✅ MAIN CONTENT */}
       <div className="relative h-full flex flex-col justify-center items-center p-8 text-white">
-        {/* Icon with Enhanced Glow Effect */}
+        {/* Icon with Dark Theme Glow Effect */}
         <div className="mb-8 flex justify-center">
           <div className="relative">
-            <div className="absolute inset-0 bg-white/20 rounded-full blur-xl animate-pulse"></div>
-            <div className="absolute inset-0 bg-white/10 rounded-full blur-2xl"></div>
-            <div className="relative p-6 bg-white/10 rounded-full backdrop-blur-sm border border-white/20 shadow-2xl">
+            <div className="absolute inset-0 bg-white/5 rounded-full blur-xl"></div>
+            <div className="absolute inset-0 bg-white/3 rounded-full blur-2xl"></div>
+            <div className="relative p-6 bg-gray-800/50 rounded-full backdrop-blur-sm border border-white/10 shadow-2xl">
               {currentSlideData.icon}
             </div>
           </div>
@@ -112,17 +112,17 @@ const ImageSlideshow = () => {
         {/* Content with Fade Animation */}
         <div className="text-center max-w-lg mx-auto">
           {/* Title with Enhanced Animation */}
-          <h1 className="text-4xl lg:text-5xl font-bold mb-4 leading-tight animate-fade-in">
+          <h1 className="text-4xl lg:text-5xl font-bold mb-4 leading-tight text-white">
             {currentSlideData.title}
           </h1>
 
           {/* Subtitle */}
-          <h2 className="text-xl lg:text-2xl font-medium mb-6 text-white/90">
+          <h2 className="text-xl lg:text-2xl font-medium mb-6 text-gray-300">
             {currentSlideData.subtitle}
           </h2>
 
           {/* Description */}
-          <p className="text-lg leading-relaxed text-white/80 mb-8">
+          <p className="text-lg leading-relaxed text-gray-400 mb-8">
             {currentSlideData.description}
           </p>
 
@@ -137,23 +137,23 @@ const ImageSlideshow = () => {
                   animationFillMode: 'forwards'
                 }}
               >
-                <div className="w-2 h-2 bg-white/60 rounded-full animate-pulse"></div>
-                <span className="text-white/90">{feature}</span>
+                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full"></div>
+                <span className="text-gray-400">{feature}</span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* ✅ CLEAN SLIDE INDICATORS (NO BUTTONS) */}
+        {/* ✅ CLEAN SLIDE INDICATORS */}
         <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2">
           <div className="flex gap-2">
             {slides.map((_, index) => (
               <div
                 key={index}
-                className={`w-3 h-3 rounded-full transition-all duration-500 ${
+                className={`w-2 h-2 rounded-full transition-all duration-500 ${
                   currentSlide === index 
-                    ? 'bg-white scale-125 shadow-lg animate-pulse' 
-                    : 'bg-white/40'
+                    ? 'bg-white/80 scale-125' 
+                    : 'bg-white/20'
                 }`}
               />
             ))}
@@ -163,12 +163,49 @@ const ImageSlideshow = () => {
         {/* ✅ SLIDE TRANSITION ANIMATION */}
         <div 
           key={currentSlide}
-          className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-slide-transition pointer-events-none"
+          className="absolute inset-0 bg-gradient-to-r from-transparent via-white/2 to-transparent animate-slide-transition pointer-events-none"
         ></div>
       </div>
 
-      {/* ✅ ENHANCED GRADIENT OVERLAY */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none"></div>
+      {/* ✅ DARK GRADIENT OVERLAY */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent pointer-events-none"></div>
+
+      {/* ✅ CSS ANIMATIONS */}
+      <style jsx>{`
+        @keyframes slide-up {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
+        @keyframes slide-transition {
+          0% { opacity: 0; transform: translateX(-100%); }
+          50% { opacity: 0.1; transform: translateX(0%); }
+          100% { opacity: 0; transform: translateX(100%); }
+        }
+        
+        @keyframes fade-in {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .animate-slide-up {
+          animation: slide-up 0.6s ease-out;
+        }
+        
+        .animate-slide-transition {
+          animation: slide-transition 2s ease-in-out;
+        }
+        
+        .animate-fade-in {
+          animation: fade-in 0.8s ease-out;
+        }
+      `}</style>
     </div>
   );
 };

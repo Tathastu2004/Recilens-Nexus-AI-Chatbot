@@ -1,8 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { IconEye, IconEyeOff, IconUser, IconLogin } from '@tabler/icons-react';
+import { 
+  IconEye, 
+  IconEyeOff, 
+  IconUser, 
+  IconLogin, 
+  IconMail, 
+  IconLock,
+  IconSparkles,
+  IconCheck,
+  IconX,
+  IconShield
+} from '@tabler/icons-react';
 import VerifyMail from './verfiyMail';
 import { useUser } from '../context/UserContext';
+import { useTheme } from '../context/ThemeContext';
 
 const SignUp = () => {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -14,6 +26,7 @@ const SignUp = () => {
   const [registrationEmail, setRegistrationEmail] = useState('');
 
   const { registerUser, loginUser, loading: userLoading, isAuthenticated } = useUser();
+  const { isDark } = useTheme();
   const navigate = useNavigate();
 
   // SignUp form data
@@ -115,19 +128,14 @@ const SignUp = () => {
     try {
       const result = await registerUser(signUpData);
       
-      console.log('📝 [SignUp] Registration result:', result);
-      
       if (result && result.success) {
-        console.log('✅ [SignUp] Registration successful, showing verification');
         setRegistrationEmail(signUpData.email);
         setShowVerification(true);
       } else {
         const errorMessage = result?.message || 'Registration failed';
-        console.error('❌ [SignUp] Registration failed:', errorMessage);
         setErrors({ general: errorMessage });
       }
     } catch (error) {
-      console.error('❌ [SignUp] Registration error:', error);
       setErrors({ general: 'An error occurred during registration' });
     } finally {
       setLoading(false);
@@ -144,34 +152,18 @@ const SignUp = () => {
       const result = await loginUser(signInData);
       
       if (result.success) {
-        console.log('✅ [SignUp] Login successful:', result);
-        
         const userData = result.user || result.data?.user || result.data;
         const userRole = userData?.role || result.role;
         
-        console.log('👤 [SignUp] User data:', {
-          userData,
-          userRole,
-          fullResult: result
-        });
-        
         if (userRole === 'admin') {
-          console.log('🔧 [SignUp] Redirecting to admin dashboard...');
           navigate('/admin-dashboard');
-        } else if (userRole === 'client' || !userRole) {
-          console.log('💬 [SignUp] Redirecting to chat...');
-          navigate('/chat');
         } else {
-          console.log('❓ [SignUp] Unknown role, redirecting to chat...');
           navigate('/chat');
         }
-        
       } else {
-        console.error('❌ [SignUp] Login failed:', result);
         setErrors({ general: result.message || 'Login failed' });
       }
     } catch (error) {
-      console.error('❌ [SignUp] Login error:', error);
       setErrors({ general: 'An error occurred during login' });
     } finally {
       setLoading(false);
@@ -212,156 +204,216 @@ const SignUp = () => {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Toggle Buttons */}
-      <div className="flex rounded-lg bg-gray-100 p-1">
+    <div className="w-full">
+      {/* ✅ MODE TOGGLE BUTTONS */}
+      <div className={`flex rounded-xl p-1 mb-6 transition-all duration-300 ${
+        isDark 
+          ? 'bg-gray-700/30 border border-gray-600/30' 
+          : 'bg-gray-100/50 border border-gray-200/30'
+      }`}>
         <button
           type="button"
           onClick={() => !isSignUp && toggleMode()}
-          className={`flex-1 rounded-md py-2 px-4 text-sm font-medium transition-colors ${
+          className={`flex-1 rounded-lg py-3 px-4 text-sm font-semibold transition-all duration-300 transform ${
             isSignUp
-              ? 'bg-white text-blue-600 shadow-sm'
-              : 'text-gray-500 hover:text-gray-900'
+              ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg scale-105'
+              : isDark
+                ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-600/20'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/30'
           }`}
         >
-          <IconUser className="inline mr-2 h-4 w-4" />
-          Sign Up
+          <IconUser className="inline mr-2 h-5 w-5" />
+          Create Account
         </button>
         <button
           type="button"
           onClick={() => isSignUp && toggleMode()}
-          className={`flex-1 rounded-md py-2 px-4 text-sm font-medium transition-colors ${
+          className={`flex-1 rounded-lg py-3 px-4 text-sm font-semibold transition-all duration-300 transform ${
             !isSignUp
-              ? 'bg-white text-blue-600 shadow-sm'
-              : 'text-gray-500 hover:text-gray-900'
+              ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg scale-105'
+              : isDark
+                ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-600/20'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/30'
           }`}
         >
-          <IconLogin className="inline mr-2 h-4 w-4" />
+          <IconLogin className="inline mr-2 h-5 w-5" />
           Sign In
         </button>
       </div>
 
-      {/* Sign Up Form */}
+      {/* ✅ SIGN UP FORM */}
       {isSignUp ? (
-        <form className="space-y-4" onSubmit={handleSignUpSubmit}>
+        <form className="space-y-5" onSubmit={handleSignUpSubmit}>
           {/* Name Field */}
-          <div>
-            <label htmlFor="name" className="block text-sm font-medium text-gray-700">
+          <div className="space-y-2">
+            <label htmlFor="name" className={`flex items-center text-sm font-medium transition-colors duration-300 ${
+              isDark ? 'text-gray-200' : 'text-gray-700'
+            }`}>
+              <IconUser className="mr-2 h-4 w-4" />
               Full Name
             </label>
-            <input
-              id="name"
-              name="name"
-              type="text"
-              value={signUpData.name}
-              onChange={handleSignUpChange}
-              className={`mt-1 block w-full px-3 py-2 border ${
-                errors.name ? 'border-red-300' : 'border-gray-300'
-              } rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm`}
-              placeholder="Enter your full name"
-            />
-            {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name}</p>}
+            <div className="relative">
+              <input
+                id="name"
+                name="name"
+                type="text"
+                value={signUpData.name}
+                onChange={handleSignUpChange}
+                className={`block w-full px-4 py-3 rounded-lg border transition-all duration-300 focus:outline-none focus:ring-2 ${
+                  errors.name 
+                    ? 'border-red-500/50 bg-red-50/10 focus:border-red-400 focus:ring-red-500/20 text-red-200'
+                    : isDark
+                      ? 'border-gray-600/50 bg-gray-700/30 focus:border-blue-400 focus:ring-blue-500/20 text-gray-100 placeholder-gray-400'
+                      : 'border-gray-300/50 bg-gray-50/30 focus:border-blue-500 focus:ring-blue-500/20 text-gray-900 placeholder-gray-500'
+                }`}
+                placeholder="Enter your full name"
+              />
+              {signUpData.name && (
+                <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                  <IconCheck className="h-5 w-5 text-green-500" />
+                </div>
+              )}
+            </div>
+            {errors.name && (
+              <p className="text-sm flex items-center text-red-400">
+                <IconX className="mr-1 h-4 w-4" />
+                {errors.name}
+              </p>
+            )}
           </div>
 
           {/* Email Field */}
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+          <div className="space-y-2">
+            <label htmlFor="email" className={`flex items-center text-sm font-medium transition-colors duration-300 ${
+              isDark ? 'text-gray-200' : 'text-gray-700'
+            }`}>
+              <IconMail className="mr-2 h-4 w-4" />
               Email Address
             </label>
-            <input
-              id="email"
-              name="email"
-              type="email"
-              value={signUpData.email}
-              onChange={handleSignUpChange}
-              className={`mt-1 block w-full px-3 py-2 border ${
-                errors.email ? 'border-red-300' : 'border-gray-300'
-              } rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm`}
-              placeholder="Enter your email"
-            />
-            {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
+            <div className="relative">
+              <input
+                id="email"
+                name="email"
+                type="email"
+                value={signUpData.email}
+                onChange={handleSignUpChange}
+                className={`block w-full px-4 py-3 rounded-lg border transition-all duration-300 focus:outline-none focus:ring-2 ${
+                  errors.email 
+                    ? 'border-red-500/50 bg-red-50/10 focus:border-red-400 focus:ring-red-500/20 text-red-200'
+                    : isDark
+                      ? 'border-gray-600/50 bg-gray-700/30 focus:border-blue-400 focus:ring-blue-500/20 text-gray-100 placeholder-gray-400'
+                      : 'border-gray-300/50 bg-gray-50/30 focus:border-blue-500 focus:ring-blue-500/20 text-gray-900 placeholder-gray-500'
+                }`}
+                placeholder="Enter your email"
+              />
+              {signUpData.email && /\S+@\S+\.\S+/.test(signUpData.email) && (
+                <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                  <IconCheck className="h-5 w-5 text-green-500" />
+                </div>
+              )}
+            </div>
+            {errors.email && (
+              <p className="text-sm flex items-center text-red-400">
+                <IconX className="mr-1 h-4 w-4" />
+                {errors.email}
+              </p>
+            )}
           </div>
 
           {/* Password Field */}
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+          <div className="space-y-2">
+            <label htmlFor="password" className={`flex items-center text-sm font-medium transition-colors duration-300 ${
+              isDark ? 'text-gray-200' : 'text-gray-700'
+            }`}>
+              <IconLock className="mr-2 h-4 w-4" />
               Password
             </label>
-            <div className="mt-1 relative">
+            <div className="relative">
               <input
                 id="password"
                 name="password"
                 type={showPassword ? 'text' : 'password'}
                 value={signUpData.password}
                 onChange={handleSignUpChange}
-                className={`block w-full px-3 py-2 pr-10 border ${
-                  errors.password ? 'border-red-300' : 'border-gray-300'
-                } rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm`}
+                className={`block w-full px-4 py-3 pr-12 rounded-lg border transition-all duration-300 focus:outline-none focus:ring-2 ${
+                  errors.password 
+                    ? 'border-red-500/50 bg-red-50/10 focus:border-red-400 focus:ring-red-500/20 text-red-200'
+                    : isDark
+                      ? 'border-gray-600/50 bg-gray-700/30 focus:border-blue-400 focus:ring-blue-500/20 text-gray-100 placeholder-gray-400'
+                      : 'border-gray-300/50 bg-gray-50/30 focus:border-blue-500 focus:ring-blue-500/20 text-gray-900 placeholder-gray-500'
+                }`}
                 placeholder="Enter your password"
               />
               <button
                 type="button"
-                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                className={`absolute inset-y-0 right-0 pr-3 flex items-center transition-colors duration-300 ${
+                  isDark ? 'text-gray-400 hover:text-gray-200' : 'text-gray-400 hover:text-gray-600'
+                }`}
                 onClick={() => setShowPassword(!showPassword)}
               >
-                {showPassword ? (
-                  <IconEyeOff className="h-5 w-5 text-gray-400" />
-                ) : (
-                  <IconEye className="h-5 w-5 text-gray-400" />
-                )}
+                {showPassword ? <IconEyeOff className="h-5 w-5" /> : <IconEye className="h-5 w-5" />}
               </button>
             </div>
-            {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password}</p>}
+            {errors.password && (
+              <p className="text-sm flex items-center text-red-400">
+                <IconX className="mr-1 h-4 w-4" />
+                {errors.password}
+              </p>
+            )}
           </div>
 
           {/* Confirm Password Field */}
-          <div>
-            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700">
+          <div className="space-y-2">
+            <label htmlFor="confirmPassword" className={`flex items-center text-sm font-medium transition-colors duration-300 ${
+              isDark ? 'text-gray-200' : 'text-gray-700'
+            }`}>
+              <IconShield className="mr-2 h-4 w-4" />
               Confirm Password
             </label>
-            <div className="mt-1 relative">
+            <div className="relative">
               <input
                 id="confirmPassword"
                 name="confirmPassword"
                 type={showConfirmPassword ? 'text' : 'password'}
                 value={signUpData.confirmPassword}
                 onChange={handleSignUpChange}
-                className={`block w-full px-3 py-2 pr-10 border ${
-                  errors.confirmPassword ? 'border-red-300' : 
-                  signUpData.confirmPassword && signUpData.password === signUpData.confirmPassword ? 'border-green-300' :
-                  'border-gray-300'
-                } rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm`}
+                className={`block w-full px-4 py-3 pr-12 rounded-lg border transition-all duration-300 focus:outline-none focus:ring-2 ${
+                  errors.confirmPassword 
+                    ? 'border-red-500/50 bg-red-50/10 focus:border-red-400 focus:ring-red-500/20 text-red-200'
+                    : signUpData.confirmPassword && signUpData.password === signUpData.confirmPassword
+                      ? 'border-green-500/50 bg-green-50/10 focus:border-green-400 focus:ring-green-500/20 text-gray-100'
+                      : isDark
+                        ? 'border-gray-600/50 bg-gray-700/30 focus:border-blue-400 focus:ring-blue-500/20 text-gray-100 placeholder-gray-400'
+                        : 'border-gray-300/50 bg-gray-50/30 focus:border-blue-500 focus:ring-blue-500/20 text-gray-900 placeholder-gray-500'
+                }`}
                 placeholder="Confirm your password"
               />
               <button
                 type="button"
-                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                className={`absolute inset-y-0 right-0 pr-3 flex items-center transition-colors duration-300 ${
+                  isDark ? 'text-gray-400 hover:text-gray-200' : 'text-gray-400 hover:text-gray-600'
+                }`}
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
               >
-                {showConfirmPassword ? (
-                  <IconEyeOff className="h-5 w-5 text-gray-400" />
-                ) : (
-                  <IconEye className="h-5 w-5 text-gray-400" />
-                )}
+                {showConfirmPassword ? <IconEyeOff className="h-5 w-5" /> : <IconEye className="h-5 w-5" />}
               </button>
             </div>
             {errors.confirmPassword && (
-              <p className="mt-1 text-sm text-red-600">{errors.confirmPassword}</p>
+              <p className="text-sm flex items-center text-red-400">
+                <IconX className="mr-1 h-4 w-4" />
+                {errors.confirmPassword}
+              </p>
             )}
             {signUpData.confirmPassword && (
-              <div className="mt-1 flex items-center">
+              <div className="flex items-center text-sm">
                 {signUpData.password === signUpData.confirmPassword ? (
-                  <div className="flex items-center text-green-600 text-sm">
-                    <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
+                  <div className="flex items-center text-green-500">
+                    <IconCheck className="w-4 h-4 mr-1" />
                     Passwords match
                   </div>
                 ) : (
-                  <div className="flex items-center text-red-600 text-sm">
-                    <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                    </svg>
+                  <div className="flex items-center text-red-400">
+                    <IconX className="w-4 h-4 mr-1" />
                     Passwords do not match
                   </div>
                 )}
@@ -370,95 +422,155 @@ const SignUp = () => {
           </div>
 
           {/* Role Field */}
-          <div>
-            <label htmlFor="role" className="block text-sm font-medium text-gray-700">
-              Role
+          <div className="space-y-2">
+            <label htmlFor="role" className={`flex items-center text-sm font-medium transition-colors duration-300 ${
+              isDark ? 'text-gray-200' : 'text-gray-700'
+            }`}>
+              <IconShield className="mr-2 h-4 w-4" />
+              Account Type
             </label>
             <select
               id="role"
               name="role"
               value={signUpData.role}
               onChange={handleSignUpChange}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              className={`block w-full px-4 py-3 rounded-lg border transition-all duration-300 focus:outline-none focus:ring-2 ${
+                isDark
+                  ? 'border-gray-600/50 bg-gray-700/30 focus:border-blue-400 focus:ring-blue-500/20 text-gray-100'
+                  : 'border-gray-300/50 bg-gray-50/30 focus:border-blue-500 focus:ring-blue-500/20 text-gray-900'
+              }`}
             >
-              <option value="client">Client</option>
-              <option value="admin">Admin</option>
+              <option value="client">Client - Regular User</option>
+              <option value="admin">Admin - Administrator</option>
             </select>
           </div>
 
           {/* General Error */}
           {errors.general && (
-            <div className="text-center">
-              <p className="text-sm text-red-600">{errors.general}</p>
+            <div className={`p-4 rounded-lg border ${
+              isDark 
+                ? 'bg-red-900/20 border-red-500/30 text-red-400' 
+                : 'bg-red-50 border-red-200 text-red-600'
+            }`}>
+              <div className="flex items-center">
+                <IconX className="mr-2 h-5 w-5" />
+                <p className="text-sm font-medium">{errors.general}</p>
+              </div>
             </div>
           )}
 
           <button
             type="submit"
             disabled={loading || (signUpData.password && signUpData.confirmPassword && signUpData.password !== signUpData.confirmPassword)}
-            className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full flex justify-center items-center py-3 px-6 border border-transparent rounded-lg text-sm font-semibold bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white shadow-lg transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
           >
-            {loading ? 'Creating Account...' : 'Sign Up'}
+            {loading ? (
+              <>
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-3"></div>
+                Creating Account...
+              </>
+            ) : (
+              <>
+                <IconUser className="mr-2 h-5 w-5" />
+                Create Account
+              </>
+            )}
           </button>
         </form>
       ) : (
-        /* Sign In Form */
-        <form className="space-y-4" onSubmit={handleSignInSubmit}>
+        /* ✅ SIGN IN FORM */
+        <form className="space-y-5" onSubmit={handleSignInSubmit}>
           {/* Email Field */}
-          <div>
-            <label htmlFor="signin-email" className="block text-sm font-medium text-gray-700">
+          <div className="space-y-2">
+            <label htmlFor="signin-email" className={`flex items-center text-sm font-medium transition-colors duration-300 ${
+              isDark ? 'text-gray-200' : 'text-gray-700'
+            }`}>
+              <IconMail className="mr-2 h-4 w-4" />
               Email Address
             </label>
-            <input
-              id="signin-email"
-              name="email"
-              type="email"
-              value={signInData.email}
-              onChange={handleSignInChange}
-              className={`mt-1 block w-full px-3 py-2 border ${
-                errors.email ? 'border-red-300' : 'border-gray-300'
-              } rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm`}
-              placeholder="Enter your email"
-            />
-            {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
+            <div className="relative">
+              <input
+                id="signin-email"
+                name="email"
+                type="email"
+                value={signInData.email}
+                onChange={handleSignInChange}
+                className={`block w-full px-4 py-3 rounded-lg border transition-all duration-300 focus:outline-none focus:ring-2 ${
+                  errors.email 
+                    ? 'border-red-500/50 bg-red-50/10 focus:border-red-400 focus:ring-red-500/20 text-red-200'
+                    : isDark
+                      ? 'border-gray-600/50 bg-gray-700/30 focus:border-blue-400 focus:ring-blue-500/20 text-gray-100 placeholder-gray-400'
+                      : 'border-gray-300/50 bg-gray-50/30 focus:border-blue-500 focus:ring-blue-500/20 text-gray-900 placeholder-gray-500'
+                }`}
+                placeholder="Enter your email"
+              />
+              {signInData.email && /\S+@\S+\.\S+/.test(signInData.email) && (
+                <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                  <IconCheck className="h-5 w-5 text-green-500" />
+                </div>
+              )}
+            </div>
+            {errors.email && (
+              <p className="text-sm flex items-center text-red-400">
+                <IconX className="mr-1 h-4 w-4" />
+                {errors.email}
+              </p>
+            )}
           </div>
 
           {/* Password Field */}
-          <div>
-            <label htmlFor="signin-password" className="block text-sm font-medium text-gray-700">
+          <div className="space-y-2">
+            <label htmlFor="signin-password" className={`flex items-center text-sm font-medium transition-colors duration-300 ${
+              isDark ? 'text-gray-200' : 'text-gray-700'
+            }`}>
+              <IconLock className="mr-2 h-4 w-4" />
               Password
             </label>
-            <div className="mt-1 relative">
+            <div className="relative">
               <input
                 id="signin-password"
                 name="password"
                 type={showPassword ? 'text' : 'password'}
                 value={signInData.password}
                 onChange={handleSignInChange}
-                className={`block w-full px-3 py-2 pr-10 border ${
-                  errors.password ? 'border-red-300' : 'border-gray-300'
-                } rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm`}
+                className={`block w-full px-4 py-3 pr-12 rounded-lg border transition-all duration-300 focus:outline-none focus:ring-2 ${
+                  errors.password 
+                    ? 'border-red-500/50 bg-red-50/10 focus:border-red-400 focus:ring-red-500/20 text-red-200'
+                    : isDark
+                      ? 'border-gray-600/50 bg-gray-700/30 focus:border-blue-400 focus:ring-blue-500/20 text-gray-100 placeholder-gray-400'
+                      : 'border-gray-300/50 bg-gray-50/30 focus:border-blue-500 focus:ring-blue-500/20 text-gray-900 placeholder-gray-500'
+                }`}
                 placeholder="Enter your password"
               />
               <button
                 type="button"
-                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                className={`absolute inset-y-0 right-0 pr-3 flex items-center transition-colors duration-300 ${
+                  isDark ? 'text-gray-400 hover:text-gray-200' : 'text-gray-400 hover:text-gray-600'
+                }`}
                 onClick={() => setShowPassword(!showPassword)}
               >
-                {showPassword ? (
-                  <IconEyeOff className="h-5 w-5 text-gray-400" />
-                ) : (
-                  <IconEye className="h-5 w-5 text-gray-400" />
-                )}
+                {showPassword ? <IconEyeOff className="h-5 w-5" /> : <IconEye className="h-5 w-5" />}
               </button>
             </div>
-            {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password}</p>}
+            {errors.password && (
+              <p className="text-sm flex items-center text-red-400">
+                <IconX className="mr-1 h-4 w-4" />
+                {errors.password}
+              </p>
+            )}
           </div>
 
           {/* General Error Message */}
           {errors.general && (
-            <div className="text-center">
-              <p className="text-sm text-red-600">{errors.general}</p>
+            <div className={`p-4 rounded-lg border ${
+              isDark 
+                ? 'bg-red-900/20 border-red-500/30 text-red-400' 
+                : 'bg-red-50 border-red-200 text-red-600'
+            }`}>
+              <div className="flex items-center">
+                <IconX className="mr-2 h-5 w-5" />
+                <p className="text-sm font-medium">{errors.general}</p>
+              </div>
             </div>
           )}
 
@@ -466,7 +578,11 @@ const SignUp = () => {
           <div className="flex items-center justify-end">
             <Link
               to="/reset-password"
-              className="text-sm text-blue-600 hover:text-blue-500"
+              className={`text-sm font-medium transition-colors duration-300 ${
+                isDark 
+                  ? 'text-blue-400 hover:text-blue-300' 
+                  : 'text-blue-600 hover:text-blue-500'
+              }`}
             >
               Forgot your password?
             </Link>
@@ -475,9 +591,19 @@ const SignUp = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+            className="w-full flex justify-center items-center py-3 px-6 border border-transparent rounded-lg text-sm font-semibold bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white shadow-lg transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:hover:scale-100"
           >
-            {loading ? 'Signing In...' : 'Sign In'}
+            {loading ? (
+              <>
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-3"></div>
+                Signing In...
+              </>
+            ) : (
+              <>
+                <IconLogin className="mr-2 h-5 w-5" />
+                Sign In
+              </>
+            )}
           </button>
         </form>
       )}

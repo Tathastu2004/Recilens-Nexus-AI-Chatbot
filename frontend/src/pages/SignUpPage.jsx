@@ -7,6 +7,7 @@ const SignUpPage = () => {
     <AuthLayout 
       title="Welcome to NexusChat" 
       subtitle="Join thousands of users already chatting with AI"
+      useSlideshow={true}
     >
       <SignUp />
     </AuthLayout>
