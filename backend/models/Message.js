@@ -8,13 +8,11 @@ const messageSchema = new mongoose.Schema({
     required: true
   },
   sender: {
-    // Use Mixed to allow both ObjectId and String
-    type: mongoose.Schema.Types.Mixed,
+    type: mongoose.Schema.Types.Mixed,  // Can be ObjectId or 'AI'
     required: true,
     validate: {
-      validator: function(v) {
-        // Allow "AI" string or valid ObjectId
-        return v === "AI" || mongoose.Types.ObjectId.isValid(v);
+      validator: function(value) {
+        return value === 'AI' || mongoose.Types.ObjectId.isValid(value);
       },
       message: 'Sender must be "AI" or a valid ObjectId'
     }
@@ -25,7 +23,6 @@ const messageSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['text', 'image', 'document'],
     default: 'text'
   },
   fileUrl: {

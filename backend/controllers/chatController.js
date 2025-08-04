@@ -110,145 +110,127 @@ export const uploadFileHandler = async (req, res) => {
 
 // 🔹 Stream AI response over HTTP with JSON fallback
 export const sendMessage = async (req, res) => {
-  const { sessionId, message, type = 'text', fileUrl, fileType, metadata, tempId } = req.body;
-  const senderId = req.user._id;
-
-  console.log('📨 [SEND MESSAGE] Request received:', {
-    sessionId,
-    senderId,
-    messageLength: message?.length,
-    type,
-    hasFile: !!fileUrl,
-    tempId
-  });
-
-  if (!sessionId || !message) {
-    return res.status(400).json({ success: false, message: 'Session ID and message are required' });
-  }
-
+  console.log('📨 [SEND MESSAGE] Request received');
+  
   try {
-    // ✅ VERIFY SESSION EXISTS AND USER HAS ACCESS
-    const session = await ChatSession.findOne({ _id: sessionId, user: senderId });
-    if (!session) {
-      return res.status(404).json({ success: false, message: 'Session not found or unauthorized' });
+    const { sessionId, message, type = 'text', fileUrl, fileType, tempId } = req.body;
+    const userId = req.user._id;
+
+    console.log('📋 [SEND MESSAGE] Payload:', {
+      sessionId: sessionId?.substring(0, 8),
+      messageLength: message?.length,
+      type,
+      hasFile: !!fileUrl,
+      tempId
+    });
+
+    // ✅ VALIDATE REQUIRED FIELDS
+    if (!sessionId || !message) {
+      return res.status(400).json({
+        success: false,
+        error: 'Session ID and message are required'
+      });
     }
 
-    // ✅ SAVE USER MESSAGE
-    const userMsg = new Message({
-      session: sessionId,
-      sender: senderId,
+    // ✅ VERIFY SESSION EXISTS AND BELONGS TO USER
+    const session = await ChatSession.findById(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Chat session not found'
+      });
+    }
+
+    if (session.user.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // ✅ SAVE USER MESSAGE TO DATABASE (FIXED FIELD NAMES)
+    const userMessage = new Message({
+      session: sessionId,  // ✅ Changed from sessionId to session
       message,
+      sender: userId,      // ✅ Changed from 'User' to actual user ObjectId
       type,
       fileUrl: fileUrl || null,
       fileType: fileType || null,
-      metadata: metadata || {},
-      timestamp: new Date()
+      tempId
     });
-    const savedUserMsg = await userMsg.save();
+
+    await userMessage.save();
+    console.log('✅ [SEND MESSAGE] User message saved:', userMessage._id);
+
+    // ✅ SET STREAMING HEADERS
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    // ✅ GET AI RESPONSE WITH STREAMING
+    console.log('🤖 [SEND MESSAGE] Getting AI response...');
     
-    // ✅ UPDATE SESSION ACTIVITY
-    await ChatSession.findByIdAndUpdate(sessionId, { lastActivity: new Date() });
+    try {
+      const aiResponse = await getAIResponse({
+        message,
+        type,
+        fileUrl,
+        fileType
+      });
 
-    console.log('✅ [SEND MESSAGE] User message saved:', savedUserMsg._id);
+      console.log('✅ [SEND MESSAGE] AI response received:', aiResponse?.length || 0, 'chars');
 
-    // ✅ CHECK IF CLIENT ACCEPTS STREAMING
-    const acceptHeader = req.headers.accept || '';
-    const supportsStreaming = acceptHeader.includes('text/plain') || acceptHeader.includes('text/event-stream');
+      // ✅ SAVE AI MESSAGE TO DATABASE (FIXED FIELD NAMES)
+      const aiMessage = new Message({
+        session: sessionId,  // ✅ Changed from sessionId to session
+        message: aiResponse,
+        sender: 'AI',        // ✅ Keep as 'AI' string for AI responses
+        type: 'text'
+      });
 
-    if (supportsStreaming) {
-      // ✅ STREAMING RESPONSE
-      console.log('🌊 [STREAMING] Starting streaming response...');
+      await aiMessage.save();
+      console.log('✅ [SEND MESSAGE] AI message saved:', aiMessage._id);
+
+      // ✅ UPDATE SESSION ACTIVITY
+      session.lastActivity = new Date();
+      await session.save();
+
+      // ✅ STREAM AI RESPONSE TO CLIENT
+      res.write(aiResponse);
+      res.end();
+
+    } catch (aiError) {
+      console.error('❌ [SEND MESSAGE] AI Error:', aiError.message);
       
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      res.setHeader('Transfer-Encoding', 'chunked');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-
-      try {
-        // ✅ GET AI RESPONSE AND STREAM IT
-        const aiText = await getAIResponse({ message, fileUrl, fileType });
-        
-        // ✅ SAVE AI MESSAGE
-        const aiMsg = new Message({
-          session: sessionId,
-          sender: 'AI',
-          message: aiText,
-          type: 'text',
-          metadata: { 
-            responseType: 'stream', 
-            userMessageId: savedUserMsg._id,
-            streamedAt: new Date().toISOString()
-          },
-          timestamp: new Date()
-        });
-        await aiMsg.save();
-
-        console.log('✅ [STREAMING] AI message saved and streaming:', aiMsg._id);
-
-        // ✅ STREAM THE COMPLETE RESPONSE
-        res.write(aiText);
-        res.end();
-        
-      } catch (aiError) {
-        console.error('❌ [STREAMING] AI Error:', aiError);
-        res.write('I apologize, but I encountered an error while processing your request. Please try again.');
-        res.end();
-      }
-    } else {
-      // ✅ JSON RESPONSE (FALLBACK)
-      console.log('📋 [JSON] Sending JSON response...');
+      const errorMessage = `❌ AI Error: ${aiError.message}`;
       
-      try {
-        const aiText = await getAIResponse({ message, fileUrl, fileType });
-        
-        const aiMsg = new Message({
-          session: sessionId,
-          sender: 'AI',
-          message: aiText,
-          type: 'text',
-          metadata: { 
-            responseType: 'json', 
-            userMessageId: savedUserMsg._id 
-          },
-          timestamp: new Date()
-        });
-        await aiMsg.save();
-
-        console.log('✅ [JSON] AI message saved:', aiMsg._id);
-
-        res.json({
-          success: true,
-          response: aiText,
-          message: aiText,
-          userMessage: savedUserMsg,
-          aiMessage: aiMsg,
-          aiServiceStatus: 'normal'
-        });
-        
-      } catch (aiError) {
-        console.error('❌ [JSON] AI Error:', aiError);
-        
-        res.status(500).json({
-          success: false,
-          error: 'AI service error',
-          message: 'I apologize, but I encountered an error while processing your request. Please try again.',
-          aiServiceStatus: aiError.message.includes('quota') ? 'overloaded' : 'error'
-        });
-      }
+      // ✅ SAVE ERROR MESSAGE (FIXED FIELD NAMES)
+      const errorMsg = new Message({
+        session: sessionId,  // ✅ Changed from sessionId to session
+        message: errorMessage,
+        sender: 'AI',        // ✅ Keep as 'AI' string for error messages
+        type: 'error'
+      });
+      
+      await errorMsg.save();
+      
+      res.write(errorMessage);
+      res.end();
     }
 
   } catch (error) {
-    console.error('❌ [SEND MESSAGE] Controller error:', error);
+    console.error('❌ [SEND MESSAGE] Server Error:', error);
     
-    if (res.headersSent) {
-      // If streaming has started, we can't send JSON
-      res.end();
-    } else {
+    if (!res.headersSent) {
       res.status(500).json({
         success: false,
-        error: 'Server error',
-        message: 'Failed to process message'
+        error: 'Failed to send message',
+        details: error.message
       });
+    } else {
+      res.write(`❌ Server Error: ${error.message}`);
+      res.end();
     }
   }
 };

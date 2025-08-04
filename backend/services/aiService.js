@@ -1,198 +1,123 @@
 // /services/aiService.js
-import fs from 'fs';
-import path from 'path';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import axios from 'axios';
 
 console.log('🚀 [AI SERVICE] Initializing AI Service...');
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-console.log('🔑 [AI SERVICE] Gemini API Key status:', process.env.GEMINI_API_KEY ? 'Found' : 'Missing');
+const FASTAPI_BASE_URL = process.env.FASTAPI_BASE_URL || 'http://127.0.0.1:8000';
 
-const downloadFile = async (url, localPath) => {
-  console.log('📥 [DOWNLOAD] Starting file download:', { url, localPath });
-  try {
-    const response = await axios({ method: 'GET', url, responseType: 'stream' });
-    const writer = fs.createWriteStream(localPath);
-    response.data.pipe(writer);
-    return new Promise((resolve, reject) => {
-      writer.on('finish', () => {
-        console.log('✅ [DOWNLOAD] File downloaded successfully:', localPath);
-        resolve();
-      });
-      writer.on('error', reject);
-    });
-  } catch (error) {
-    console.error('❌ [DOWNLOAD] Failed to download file:', error.message);
-    throw error;
-  }
-};
-
-const imageToBase64 = async (filePath) => {
-  console.log('🖼️ [IMAGE TO BASE64] Starting conversion for:', filePath);
-  try {
-    let localPath = filePath;
-    if (filePath.startsWith('http')) {
-      const tempPath = `/tmp/temp_image_${Date.now()}.jpg`;
-      await downloadFile(filePath, tempPath);
-      localPath = tempPath;
-    }
-    if (!fs.existsSync(localPath)) {
-      console.error(`❌ [IMAGE TO BASE64] Image file not found: ${localPath}`);
-      return null;
-    }
-    const buffer = fs.readFileSync(localPath);
-    const base64 = buffer.toString('base64');
-    if (filePath.startsWith('http') && fs.existsSync(localPath)) fs.unlinkSync(localPath);
-    console.log('✅ [IMAGE TO BASE64] Conversion successful:', { originalPath: filePath, base64Length: base64.length });
-    return base64;
-  } catch (error) {
-    console.error(`❌ [IMAGE TO BASE64] Error:`, { filePath, error: error.message });
-    return null;
-  }
-};
-
-// ✅ FIXED: Use dynamic import to avoid the initialization error
-const extractTextFromPDF = async (pdfPath) => {
-  console.log('📄 [PDF EXTRACT] Starting text extraction for:', pdfPath);
-  try {
-    // ✅ Dynamic import to avoid the test file error
-    const pdfParse = (await import('pdf-parse')).default;
-    
-    let localPath = pdfPath;
-    if (pdfPath.startsWith('http')) {
-      const tempPath = `/tmp/temp_pdf_${Date.now()}.pdf`;
-      await downloadFile(pdfPath, tempPath);
-      localPath = tempPath;
-    }
-    if (!fs.existsSync(localPath)) {
-      console.error(`❌ [PDF EXTRACT] PDF file not found: ${localPath}`);
-      return 'PDF file not found';
-    }
-    const buffer = fs.readFileSync(localPath);
-    const data = await pdfParse(buffer);
-    if (pdfPath.startsWith('http') && fs.existsSync(localPath)) fs.unlinkSync(localPath);
-    console.log('✅ [PDF EXTRACT] PDF parsing successful:', { originalPath: pdfPath, textLength: data.text.length, pages: data.numpages });
-    return data.text;
-  } catch (error) {
-    console.error(`❌ [PDF EXTRACT] Error:`, { pdfPath, error: error.message });
-    
-    // ✅ Fallback: If pdf-parse fails, return helpful message
-    if (error.message.includes('ENOENT') || error.message.includes('test/data')) {
-      console.warn('⚠️ [PDF EXTRACT] pdf-parse test file issue, PDF processing disabled');
-      return 'PDF processing temporarily unavailable. Please try uploading the content as text.';
-    }
-    
-    return 'Error reading PDF file';
-  }
-};
-
+// ✅ Stream-based AI Response from FastAPI
 export const getAIResponse = async (input) => {
-  console.log('🚀 [AI SERVICE] Starting AI response generation...');
-  console.log('📊 [DEBUG] Input analysis:', {
-    type: typeof input,
-    isString: typeof input === 'string',
-    isObject: typeof input === 'object' && input !== null,
-    stringLength: typeof input === 'string' ? input.length : null,
-    inputPreview: typeof input === 'string' ? input.substring(0, 100) + '...' : JSON.stringify(input)
-  });
+  console.log('🚀 [AI SERVICE] Calling FastAPI stream endpoint...');
+  console.log('📦 [DEBUG] Input payload:', JSON.stringify(input, null, 2));
+
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
-    if (typeof input === 'string') {
-      console.log('📝 [AI SERVICE] Processing simple text input...');
-      const result = await model.generateContent(input);
-      const response = await result.response;
-      const text = response.text();
-      console.log('✅ [AI SERVICE] Text response generated:', { inputLength: input.length, responseLength: text.length });
-      return text;
+    // ✅ VALIDATE INPUT
+    if (!input || (!input.message && !input.prompt)) {
+      throw new Error('No message or prompt provided');
     }
 
-    if (typeof input === 'object' && input !== null) {
-      console.log('🗂️ [AI SERVICE] Processing object input...');
-      const parts = [];
-      const textContent = input.prompt || input.message || "";
-      if (textContent) {
-        parts.push({ text: textContent });
-        console.log('📝 [DEBUG] Added text part:', textContent.substring(0, 100));
-      }
+    // ✅ ULTRA SIMPLE PAYLOAD
+    const payload = {
+      message: input.message || input.prompt || '',
+      type: "chat"
+    };
 
-      if (input.fileUrl && input.fileType) {
-        console.log(`📁 [AI SERVICE] Processing file:`, { fileUrl: input.fileUrl, fileType: input.fileType });
-        if (input.fileType === 'image') {
-          const base64Image = await imageToBase64(input.fileUrl);
-          if (base64Image) {
-            let mimeType = input.mimeType || 'image/jpeg';
-            if (input.fileUrl.includes('.png')) mimeType = 'image/png';
-            if (input.fileUrl.includes('.jpg') || input.fileUrl.includes('.jpeg')) mimeType = 'image/jpeg';
-            if (input.fileUrl.includes('.gif')) mimeType = 'image/gif';
-            if (input.fileUrl.includes('.webp')) mimeType = 'image/webp';
-            parts.push({ inlineData: { mimeType, data: base64Image } });
-            console.log('✅ [AI SERVICE] Image part added');
-          }
-        }
-        if (input.fileType === 'document' || input.fileUrl.includes('.pdf')) {
-          const extractedText = await extractTextFromPDF(input.fileUrl);
-          parts.push({ text: `Document content:\n${extractedText}` });
-          console.log('✅ [AI SERVICE] Document part added');
-        }
-      }
+    console.log('📤 [AI SERVICE] Sending ultra simple payload:', JSON.stringify(payload, null, 2));
 
-      if (parts.length === 0) {
-        console.warn('⚠️ [AI SERVICE] No valid parts found');
-        return 'No valid input provided.';
-      }
-
-      console.log('🔄 [AI SERVICE] Generating content with', parts.length, 'parts...');
-      const result = await model.generateContent(parts);
-      const response = await result.response;
-      const text = response.text();
-      console.log('✅ [AI SERVICE] Multimodal response generated:', { partsCount: parts.length, responseLength: text.length });
-      return text;
+    // ✅ TEST 1: HEALTH CHECK
+    try {
+      const healthCheck = await axios.get(`${FASTAPI_BASE_URL}/health`, { timeout: 5000 });
+      console.log('✅ [AI SERVICE] Health check passed:', healthCheck.status);
+    } catch (healthError) {
+      console.error('❌ [AI SERVICE] Health check failed:', healthError.message);
+      return '⚠️ FastAPI service is not available.';
     }
 
-    console.warn('⚠️ [AI SERVICE] Invalid input format:', typeof input);
-    return 'Invalid input format provided.';
-  } catch (err) {
-    console.error('❌ [AI SERVICE] Error occurred:', { message: err.message, inputType: typeof input });
-    if (err.message.includes('API_KEY')) return 'AI service configuration error. Please check API key.';
-    if (err.message.includes('quota') || err.message.includes('429')) return 'AI service temporarily unavailable due to quota limits.';
-    if (err.message.includes('404')) return 'AI model temporarily unavailable. Please try again.';
-    return 'I apologize, but I encountered an error while processing your request. Please try again.';
+    // ✅ TEST 2: DEBUG ENDPOINT
+    try {
+      const debugResponse = await axios.post(`${FASTAPI_BASE_URL}/debug`, payload, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 5000
+      });
+      console.log('✅ [AI SERVICE] Debug endpoint passed:', debugResponse.status);
+      console.log('📋 [AI SERVICE] Debug response:', debugResponse.data);
+    } catch (debugError) {
+      console.error('❌ [AI SERVICE] Debug endpoint failed:', {
+        status: debugError.response?.status,
+        data: debugError.response?.data,
+        message: debugError.message
+      });
+      return `⚠️ Debug test failed: ${JSON.stringify(debugError.response?.data)}`;
+    }
+
+    // ✅ TEST 3: SIMPLE TEST ENDPOINT
+    try {
+      const testResponse = await axios.post(`${FASTAPI_BASE_URL}/test`, payload, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 5000
+      });
+      console.log('✅ [AI SERVICE] Test endpoint passed:', testResponse.status);
+    } catch (testError) {
+      console.error('❌ [AI SERVICE] Test endpoint failed:', {
+        status: testError.response?.status,
+        data: testError.response?.data
+      });
+      return `⚠️ Test endpoint failed: ${JSON.stringify(testError.response?.data)}`;
+    }
+
+    // ✅ TEST 4: ACTUAL CHAT REQUEST
+    const response = await axios.post(`${FASTAPI_BASE_URL}/chat`, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/plain',
+      },
+      responseType: 'stream',
+      timeout: 60000,
+    });
+
+    console.log('📥 [AI SERVICE] Chat response status:', response.status);
+
+    let fullText = '';
+    response.data.setEncoding('utf8');
+
+    for await (const chunk of response.data) {
+      fullText += chunk;
+      console.log('📝 [AI SERVICE] Chunk received:', chunk.length, 'chars');
+    }
+
+    console.log('✅ [AI SERVICE] Stream complete. Total length:', fullText.length);
+    
+    if (!fullText.trim()) {
+      throw new Error('Empty response from AI service');
+    }
+
+    return fullText;
+
+  } catch (error) {
+    console.error('❌ [AI SERVICE] Error details:', {
+      message: error.message,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      url: error.config?.url
+    });
+
+    // ✅ DETAILED ERROR MESSAGES
+    if (error.code === 'ECONNREFUSED') {
+      return '⚠️ AI service is not running. Please start the FastAPI server on port 8000.';
+    } else if (error.response?.status === 400) {
+      return `⚠️ Bad Request (400): ${JSON.stringify(error.response.data)}`;
+    } else if (error.response?.status === 422) {
+      return `⚠️ Validation Error (422): ${JSON.stringify(error.response.data)}`;
+    } else if (error.response?.status === 503) {
+      return '⚠️ Ollama service is not available. Please make sure Ollama is running.';
+    } else {
+      return `⚠️ AI service failed (${error.response?.status || 'unknown'}): ${JSON.stringify(error.response?.data) || error.message}`;
+    }
   }
 };
 
-export const getSimpleAIResponse = async (message) => {
-  console.log('🚀 [SIMPLE AI] Starting simple AI response generation...');
-  console.log('📊 [DEBUG] Message details:', {
-    type: typeof message,
-    isString: typeof message === 'string',
-    length: typeof message === 'string' ? message.length : null,
-    preview: typeof message === 'string' ? message.substring(0, 100) + '...' : String(message)
-  });
-  try {
-    if (!message || typeof message !== 'string') {
-      console.warn('⚠️ [SIMPLE AI] Invalid message provided:', typeof message);
-      return 'Please provide a valid message.';
-    }
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    const result = await model.generateContent(message);
-    const response = await result.response;
-    const text = response.text();
-    console.log('✅ [SIMPLE AI] Response generated successfully:', {
-      inputLength: message.length,
-      responseLength: text.length,
-      responsePreview: text.substring(0, 200) + (text.length > 200 ? '...' : '')
-    });
-    return text;
-  } catch (err) {
-    console.error('❌ [SIMPLE AI] Error occurred:', {
-      message: err.message,
-      stack: err.stack,
-      inputMessage: typeof message === 'string' ? message.substring(0, 100) + '...' : String(message)
-    });
-    return 'I apologize, but I encountered an error. Please try again.';
-  }
-};
+// ✅ Alias (if any call uses the older function)
+export const getSimpleAIResponse = getAIResponse;
 
-console.log('✅ [AI SERVICE] AI Service initialization complete');
+console.log('✅ [AI SERVICE] FastAPI streaming AI ready.');
