@@ -2,10 +2,13 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from ollama import AsyncClient
+from olloma import AsyncClient
 import ollama
 import json
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+import uuid
+from datetime import datetime
+from blip_handler import generate_blip_response_stream, check_blip_health
 
 app = FastAPI()
 
@@ -17,238 +20,142 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ✅ SESSION MEMORY STORAGE
+session_memory = {}  # sessionId -> conversation history
+
+class ConversationMemory:
+    def __init__(self):
+        self.conversations = {}
+    
+    def add_message(self, session_id: str, role: str, content: str, message_type: str = "text", metadata: dict = None):
+        if session_id not in self.conversations:
+            self.conversations[session_id] = []
+        
+        message = {
+            "id": str(uuid.uuid4()),
+            "role": role,  # "user" or "assistant"
+            "content": content,
+            "type": message_type,  # "text", "image", "analysis"
+            "model": "BLIP" if message_type == "image" else "Llama3",
+            "timestamp": datetime.now().isoformat(),
+            "metadata": metadata or {}
+        }
+        
+        self.conversations[session_id].append(message)
+        
+        # Keep only last 20 messages to prevent memory issues
+        if len(self.conversations[session_id]) > 20:
+            self.conversations[session_id] = self.conversations[session_id][-20:]
+    
+    def get_conversation(self, session_id: str) -> List[dict]:
+        return self.conversations.get(session_id, [])
+    
+    def get_last_image_analysis(self, session_id: str) -> Optional[dict]:
+        """Get the most recent image analysis from this session"""
+        conversation = self.get_conversation(session_id)
+        
+        for message in reversed(conversation):
+            if message["type"] == "image" and message["role"] == "assistant":
+                return message
+        return None
+    
+    def get_context_summary(self, session_id: str, max_messages: int = 5) -> str:
+        """Get recent conversation context for Llama3"""
+        conversation = self.get_conversation(session_id)
+        if not conversation:
+            return ""
+        
+        recent_messages = conversation[-max_messages:]
+        context_parts = []
+        
+        for msg in recent_messages:
+            role = "User" if msg["role"] == "user" else "Assistant"
+            model_info = f" ({msg['model']})" if msg["role"] == "assistant" else ""
+            context_parts.append(f"{role}{model_info}: {msg['content']}")
+        
+        return "\n".join(context_parts)
+
+# ✅ INITIALIZE MEMORY
+memory = ConversationMemory()
+
+# ✅ UPDATE CHAT REQUEST MODEL
 class ChatRequest(BaseModel):
     prompt: Optional[str] = None
     message: Optional[str] = None
     type: Optional[str] = "chat"
     fileUrl: Optional[str] = None
     fileType: Optional[str] = None
+    conversationContext: Optional[List[Dict[str, Any]]] = []
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):
+        """Create ChatRequest from raw dict, handling extra fields gracefully"""
         valid_fields = {
             'prompt': data.get('prompt'),
             'message': data.get('message'), 
             'type': data.get('type', 'chat'),
             'fileUrl': data.get('fileUrl'),
-            'fileType': data.get('fileType')
+            'fileType': data.get('fileType'),
+            'conversationContext': data.get('conversationContext', [])
         }
         return cls(**{k: v for k, v in valid_fields.items() if v is not None})
 
-@app.post("/chat")
-async def unified_chat_route(request: Request):
-    try:
-        try:
-            raw_body = await request.body()
-            print(f"🔍 [FASTAPI] Raw body: {raw_body}")
-            
-            if raw_body:
-                json_data = json.loads(raw_body)
-                print(f"🔍 [FASTAPI] Parsed JSON: {json.dumps(json_data, indent=2)}")
-            else:
-                raise HTTPException(status_code=400, detail="Empty request body")
-                
-        except json.JSONDecodeError as e:
-            print(f"❌ [FASTAPI] JSON decode error: {e}")
-            raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
-        
-        try:
-            chat_request = ChatRequest.from_dict(json_data)
-            print(f"🔍 [FASTAPI] ChatRequest object: {chat_request.dict()}")
-        except Exception as e:
-            print(f"❌ [FASTAPI] ChatRequest creation error: {e}")
-            raise HTTPException(status_code=400, detail=f"Invalid request format: {str(e)}")
-        
-        user_input = chat_request.prompt or chat_request.message
-        
-        if not user_input or not user_input.strip():
-            print(f"❌ [FASTAPI] No valid input found. prompt: {chat_request.prompt}, message: {chat_request.message}")
-            raise HTTPException(status_code=400, detail="No prompt or message provided")
-            
-        print(f"🚀 [FASTAPI] Processing request: {user_input[:50]}...")
-        print(f"📋 [FASTAPI] Request type: {chat_request.type}")
-        
-        if chat_request.type.lower() == "chat":
-            try:
-                client = AsyncClient()
-                
-                async def response_generator():
-                    try:
-                        print(f"🤖 [FASTAPI] Calling Ollama with model: llama3")
-                        print(f"🤖 [FASTAPI] User input: {user_input}")
-                        
-                        stream = await client.chat(
-                            model='llama3',
-                            messages=[{"role": "user", "content": user_input}],
-                            stream=True
-                        )
-                        
-                        chunk_count = 0
-                        total_content = ""
-                        
-                        async for chunk in stream:
-                            content = chunk.get('message', {}).get('content', '')
-                            if content:
-                                chunk_count += 1
-                                total_content += content
-                                print(f"📝 [STREAM] Chunk {chunk_count}: '{content}'")
-                                yield content
-                        
-                        print(f"✅ [FASTAPI] Stream completed. Total chunks: {chunk_count}")
-                        print(f"✅ [FASTAPI] Total content length: {len(total_content)}")
-                                
-                    except Exception as e:
-                        error_msg = f"❌ Ollama Error: {str(e)}"
-                        print(f"❌ [STREAM] Error: {error_msg}")
-                        yield error_msg
-
-                return StreamingResponse(
-                    response_generator(), 
-                    media_type="text/plain",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                        "X-Accel-Buffering": "no"
-                    }
-                )
-                
-            except Exception as ollama_error:
-                print(f"❌ [FASTAPI] Ollama connection error: {ollama_error}")
-                raise HTTPException(
-                    status_code=503, 
-                    detail=f"Ollama service unavailable: {str(ollama_error)}"
-                )
-        
-        else:
-            raise HTTPException(status_code=400, detail=f"Unsupported type: {chat_request.type}")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ [FASTAPI] Unexpected error: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
-# ✅ FIXED HEALTH CHECK - BETTER MODEL DETECTION
+# ✅ ENHANCED HEALTH CHECK
 @app.get("/health")
 async def health_check():
     try:
-        print("🔍 [HEALTH] Checking Ollama connection...")
+        print("🔍 [HEALTH] Checking services...")
         
-        # ✅ FIRST TRY DIRECT OLLAMA API (matches your curl test)
+        # ✅ CHECK OLLAMA
+        ollama_status = {"connected": False, "llama3_available": False, "available_models": []}
         try:
             import httpx
             async with httpx.AsyncClient() as http_client:
                 response = await http_client.get("http://localhost:11434/api/tags")
                 if response.status_code == 200:
                     ollama_data = response.json()
-                    print(f"🔍 [HEALTH] Direct Ollama API response: {ollama_data}")
-                    
-                    if "models" in ollama_data:
-                        available_models = []
-                        for model in ollama_data["models"]:
-                            model_name = model.get("name", "")
-                            if model_name:
-                                available_models.append(model_name)
-                                print(f"🔍 [HEALTH] Found model: {model_name}")
-                        
-                        llama3_available = any("llama3" in model.lower() for model in available_models)
-                        
-                        print(f"🔍 [HEALTH] Available models: {available_models}")
-                        print(f"🔍 [HEALTH] Llama3 available: {llama3_available}")
-                        
-                        return {
-                            "status": "ok",
-                            "message": "FastAPI is running",
-                            "ollama_connected": True,
-                            "llama3_available": llama3_available,
-                            "available_models": available_models,
-                            "detection_method": "direct_api"
-                        }
-                    
-        except Exception as direct_api_error:
-            print(f"❌ [HEALTH] Direct API failed: {direct_api_error}")
+                    available_models = [model.get("name", "") for model in ollama_data.get("models", [])]
+                    llama3_available = any("llama3" in model.lower() for model in available_models)
+                    ollama_status = {
+                        "connected": True,
+                        "llama3_available": llama3_available,
+                        "available_models": available_models
+                    }
+        except Exception as e:
+            ollama_status["error"] = str(e)
         
-        # ✅ FALLBACK: TRY ASYNC CLIENT (original method)
+        # ✅ CHECK BLIP
+        blip_status = {"connected": False, "status": "unknown"}
         try:
-            client = AsyncClient()
-            models_response = await client.list()
-            print(f"🔍 [HEALTH] AsyncClient response: {models_response}")
-            
-            # Handle different response formats
-            models_list = []
-            if isinstance(models_response, dict):
-                if 'models' in models_response:
-                    models_list = models_response['models']
-                elif 'data' in models_response:
-                    models_list = models_response['data']
-                else:
-                    models_list = list(models_response.values())[0] if models_response else []
-            
-            available_models = []
-            for model in models_list:
-                if isinstance(model, dict):
-                    model_name = model.get('name', '') or model.get('model', '')
-                    if model_name:
-                        available_models.append(model_name)
-                elif isinstance(model, str):
-                    available_models.append(model)
-            
-            llama3_available = any("llama3" in model.lower() for model in available_models)
-            
-            return {
-                "status": "ok",
-                "message": "FastAPI is running", 
-                "ollama_connected": True,
-                "llama3_available": llama3_available,
-                "available_models": available_models,
-                "detection_method": "async_client"
+            blip_working, blip_message = check_blip_health()
+            blip_status = {
+                "connected": blip_working,
+                "status": blip_message,
+                "device": str(device) if 'device' in globals() else "unknown"
             }
-            
-        except Exception as async_client_error:
-            print(f"❌ [HEALTH] AsyncClient failed: {async_client_error}")
+        except Exception as e:
+            blip_status = {
+                "connected": False,
+                "status": f"BLIP check failed: {str(e)}"
+            }
         
-        # ✅ FINAL FALLBACK: TEST LLAMA3 DIRECTLY
-        try:
-            print("🔍 [HEALTH] Testing llama3 directly...")
-            client = AsyncClient()
-            test_response = await client.chat(
-                model='llama3',
-                messages=[{"role": "user", "content": "test"}],
-                stream=False
-            )
-            
-            if test_response and test_response.get('message'):
-                print("✅ [HEALTH] llama3 direct test successful!")
-                return {
-                    "status": "ok",
-                    "message": "FastAPI is running",
-                    "ollama_connected": True,
-                    "llama3_available": True,
-                    "available_models": ["llama3:latest"],
-                    "detection_method": "direct_chat_test"
-                }
-                
-        except Exception as test_error:
-            print(f"❌ [HEALTH] Direct test failed: {test_error}")
+        # ✅ OVERALL STATUS
+        overall_status = "ok" if ollama_status["connected"] and blip_status["connected"] else "partial"
         
-        # ✅ IF ALL FAILS, RETURN PARTIAL STATUS
         return {
-            "status": "partial",
-            "message": "FastAPI running, Ollama connected, but model detection failed",
-            "ollama_connected": True,
-            "llama3_available": False,
-            "available_models": [],
-            "note": "Chat endpoint may still work despite detection failure"
+            "status": overall_status,
+            "message": "FastAPI is running",
+            "services": {
+                "ollama": ollama_status,
+                "blip": blip_status
+            },
+            "supported_types": ["chat", "image"]
         }
         
     except Exception as e:
-        print(f"❌ [HEALTH] Ollama connection error: {e}")
         return {
-            "status": "partial",
-            "message": "FastAPI is running but Ollama is not available",
-            "ollama_connected": False,
-            "llama3_available": False,
-            "available_models": [],
+            "status": "error",
+            "message": "Health check failed",
             "error": str(e)
         }
 
@@ -282,12 +189,238 @@ async def debug_request(request: Request):
     except Exception as e:
         return {"error": str(e), "raw_body": raw_body.decode('utf-8') if raw_body else None}
 
+# ✅ UPDATED CHAT ROUTE WITH BETTER CONTEXT PROCESSING
+@app.post("/chat")
+async def unified_chat_route(request: Request):
+    try:
+        # Parse request
+        body = await request.json()
+        chat_request = ChatRequest.from_dict(body)
+        
+        user_message = chat_request.message or chat_request.prompt or ""
+        request_type = chat_request.type or "chat"
+        file_url = chat_request.fileUrl
+        session_id = body.get("sessionId", "default")
+        conversation_context = chat_request.conversationContext or []
+        
+        print(f"📨 [FASTAPI] Unified chat request:")
+        print(f"   - Session: {session_id}")
+        print(f"   - Message: {user_message[:50]}...")
+        print(f"   - Type: {request_type}")
+        print(f"   - File: {file_url is not None}")
+        print(f"   - Context Messages: {len(conversation_context)}")
+        
+        # ✅ ENHANCED CONTEXT PROCESSING - BUILD CONVERSATION HISTORY
+        enhanced_context = ""
+        last_image_analysis = None
+        
+        if conversation_context:
+            print(f"📚 [FASTAPI] Processing {len(conversation_context)} context messages...")
+            
+            # Build conversation history and find last image analysis
+            conversation_history = []
+            
+            for i, ctx_msg in enumerate(conversation_context):
+                role = ctx_msg.get('role', 'user')
+                content = ctx_msg.get('content', '')
+                msg_type = ctx_msg.get('type', 'text')
+                file_url_ctx = ctx_msg.get('fileUrl')
+                
+                # Track the last image analysis
+                if (file_url_ctx or msg_type == 'image') and role == 'assistant':
+                    last_image_analysis = {
+                        'content': content,
+                        'fileUrl': file_url_ctx,
+                        'index': i
+                    }
+                    print(f"🖼️ [FASTAPI] Found image analysis at index {i}: {content[:100]}...")
+                
+                # Add to conversation history
+                if content.strip():
+                    conversation_history.append(f"{role.title()}: {content}")
+            
+            # Build enhanced context
+            if conversation_history:
+                enhanced_context = "Previous conversation:\n" + "\n".join(conversation_history[-10:]) + "\n\n"
+                print(f"📝 [FASTAPI] Built conversation context with {len(conversation_history)} messages")
+        
+        # ✅ CHECK FOR REFERENCE TO PREVIOUS IMAGE/ANALYSIS
+        reference_keywords = [
+            "again", "analysis", "image", "picture", "describe again", "what did you see",
+            "tell me again", "repeat", "previous", "above", "that photo", "detail",
+            "give analysis", "analyze again", "what was in", "explain again"
+        ]
+        
+        is_asking_about_previous = any(keyword in user_message.lower() for keyword in reference_keywords)
+        
+        if request_type == "chat" and is_asking_about_previous and last_image_analysis:
+            print(f"🔄 [FASTAPI] User asking about previous analysis, enhancing context...")
+            
+            enhanced_message = f"""{enhanced_context}The user previously uploaded an image and received this analysis: "{last_image_analysis['content']}"
+
+Now the user is asking: "{user_message}"
+
+Please respond based on the previous image analysis. If they're asking for the analysis again or for more details, provide information based on what was already analyzed."""
+
+            user_message = enhanced_message
+            print(f"✅ [FASTAPI] Enhanced message with previous image context")
+            
+        elif request_type == "chat" and enhanced_context:
+            # Just add conversation context without specific image reference
+            user_message = enhanced_context + "Current user message: " + user_message
+            print(f"📚 [FASTAPI] Added general conversation context")
+        
+        # ✅ AUTO-DETECT IMAGE TYPE
+        if file_url and any(ext in file_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']):
+            request_type = "image"
+            print(f"🖼️ [FASTAPI] Auto-detected image from URL, switching to BLIP")
+        
+        # ✅ STORE USER MESSAGE IN MEMORY
+        memory.add_message(session_id, "user", user_message, 
+                          "image" if file_url else "text", 
+                          {"file_url": file_url})
+        
+        # ✅ ROUTE TO APPROPRIATE MODEL
+        if request_type == "image":
+            print(f"🖼️ [FASTAPI] Routing to BLIP handler...")
+            
+            async def blip_response_generator():
+                try:
+                    response_content = ""
+                    async for chunk in generate_blip_response_stream(user_message, file_url):
+                        response_content += chunk
+                        yield chunk
+                    
+                    # ✅ STORE BLIP RESPONSE
+                    memory.add_message(session_id, "assistant", response_content, "image", 
+                                     {"file_url": file_url, "model": "BLIP"})
+                    
+                except Exception as e:
+                    error_msg = f"❌ BLIP Error: {str(e)}"
+                    print(f"❌ [BLIP] Error: {error_msg}")
+                    yield error_msg
+            
+            return StreamingResponse(
+                blip_response_generator(),
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
+                }
+            )
+        
+        elif request_type == "chat":
+            print(f"🦙 [FASTAPI] Routing to Llama3 handler...")
+            
+            try:
+                async def llama_response_generator():
+                    try:
+                        client = AsyncClient(host='http://127.0.0.1:11434')
+                        
+                        # ✅ ENHANCED SYSTEM PROMPT FOR CONTEXT AWARENESS
+                        system_prompt = """You are a helpful AI assistant with access to conversation history. 
+
+IMPORTANT INSTRUCTIONS:
+- You have access to previous conversation context including image analyses from BLIP model
+- When users ask to "repeat", "again", "give analysis again", or refer to previous content, use the provided context
+- If a user asks about a previous image analysis, provide the information from the context
+- Don't say "this conversation just started" if context is provided
+- Be conversational and reference previous interactions when relevant"""
+
+                        stream = await client.chat(
+                            model='llama3',
+                            messages=[
+                                {
+                                    'role': 'system',
+                                    'content': system_prompt
+                                },
+                                {
+                                    'role': 'user',
+                                    'content': user_message
+                                }
+                            ],
+                            stream=True
+                        )
+                        
+                        response_content = ""
+                        chunk_count = 0
+                        
+                        async for chunk in stream:
+                            content = chunk.get('message', {}).get('content', '')
+                            if content:
+                                chunk_count += 1
+                                response_content += content
+                                yield content
+                        
+                        # ✅ STORE LLAMA3 RESPONSE
+                        memory.add_message(session_id, "assistant", response_content, "text", 
+                                         {"model": "Llama3"})
+                        
+                        print(f"✅ [LLAMA3] Response completed. Chunks: {chunk_count}")
+                        print(f"📝 [LLAMA3] Response preview: {response_content[:100]}...")
+                        
+                    except Exception as e:
+                        error_msg = f"❌ Llama3 Error: {str(e)}"
+                        print(f"❌ [LLAMA3] Error: {error_msg}")
+                        yield error_msg
+                
+                return StreamingResponse(
+                    llama_response_generator(),
+                    media_type="text/plain",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no"
+                    }
+                )
+            
+            except Exception as ollama_error:
+                print(f"❌ [FASTAPI] Ollama connection error: {ollama_error}")
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Ollama service unavailable: {str(ollama_error)}"
+                )
+        
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported request type: {request_type}")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ [FASTAPI] Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+# ✅ NEW ENDPOINT: GET SESSION MEMORY
+@app.get("/session/{session_id}/memory")
+async def get_session_memory(session_id: str):
+    """Get conversation history for a session"""
+    conversation = memory.get_conversation(session_id)
+    return {
+        "session_id": session_id,
+        "message_count": len(conversation),
+        "messages": conversation
+    }
+
+# ✅ NEW ENDPOINT: CLEAR SESSION MEMORY
+@app.delete("/session/{session_id}/memory")
+async def clear_session_memory(session_id: str):
+    """Clear conversation history for a session"""
+    if session_id in memory.conversations:
+        del memory.conversations[session_id]
+    return {"message": f"Session {session_id} memory cleared"}
+
 if __name__ == "__main__":
     import uvicorn
     print("🚀 Starting FastAPI server...")
     print("📡 Endpoints available:")
-    print("   - POST /chat (AI chat)")
+    print("   - POST /chat (AI chat with type-based routing)")
     print("   - GET /health (Health check)")
     print("   - POST /debug (Debug requests)")
     print("   - POST /test (Simple test)")
+    print("")
+    print("🎯 Supported request types:")
+    print("   - 'chat' → Llama3 (text responses)")
+    print("   - 'image' → BLIP (image analysis)")
+    print("   - Auto-detection based on fileType")
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

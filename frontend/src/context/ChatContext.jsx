@@ -293,27 +293,44 @@ export const ChatProvider = ({ children }) => {
     
     try {
       const response = await axios.get(
-        `${backendUrl}/api/chat/messages/${sessionId}`,
+        `${backendUrl}/api/chat/session/${sessionId}/messages`,
         {
           headers: { Authorization: `Bearer ${token}` },
-          timeout: 10000 // 10 second timeout
+          timeout: 15000 // 15 second timeout
         }
       );
-      
-      const fetchedMessages = response.data || [];
-      console.log('✅ [FETCH] Loaded', fetchedMessages.length, 'messages for session:', sessionId);
-      
-      setMessages(prev => ({
-        ...prev,
-        [sessionId]: fetchedMessages
-      }));
-      
-      return fetchedMessages;
+
+      console.log('📥 [FETCH] Response received:', {
+        status: response.status,
+        success: response.data.success,
+        messageCount: response.data.messages?.length || 0
+      });
+
+      if (response.data.success) {
+        const fetchedMessages = response.data.messages || [];
+        console.log('✅ [FETCH] Loaded', fetchedMessages.length, 'messages for session:', sessionId);
+        
+        // ✅ UPDATE MESSAGES STATE
+        setMessages(prev => ({
+          ...prev,
+          [sessionId]: fetchedMessages
+        }));
+        
+        return fetchedMessages;
+      } else {
+        console.log('❌ [FETCH] API returned error:', response.data.error);
+        setMessages(prev => ({
+          ...prev,
+          [sessionId]: []
+        }));
+        return [];
+      }
     } catch (error) {
       console.error('❌ [FETCH] Failed to load messages:', {
         sessionId,
         error: error.message,
-        status: error.response?.status
+        status: error.response?.status,
+        statusText: error.response?.statusText
       });
       
       // ✅ SET EMPTY ARRAY ON ERROR
@@ -342,9 +359,9 @@ export const ChatProvider = ({ children }) => {
     
     setCurrentSessionId(sessionId);
     
-    // Load messages if switching to a real session that we don't have cached
+    // ✅ AUTOMATICALLY LOAD MESSAGES IF SWITCHING TO A SESSION WE DON'T HAVE CACHED
     if (sessionId && sessionId.match(/^[0-9a-fA-F]{24}$/) && !messages[sessionId]) {
-      console.log('📤 [SESSION] Loading messages for new session:', sessionId);
+      console.log('📤 [SESSION] Auto-loading messages for new session:', sessionId);
       fetchSessionMessages(sessionId);
     }
   }, [currentSessionId, activeStreams, cancelStream, fetchSessionMessages, messages]);

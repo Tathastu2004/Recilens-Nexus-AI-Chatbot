@@ -10,6 +10,33 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import '../styles/animations.css';
 
+// ✅ CONSOLE THROTTLING UTILITY
+const throttledConsole = (() => {
+  const logCache = new Map();
+  const THROTTLE_TIME = 1000; // 1 second
+  
+  return {
+    log: (key, ...args) => {
+      const now = Date.now();
+      const lastLog = logCache.get(key);
+      
+      if (!lastLog || now - lastLog > THROTTLE_TIME) {
+        console.log(...args);
+        logCache.set(key, now);
+      }
+    },
+    error: (key, ...args) => {
+      const now = Date.now();
+      const lastLog = logCache.get(key);
+      
+      if (!lastLog || now - lastLog > THROTTLE_TIME) {
+        console.error(...args);
+        logCache.set(key, now);
+      }
+    }
+  };
+})();
+
 const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) => {
   // ✅ Constants and token
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
@@ -19,35 +46,31 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   // ✅ THEME CONTEXT
   const { theme, isDark, toggleTheme, isTransitioning } = useTheme();
 
-  // ✅ SIMPLIFIED SESSION STATE - Only use prop from parent
-  const [lastProcessedSession, setLastProcessedSession] = useState(null);
-
-  // ✅ USE SELECTED SESSION AS PRIMARY SOURCE
-  const activeSessionId = selectedSession || lastProcessedSession;
-
   // ✅ STATE MANAGEMENT
   const [input, setInput] = useState("");
   const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [hasInitialized, setHasInitialized] = useState(false);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
   
   const messagesEndRef = useRef(null);
+  const initializationRef = useRef(false); // ✅ Prevent double initialization
 
-  // ✅ CHAT CONTEXT INTEGRATION
-  let chatContext = null;
-  let chatContextAvailable = false;
+  // ✅ CHAT CONTEXT INTEGRATION - MEMOIZED
+  const chatContext = useMemo(() => {
+    try {
+      return useChat();
+    } catch (error) {
+      return null;
+    }
+  }, []);
 
-  try {
-    chatContext = useChat();
-    chatContextAvailable = true;
-  } catch (error) {
-    chatContextAvailable = false;
-  }
+  const chatContextAvailable = Boolean(chatContext);
 
-  // ✅ DESTRUCTURE CONTEXT VALUES
+  // ✅ DESTRUCTURE CONTEXT VALUES - MEMOIZED
   const {
-    currentSessionId,
+    currentSessionId: contextSessionId,
     setSession,
     sendMessage,
     getCurrentSessionMessages,
@@ -63,93 +86,27 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const [fallbackMessages, setFallbackMessages] = useState([]);
   const [isFetchingFallback, setIsFetchingFallback] = useState(false);
 
-  // ✅ CONNECTION STATUS
-  const actualIsConnected = chatContextAvailable ? (isConnected ?? false) : false;
-  const isAIStreaming = chatContextAvailable ? (isSessionStreaming ? isSessionStreaming(lastProcessedSession || currentSessionId) : false) : false;
+  // ✅ CONNECTION STATUS - MEMOIZED
+  const actualIsConnected = useMemo(() => 
+    chatContextAvailable ? (isConnected ?? false) : false
+  , [chatContextAvailable, isConnected]);
 
-  // ✅ PERSIST SESSION TO LOCALSTORAGE AND URL
-  const persistSession = useCallback((sessionId) => {
-    console.log('💾 Persisting session:', sessionId);
-    
-    if (sessionId && sessionId !== 'null' && sessionId !== 'undefined') {
-      localStorage.setItem('currentChatSession', sessionId);
-      setLastProcessedSession(sessionId);
-      
-      // Update URL without refreshing page
-      const url = new URL(window.location);
-      url.searchParams.set('session', sessionId);
-      window.history.replaceState({}, '', url);
-      
-      console.log('✅ Session persisted:', sessionId);
-    } else {
-      localStorage.removeItem('currentChatSession');
-      setLastProcessedSession(null);
-      
-      // Remove session from URL
-      const url = new URL(window.location);
-      url.searchParams.delete('session');
-      window.history.replaceState({}, '', url);
-      
-      console.log('✅ Session cleared');
-    }
-  }, []);
+  const activeSessionId = useMemo(() => 
+    selectedSession || currentSessionId
+  , [selectedSession, currentSessionId]);
 
-  // ✅ INITIALIZE SESSION ON MOUNT - FIXED to set context session
-  useEffect(() => {
-    if (hasInitialized) return;
-    
-    const initializeSession = async () => {
-      console.log('🚀 [DASHBOARD] Initializing with session:', selectedSession);
-      
-      if (selectedSession && selectedSession !== 'null' && selectedSession !== 'undefined') {
-        console.log('🔄 [DASHBOARD] Using session from parent:', selectedSession);
-        
-        // Sync with context if available
-        if (chatContextAvailable && setSession && selectedSession !== currentSessionId) {
-          console.log('📡 [DASHBOARD] Setting session in context:', selectedSession);
-          setSession(selectedSession);
-        }
-        
-        // Fetch messages for the session
-        console.log('📨 [DASHBOARD] Fetching messages for session:', selectedSession);
-        await fetchMessagesViaHTTP(selectedSession);
-      }
-      
-      setHasInitialized(true);
-    };
+  const isAIStreaming = useMemo(() => 
+    chatContextAvailable ? (isSessionStreaming ? isSessionStreaming(activeSessionId) : false) : false
+  , [chatContextAvailable, isSessionStreaming, activeSessionId]);
 
-    initializeSession();
-  }, [selectedSession, chatContextAvailable, setSession, currentSessionId]);
-
-  // ✅ HANDLE BROWSER BACK/FORWARD
-  useEffect(() => {
-    const handlePopState = () => {
-      const urlSession = new URLSearchParams(window.location.search).get('session');
-      console.log('🔙 Browser navigation detected:', urlSession);
-      
-      if (urlSession && urlSession !== lastProcessedSession) {
-        setLastProcessedSession(urlSession);
-        if (chatContextAvailable && setSession) {
-          setSession(urlSession);
-        }
-        if (onSessionUpdate) {
-          onSessionUpdate(urlSession);
-        }
-      }
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, [lastProcessedSession, chatContextAvailable, setSession, onSessionUpdate]);
-
-  // ✅ FALLBACK FETCH FUNCTION
+  // ✅ FALLBACK FETCH FUNCTION - OPTIMIZED WITH THROTTLING
   const fetchMessagesViaHTTP = useCallback(async (sessionId) => {
     if (!sessionId || !token) {
-      console.log('❌ Cannot fetch messages - missing sessionId or token');
-      return;
+      throttledConsole.log('fetch-error', '❌ Cannot fetch messages - missing sessionId or token');
+      return [];
     }
     
-    console.log('📡 Fetching messages via HTTP for session:', sessionId);
+    throttledConsole.log('fetch-start', '📡 [HTTP FETCH] Fetching messages for session:', sessionId);
     
     try {
       setIsFetchingFallback(true);
@@ -158,36 +115,132 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
-        }
+        },
+        timeout: 15000
+      });
+      
+      throttledConsole.log('fetch-response', '📥 [HTTP FETCH] Response received:', {
+        status: response.status,
+        success: response.data.success,
+        messageCount: response.data.messages?.length || 0
       });
       
       if (response.data.success) {
         const messages = response.data.messages || [];
+        
+        // ✅ SET MESSAGES AND SYNC WITH CONTEXT
         setFallbackMessages(messages);
-        console.log('✅ Fetched messages via HTTP:', messages.length);
+        
+        // ✅ ALSO UPDATE CONTEXT IF AVAILABLE
+        if (chatContextAvailable && setSessionMessages) {
+          setSessionMessages(sessionId, messages);
+        }
+        
         return messages;
       } else {
-        console.log('❌ HTTP fetch failed:', response.data.message);
+        throttledConsole.error('fetch-failed', '❌ [HTTP FETCH] Failed:', response.data.error || response.data.message);
         setFallbackMessages([]);
+        return [];
       }
     } catch (error) {
-      console.error('❌ HTTP fetch error:', error);
+      throttledConsole.error('fetch-error', '❌ [HTTP FETCH] Error:', {
+        message: error.message,
+        status: error.response?.status
+      });
+      
       setFallbackMessages([]);
+      
+      // If it's a network error, try to reconnect context
+      if (chatContextAvailable && reconnect) {
+        reconnect();
+      }
+      
+      return [];
     } finally {
       setIsFetchingFallback(false);
     }
-  }, [backendUrl, token]);
+  }, [backendUrl, token, chatContextAvailable, reconnect, setSessionMessages]);
 
-  // ✅ GET CURRENT MESSAGES
+  // ✅ INITIALIZE SESSION ON MOUNT - PREVENT DOUBLE EXECUTION
+  useEffect(() => {
+    // ✅ PREVENT DOUBLE INITIALIZATION IN STRICT MODE
+    if (initializationRef.current) {
+      return;
+    }
+
+    const initializeSession = async () => {
+      if (selectedSession && selectedSession !== 'null' && selectedSession !== 'undefined') {
+        throttledConsole.log('init-start', '🚀 [DASHBOARD] Initializing dashboard with session:', selectedSession);
+        
+        initializationRef.current = true;
+        
+        // Set current session state
+        setCurrentSessionId(selectedSession);
+        
+        // Sync with context if available
+        if (chatContextAvailable && setSession) {
+          setSession(selectedSession);
+        }
+        
+        // ✅ FETCH MESSAGES WITH RETRY LOGIC
+        try {
+          const messages = await fetchMessagesViaHTTP(selectedSession);
+          
+          // ✅ DOUBLE-CHECK: Also try context fetch if HTTP didn't get messages
+          if ((!messages || messages.length === 0) && chatContextAvailable && fetchSessionMessages) {
+            await fetchSessionMessages(selectedSession);
+          }
+        } catch (error) {
+          throttledConsole.error('init-error', '❌ [DASHBOARD] Failed to fetch messages:', error);
+        }
+      }
+      
+      setHasInitialized(true);
+    };
+
+    if (!hasInitialized) {
+      initializeSession();
+    }
+  }, [selectedSession]); // ✅ SIMPLIFIED DEPENDENCIES
+
+  // ✅ WATCH FOR SESSION CHANGES FROM PARENT - OPTIMIZED
+  useEffect(() => {
+    if (selectedSession && selectedSession !== currentSessionId && hasInitialized) {
+      throttledConsole.log('session-change', '🔄 [SESSION CHANGE] New session from parent:', selectedSession);
+      
+      // Clear old data first
+      setFallbackMessages([]);
+      setCurrentSessionId(selectedSession);
+      
+      // Sync with context
+      if (chatContextAvailable && setSession) {
+        setSession(selectedSession);
+      }
+      
+      // ✅ FETCH MESSAGES IMMEDIATELY WITH PROPER ERROR HANDLING
+      fetchMessagesViaHTTP(selectedSession).then(messages => {
+        throttledConsole.log('session-fetch', '📨 [SESSION CHANGE] Messages fetched:', messages?.length || 0);
+      }).catch(error => {
+        throttledConsole.error('session-fetch-error', '❌ [SESSION CHANGE] Failed to fetch messages:', error);
+      });
+      
+      // ✅ ALSO TRY CONTEXT FETCH
+      if (chatContextAvailable && fetchSessionMessages) {
+        fetchSessionMessages(selectedSession);
+      }
+    }
+  }, [selectedSession, currentSessionId, hasInitialized]); // ✅ OPTIMIZED DEPENDENCIES
+
+  // ✅ GET CURRENT MESSAGES - OPTIMIZED WITH STABLE REFERENCE
   const actualMessages = useMemo(() => {
     if (chatContextAvailable && actualIsConnected && getCurrentSessionMessages) {
       const contextMessages = getCurrentSessionMessages();
-      console.log('📋 Using context messages:', contextMessages.length);
-      return contextMessages;
-    } else {
-      console.log('📋 Using fallback messages:', fallbackMessages.length);
-      return fallbackMessages;
+      if (contextMessages.length > 0) {
+        return contextMessages;
+      }
     }
+    
+    return fallbackMessages;
   }, [chatContextAvailable, actualIsConnected, getCurrentSessionMessages, fallbackMessages]);
 
   // ✅ SPEECH RECOGNITION
@@ -201,8 +254,8 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const [isManuallyEditing, setIsManuallyEditing] = useState(false);
   const [hasStoppedListening, setHasStoppedListening] = useState(false);
 
-  // ✅ MODERN USER MESSAGE COMPONENT - BETTER SPACING
-  const UserMessage = ({ message, timestamp, status, fileUrl, type }) => (
+  // ✅ MODERN USER MESSAGE COMPONENT
+  const UserMessage = React.memo(({ message, timestamp, status, fileUrl, type, fileType }) => (
     <div className="flex justify-end mb-4 animate-fade-in px-4">
       <div className="flex items-start gap-2 max-w-[85%]">
         <div className={`px-4 py-3 rounded-2xl shadow-sm transition-all duration-300 ${
@@ -216,12 +269,17 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           
           {fileUrl && (
             <div className="mt-3 pt-2 border-t border-white/20">
-              {type === 'image' ? (
-                <img 
-                  src={fileUrl} 
-                  alt="Uploaded" 
-                  className="max-w-full h-auto rounded-lg shadow-md"
-                />
+              {(type === 'image' || fileType?.startsWith('image/')) ? (
+                <div className="space-y-2">
+                  <img 
+                    src={fileUrl} 
+                    alt="Uploaded" 
+                    className="max-w-full max-h-64 h-auto rounded-lg shadow-md object-cover"
+                  />
+                  <div className="text-xs text-white/70 bg-white/10 rounded px-2 py-1">
+                    🖼️ Image will be analyzed by BLIP model
+                  </div>
+                </div>
               ) : (
                 <a 
                   href={fileUrl} 
@@ -246,112 +304,65 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         </div>
       </div>
     </div>
-  );
+  ));
 
-  // ✅ MODERN AI RESPONSE COMPONENT - BETTER SPACING  
-  const AiMessage = ({ message, timestamp, fileUrl, fileType, isStreaming = false }) => (
-    <div className="flex items-start gap-2 mb-4 animate-fade-in px-4">
-      <div className="flex-shrink-0 w-7 h-7 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-full flex items-center justify-center shadow-md">
-        <IconRobot size={14} className="text-white" />
-      </div>
-      
-      <div className="flex-1 max-w-[85%]">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl px-4 py-3 shadow-sm border border-gray-200 dark:border-gray-700">
-          {isStreaming ? (
-            <div className="flex items-center gap-3">
-              <div className="typing-indicator">
-                <span></span>
-                <span></span>
-                <span></span>
+  // ✅ AI MESSAGE COMPONENT - MEMOIZED
+  const AiMessage = React.memo(({ message, timestamp, fileUrl, fileType, isStreaming = false }) => {
+    const isBLIPResponse = message.includes('🖼️') || 
+                          message.includes('Image') || 
+                          message.includes('BLIP') ||
+                          (fileUrl && fileType?.startsWith('image/'));
+
+    return (
+      <div className="flex items-start gap-2 mb-4 animate-fade-in px-4">
+        <div className="flex-shrink-0 w-7 h-7 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-full flex items-center justify-center shadow-md">
+          <IconRobot size={14} className="text-white" />
+        </div>
+        
+        <div className="flex-1 max-w-[85%]">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl px-4 py-3 shadow-sm border border-gray-200 dark:border-gray-700">
+            {isStreaming ? (
+              <div className="flex items-center gap-3">
+                <div className="typing-indicator">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+                <span className="text-sm text-gray-500 dark:text-gray-400">
+                  {isBLIPResponse ? 'Analyzing image...' : 'AI is thinking...'}
+                </span>
               </div>
-              <span className="text-sm text-gray-500 dark:text-gray-400">AI is thinking...</span>
-            </div>
-          ) : (
-            <div className="prose prose-sm max-w-none text-gray-800 dark:text-gray-200">
-              <ReactMarkdown
-                components={{
-                  code({node, inline, className, children, ...props}) {
-                    const match = /language-(\w+)/.exec(className || '');
-                    return !inline && match ? (
-                      <SyntaxHighlighter
-                        style={oneDark}
-                        language={match[1]}
-                        PreTag="div"
-                        className="rounded-lg my-3"
-                        {...props}
-                      >
-                        {String(children).replace(/\n$/, '')}
-                      </SyntaxHighlighter>
-                    ) : (
-                      <code className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded text-sm font-mono" {...props}>
-                        {children}
-                      </code>
-                    );
-                  },
-                  p: ({children}) => <p className="mb-2 leading-relaxed">{children}</p>,
-                  h1: ({children}) => <h1 className="text-lg font-bold mb-2 text-gray-900 dark:text-gray-100">{children}</h1>,
-                  h2: ({children}) => <h2 className="text-base font-bold mb-2 text-gray-900 dark:text-gray-100">{children}</h2>,
-                  h3: ({children}) => <h3 className="text-sm font-bold mb-2 text-gray-900 dark:text-gray-100">{children}</h3>,
-                  ul: ({children}) => <ul className="list-disc pl-4 mb-2 space-y-1">{children}</ul>,
-                  ol: ({children}) => <ol className="list-decimal pl-4 mb-2 space-y-1">{children}</ol>,
-                  blockquote: ({children}) => (
-                    <blockquote className="border-l-4 border-emerald-500 pl-3 py-1 my-3 bg-gray-50 dark:bg-gray-700/30 rounded-r-lg">
-                      {children}
-                    </blockquote>
-                  )
-                }}
-              >
-                {message}
-              </ReactMarkdown>
-            </div>
-          )}
+            ) : (
+              <div className="space-y-2">
+                {isBLIPResponse && (
+                  <div className="inline-flex items-center gap-2 px-2 py-1 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-md text-xs text-purple-600 dark:text-purple-400 mb-2">
+                    <div className="w-1.5 h-1.5 bg-purple-500 rounded-full"></div>
+                    Image Analysis
+                  </div>
+                )}
+                
+                <div className="prose prose-sm max-w-none text-gray-800 dark:text-gray-200">
+                  <ReactMarkdown
+                    components={{
+                      p: ({children}) => <p className="mb-1 leading-relaxed">{children}</p>,
+                    }}
+                  >
+                    {message}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            )}
+          </div>
           
-          {fileUrl && !isStreaming && (
-            <div className="mt-3 pt-2 border-t border-gray-200 dark:border-gray-700">
-              {fileType === 'image' ? (
-                <img 
-                  src={fileUrl} 
-                  alt="AI Generated" 
-                  className="max-w-full h-auto rounded-lg shadow-md"
-                />
-              ) : (
-                <a 
-                  href={fileUrl} 
-                  target="_blank" 
-                  rel="noopener noreferrer" 
-                  className="inline-flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors"
-                >
-                  <IconPaperclip size={16} />
-                  View attachment
-                </a>
-              )}
+          {!isStreaming && (
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 px-1">
+              {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </div>
           )}
         </div>
-        
-        {!isStreaming && (
-          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 px-1">
-            {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </div>
-        )}
       </div>
-    </div>
-  );
-
-  // ✅ LOAD SESSION MESSAGES
-  const loadSessionMessages = useCallback(async (sessionId) => {
-    if (!sessionId || !chatContextAvailable || !fetchSessionMessages) return;
-
-    try {
-      setIsLoadingMessages(true);
-      console.log('📡 Loading messages from context for session:', sessionId);
-      await fetchSessionMessages(sessionId);
-    } catch (error) {
-      console.error('❌ Error loading messages from context:', error);
-    } finally {
-      setIsLoadingMessages(false);
-    }
-  }, [chatContextAvailable, fetchSessionMessages]);
+    );
+  });
 
   // ✅ UPDATE SESSION TITLE
   const updateSessionTitle = useCallback(async (sessionId, firstMessage) => {
@@ -378,7 +389,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       }));
       
     } catch (err) {
-      console.error('Failed to update session title:', err);
+      throttledConsole.error('title-update', 'Failed to update session title:', err);
     }
   }, [backendUrl, token]);
 
@@ -415,19 +426,17 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   }, [listening]);
 
-  // ✅ SUBMIT HANDLER - Use activeSessionId
+  // ✅ SUBMIT HANDLER - OPTIMIZED
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
     if (!input.trim() && !file) return;
     
-    // ✅ Use selectedSession as primary source
-    const sessionToUse = selectedSession;
+    const sessionToUse = activeSessionId;
     if (!sessionToUse || isAIStreaming) {
-      console.log('❌ Cannot submit - no session or AI is streaming');
       return;
     }
 
-    console.log('📤 Submitting message to session:', sessionToUse);
+    throttledConsole.log('submit', '📤 Submitting message to session:', sessionToUse);
     
     setIsManuallyEditing(false);
     setHasStoppedListening(false);
@@ -446,10 +455,22 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     // Handle file upload
     let fileUrl = null;
     let fileType = null;
+    let requestType = 'chat';
 
     if (file) {
       try {
         setIsUploading(true);
+        
+        const isImage = file.type.startsWith("image/");
+        
+        if (isImage) {
+          requestType = 'image';
+          fileType = 'image';
+        } else {
+          requestType = 'chat';
+          fileType = 'document';
+        }
+
         const formData = new FormData();
         formData.append("file", file);
 
@@ -462,10 +483,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
 
         if (res.data.success) {
           fileUrl = res.data.fileUrl || res.data.url;
-          fileType = file.type.startsWith("image") ? "image" : "document";
         }
       } catch (err) {
-        console.error('File upload failed:', err);
+        throttledConsole.error('upload-error', '❌ [UPLOAD] File upload failed:', err);
+        return;
       } finally {
         setIsUploading(false);
       }
@@ -478,7 +499,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       sender: userId,
       type: fileType || "text",
       fileUrl,
-      fileType,
+      fileType: file?.type || null,
       timestamp: new Date().toISOString(),
       status: 'sent'
     };
@@ -487,16 +508,17 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     if (chatContextAvailable && setSessionMessages) {
       const currentMessages = getCurrentSessionMessages();
       setSessionMessages(sessionToUse, [...currentMessages, userMessage]);
+    } else {
+      setFallbackMessages(prev => [...prev, userMessage]);
     }
 
-    // Send message
     const messagePayload = {
       sessionId: sessionToUse,
       senderId: userId,
       message: originalInput,
-      type: fileType || "text",
+      type: requestType,
       fileUrl,
-      fileType,
+      fileType: file?.type || null,
       tempId: tempMessageId
     };
 
@@ -504,66 +526,27 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       if (chatContextAvailable && sendMessage) {
         const result = await sendMessage(messagePayload);
         
-        if (result.success && isFirstMessage && originalInput.trim()) {
-          updateSessionTitle(sessionToUse, originalInput.trim());
+        if (result.success) {
+          if (isFirstMessage && originalInput.trim()) {
+            updateSessionTitle(sessionToUse, originalInput.trim());
+          }
         }
       }
     } catch (error) {
-      console.error('Error during message submission:', error);
+      throttledConsole.error('ai-error', '❌ [AI ERROR] Error during message submission:', error);
     }
-  }, [input, file, selectedSession, isAIStreaming, actualMessages.length, userId, resetTranscript, backendUrl, token, chatContextAvailable, setSessionMessages, getCurrentSessionMessages, sendMessage, updateSessionTitle]);
+  }, [input, file, activeSessionId, isAIStreaming, actualMessages.length, userId, resetTranscript, backendUrl, token, chatContextAvailable, setSessionMessages, getCurrentSessionMessages, sendMessage, updateSessionTitle]);
 
-  // ✅ HANDLE SESSION CHANGES FROM PARENT
+  // ✅ AUTO-SCROLL - THROTTLED
   useEffect(() => {
-    if (!hasInitialized) return;
-    if (selectedSession === lastProcessedSession) return;
-
-    console.log('🔄 [DASHBOARD] Processing session change:', { 
-      from: lastProcessedSession,
-      to: selectedSession
-    });
-
-    setLastProcessedSession(selectedSession);
-
-    if (selectedSession && selectedSession !== 'null' && selectedSession !== 'undefined') {
-      // Sync with context
-      if (chatContextAvailable && setSession && selectedSession !== currentSessionId) {
-        setSession(selectedSession);
+    const timeoutId = setTimeout(() => {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
       }
-      
-      // Fetch messages if needed
-      if (!actualIsConnected || selectedSession !== currentSessionId) {
-        fetchMessagesViaHTTP(selectedSession);
-      }
-    } else {
-      // Clear state
-      setFallbackMessages([]);
-      if (chatContextAvailable && setSession) {
-        setSession(null);
-      }
-    }
-  }, [selectedSession, hasInitialized, lastProcessedSession, currentSessionId, actualIsConnected, chatContextAvailable, setSession, fetchMessagesViaHTTP]);
+    }, 100);
 
-  // ✅ FALLBACK TRIGGER - Only for active sessions without messages
-  useEffect(() => {
-    const activeSessionId = lastProcessedSession;
-    
-    if (activeSessionId && 
-        !actualIsConnected && 
-        actualMessages.length === 0 && 
-        !isFetchingFallback && 
-        hasInitialized) {
-      console.log('🔄 Triggering fallback fetch for:', activeSessionId);
-      fetchMessagesViaHTTP(activeSessionId);
-    }
-  }, [lastProcessedSession, actualIsConnected, actualMessages.length, isFetchingFallback, hasInitialized, fetchMessagesViaHTTP]);
-
-  // ✅ AUTO-SCROLL
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [actualMessages, isAIStreaming]);
+    return () => clearTimeout(timeoutId);
+  }, [actualMessages.length]); // ✅ ONLY TRIGGER ON LENGTH CHANGE
 
   // ✅ VOICE INPUT TRANSCRIPT HANDLING
   useEffect(() => {
@@ -572,19 +555,55 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   }, [transcript, listening, isManuallyEditing, hasStoppedListening]);
 
-  // ✅ DEBUG LOGGING
-  useEffect(() => {
-    console.log('🔍 Session state:', {
-      lastProcessedSession,
-      currentSessionId,
+  // ✅ DEBUG LOGGING - HEAVILY THROTTLED
+  useEffect(() => { 
+    throttledConsole.log('dashboard-state', '🔍 Dashboard state:', {
       selectedSession,
+      messagesCount: actualMessages.length,
       hasInitialized,
-      actualIsConnected,
-      messagesCount: actualMessages.length
+      actualIsConnected
     });
-  }, [lastProcessedSession, currentSessionId, selectedSession, hasInitialized, actualIsConnected, actualMessages.length]);
+  }, [selectedSession, actualMessages.length, hasInitialized, actualIsConnected]);
 
-  // ✅ MAIN RENDER WITH THEME INTEGRATION
+  // ✅ MAIN RENDER - MEMOIZED SECTIONS
+  const headerSection = useMemo(() => (
+    <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-b border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-7 h-7 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-lg flex items-center justify-center">
+            <IconRobot size={16} className="text-white" />
+          </div>
+          <h1 className="text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
+            Nexus AI Assistant
+          </h1>
+        </div>
+        
+        <div className="flex items-center gap-3">
+          {!actualIsConnected && (
+            <div className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2">
+              <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></div>
+              Reconnecting...
+            </div>
+          )}
+          
+          <button
+            onClick={toggleTheme}
+            className={`p-2 rounded-lg transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 ${
+              isTransitioning ? 'animate-spin' : ''
+            }`}
+            title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+          >
+            {isDark ? (
+              <IconSun size={18} className="text-yellow-500" />
+            ) : (
+              <IconMoon size={18} className="text-gray-600" />
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  ), [actualIsConnected, isDark, isTransitioning, toggleTheme]);
+
   return (
     <div className={`flex flex-col h-screen transition-all duration-300 ${
       isDark 
@@ -592,46 +611,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         : 'bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50'
     } ${isTransitioning ? 'animate-pulse' : ''}`}>
       
-      {/* ✅ HEADER WITH THEME TOGGLE */}
-      <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-b border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-7 h-7 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-lg flex items-center justify-center">
-              <IconRobot size={16} className="text-white" />
-            </div>
-            <h1 className="text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
-              Nexus AI Assistant
-            </h1>
-          </div>
-          
-          <div className="flex items-center gap-3">
-            {/* Connection indicator */}
-            {!actualIsConnected && (
-              <div className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2">
-                <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></div>
-                Reconnecting...
-              </div>
-            )}
-            
-            {/* ✅ THEME TOGGLE BUTTON */}
-            <button
-              onClick={toggleTheme}
-              className={`p-2 rounded-lg transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 ${
-                isTransitioning ? 'animate-spin' : ''
-              }`}
-              title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
-            >
-              {isDark ? (
-                <IconSun size={18} className="text-yellow-500" />
-              ) : (
-                <IconMoon size={18} className="text-gray-600" />
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
+      {/* ✅ HEADER */}
+      {headerSection}
 
-      {/* ✅ MESSAGES AREA - REDUCED PADDING */}
+      {/* ✅ MESSAGES AREA */}
       <div className="flex-1 overflow-y-auto py-4">
         {(isFetchingFallback || isLoadingMessages) ? (
           <div className="flex items-center justify-center h-full">
@@ -707,15 +690,17 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         )}
       </div>
 
-      {/* ✅ COMPACT INPUT AREA */}
+      {/* ✅ INPUT AREA */}
       <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-t border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
         <div className="max-w-4xl mx-auto">
           <form onSubmit={handleSubmit} className="relative">
             <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-2xl shadow-sm border border-gray-200/50 dark:border-gray-600/50 px-3 py-2">
-              {/* File Upload */}
               <input
                 type="file"
-                onChange={(e) => setFile(e.target.files[0])}
+                onChange={(e) => {
+                  const selectedFile = e.target.files[0];
+                  setFile(selectedFile);
+                }}
                 className="hidden"
                 id="fileUpload"
                 accept="image/*,.pdf,.doc,.docx,.txt"
@@ -728,7 +713,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                 <IconUpload size={18} className="text-gray-500 group-hover:text-gray-700 dark:text-gray-400 dark:group-hover:text-gray-200 transition-colors" />
               </label>
 
-              {/* Voice Input */}
               {browserSupportsSpeechRecognition && (
                 <button
                   type="button"
@@ -744,7 +728,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                 </button>
               )}
 
-              {/* Text Input */}
               <input
                 type="text"
                 value={input}
@@ -754,7 +737,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                 disabled={isAIStreaming}
               />
 
-              {/* Send Button */}
               <button
                 type="submit"
                 className={`p-2 rounded-lg transition-all duration-200 ${
@@ -774,7 +756,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             </div>
           </form>
 
-          {/* ✅ COMPACT STATUS INDICATORS */}
           {(file || listening) && (
             <div className="flex items-center gap-4 mt-2 px-2 text-xs">
               {file && (
@@ -797,7 +778,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             </div>
           )}
 
-          {/* AI Status */}
           {isAIStreaming && (
             <div className="text-xs text-blue-500 dark:text-blue-400 mt-2 px-2 flex items-center gap-2">
               <div className="typing-indicator">
