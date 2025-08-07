@@ -1,6 +1,23 @@
 "use client";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { IconSend, IconRobot, IconUpload, IconMicrophone, IconCheck, IconPaperclip, IconUser, IconSun, IconMoon, IconClipboard, IconX } from "@tabler/icons-react";
+import { 
+  IconSend, 
+  IconRobot, 
+  IconUpload, 
+  IconMicrophone, 
+  IconCheck, 
+  IconPaperclip, 
+  IconUser, 
+  IconSun, 
+  IconMoon, 
+  IconClipboard, 
+  IconX, 
+  IconFileText, 
+  IconFile,  // Use IconFile instead of IconFilePdf
+  IconFileWord, 
+  IconDownload, 
+  IconAlertCircle 
+} from "@tabler/icons-react";
 import axios from "axios";
 import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 import { useChat } from '../context/ChatContext';
@@ -20,20 +37,33 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const { theme, isDark, toggleTheme, isTransitioning } = useTheme();
 
   // ✅ STATE MANAGEMENT
-  const [input, setInput] = useState("");
-  const [file, setFile] = useState(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  const [hasInitialized, setHasInitialized] = useState(false);
-  const [currentSessionId, setCurrentSessionId] = useState(null);
+ // ✅ STATE MANAGEMENT
+const [input, setInput] = useState("");
+const [file, setFile] = useState(null);
+const [isUploading, setIsUploading] = useState(false);
+const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+const [hasInitialized, setHasInitialized] = useState(false);
+const [currentSessionId, setCurrentSessionId] = useState(null);
+const [uploadResult, setUploadResult] = useState(null);
+/* Removed duplicate isAIStreaming state, as it is derived from context below */
+const [isAIStreaming, setIsAIStreaming] = useState(false);
+
+// ✅ NEW STATE FOR COPY-PASTE FUNCTIONALITY
+const [pastedImage, setPastedImage] = useState(null);
+const [pastePreview, setPastePreview] = useState(null);
+const [showPasteIndicator, setShowPasteIndicator] = useState(false);
   
-  // ✅ NEW STATE FOR COPY-PASTE FUNCTIONALITY
-  const [pastedImage, setPastedImage] = useState(null);
-  const [pastePreview, setPastePreview] = useState(null);
-  const [showPasteIndicator, setShowPasteIndicator] = useState(false);
+  // ✅ NEW STATE FOR DOCUMENT SUPPORT
+  const [dragOver, setDragOver] = useState(false);
+  const [fileValidationError, setFileValidationError] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
   
+  // ✅ NEW STATE FOR DEDUPLICATION
+  const [duplicateCheck, setDuplicateCheck] = useState(null);
+  const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
+
   const messagesEndRef = useRef(null);
-  const inputRef = useRef(null); // ✅ REF FOR INPUT ELEMENT
+  const inputRef = useRef(null);
 
   // ✅ CHAT CONTEXT INTEGRATION
   let chatContext = null;
@@ -46,18 +76,31 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     chatContextAvailable = false;
   }
 
-  // ✅ DESTRUCTURE CONTEXT VALUES
+  // ✅ DESTRUCTURE CONTEXT VALUES WITH DOCUMENT SUPPORT
   const {
     currentSessionId: contextSessionId,
     setSession,
     sendMessage,
+    addMessageToSession,
     getCurrentSessionMessages,
     setSessionMessages,
     isConnected,
     fetchSessionMessages,
     isSessionStreaming,
     initializeContext,
-    reconnect
+    reconnect,
+    // ✅ DOCUMENT FEATURES
+    detectFileType,
+    validateFile,
+    supportedFileTypes,
+    getSessionStats,
+    clearSessionCache,
+    aiServiceHealth,
+    // ✅ NEW: DEDUPLICATION FEATURES
+    generateFileHash,
+    checkDuplicateFile,
+    getDuplicateStats,
+    cleanupDuplicates
   } = chatContext || {};
 
   // ✅ FALLBACK MESSAGE FETCHING
@@ -67,7 +110,132 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   // ✅ CONNECTION STATUS
   const actualIsConnected = chatContextAvailable ? (isConnected ?? false) : false;
   const activeSessionId = selectedSession || currentSessionId;
-  const isAIStreaming = chatContextAvailable ? (isSessionStreaming ? isSessionStreaming(activeSessionId) : false) : false;
+  // const isAIStreaming = chatContextAvailable ? (isSessionStreaming ? isSessionStreaming(activeSessionId) : false) : false;
+
+  // ✅ ENHANCED FILE TYPE DETECTION
+  const getFileIcon = useCallback((fileType, fileName) => {
+    const type = detectFileType ? detectFileType(null, fileName, fileType) : 'unknown';
+    
+    switch (type) {
+      case 'image':
+        return <IconClipboard size={16} className="text-purple-500" />;
+      case 'document':
+        if (fileName?.toLowerCase().endsWith('.pdf') || fileType?.includes('pdf')) {
+          return <IconFile size={16} className="text-red-500" />; // Changed from IconFilePdf
+        } else if (fileName?.toLowerCase().match(/\.(docx?|doc)$/i) || fileType?.includes('word')) {
+          return <IconFileWord size={16} className="text-blue-500" />;
+        } else {
+          return <IconFileText size={16} className="text-gray-500" />;
+        }
+      default:
+        return <IconPaperclip size={16} className="text-gray-500" />;
+    }
+  }, [detectFileType]);
+
+  // ✅ ENHANCED FILE VALIDATION
+  const validateFileBeforeUpload = useCallback(async (file) => {
+    if (!file) return { isValid: false, error: 'No file selected' };
+    
+    // Clear previous errors
+    setFileValidationError(null);
+    setDuplicateCheck(null);
+    setShowDuplicateWarning(false);
+    
+    try {
+      // ✅ ENHANCED VALIDATION WITH TEXT EXTRACTION CAPABILITY
+      if (validateFile) {
+        const validation = await validateFile(file);
+        if (!validation.isValid) {
+          setFileValidationError(validation.error);
+          return validation;
+        }
+        
+        // ✅ SHOW TEXT EXTRACTION CAPABILITY
+        if (validation.canExtractText) {
+          console.log('📄 [VALIDATION] Document can have text extracted:', {
+            fileName: file.name,
+            processingInfo: validation.processingInfo
+          });
+        }
+      }
+      
+      // ✅ CHECK FOR DUPLICATES
+      if (generateFileHash && checkDuplicateFile) {
+        console.log('🔍 [DUPLICATE CHECK] Checking for duplicate file...');
+        const fileHash = await generateFileHash(file);
+        
+        if (fileHash) {
+          const duplicateResult = await checkDuplicateFile(fileHash);
+          
+          if (duplicateResult.success && duplicateResult.isDuplicate) {
+            console.log('⚠️ [DUPLICATE CHECK] Duplicate file detected:', duplicateResult.existingFile);
+            setDuplicateCheck({
+              isDuplicate: true,
+              existingFile: duplicateResult.existingFile,
+              fileHash
+            });
+            setShowDuplicateWarning(true);
+            
+            // Don't return error, just show warning
+            return { 
+              isValid: true, 
+              isDuplicate: true, 
+              existingFile: duplicateResult.existingFile,
+              warning: 'This file already exists in your uploads. Using existing version will save bandwidth.'
+            };
+          } else {
+            console.log('✅ [DUPLICATE CHECK] File is unique');
+            setDuplicateCheck({ isDuplicate: false, fileHash });
+          }
+        }
+      }
+      
+      return { isValid: true, detectedType: 'unknown' };
+      
+    } catch (error) {
+      const errorMsg = `Validation failed: ${error.message}`;
+      setFileValidationError(errorMsg);
+      return { isValid: false, error: errorMsg };
+    }
+  }, [validateFile, generateFileHash, checkDuplicateFile]);
+
+  // ✅ DRAG AND DROP HANDLERS
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback(async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const droppedFile = files[0];
+      console.log('📁 [DRAG DROP] File dropped:', {
+        name: droppedFile.name,
+        type: droppedFile.type,
+        size: droppedFile.size
+      });
+      
+      const validation = await validateFileBeforeUpload(droppedFile);
+      if (validation.isValid) {
+        setFile(droppedFile);
+        // Clear pasted image if file is dropped
+        if (pastedImage) {
+          clearPastedImage();
+        }
+      }
+    }
+  }, [validateFileBeforeUpload, pastedImage]);
 
   // ✅ IMAGE PASTE UTILITY FUNCTIONS
   const createFileFromBlob = (blob, filename = 'pasted-image.png') => {
@@ -107,6 +275,13 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           // ✅ CREATE FILE FROM BLOB
           const imageFile = createFileFromBlob(blob, `pasted-image-${Date.now()}.png`);
           
+          // ✅ VALIDATE PASTED IMAGE
+          const validation = await validateFileBeforeUpload(imageFile);
+          if (!validation.isValid) {
+            console.error('❌ [PASTE] Validation failed:', validation.error);
+            return;
+          }
+          
           // ✅ CREATE PREVIEW
           const previewUrl = await createImagePreview(imageFile);
           
@@ -133,7 +308,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     if (!imageFound) {
       console.log('📋 [PASTE] No image found in clipboard');
     }
-  }, [createImagePreview]);
+  }, [createImagePreview, validateFileBeforeUpload]);
 
   // ✅ KEYBOARD SHORTCUTS
   const handleKeyDown = useCallback((e) => {
@@ -162,35 +337,44 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     setPastedImage(null);
     setPastePreview(null);
     setFile(null);
+    setFileValidationError(null);
     
     // Clear file input
     const fileInput = document.getElementById("fileUpload");
     if (fileInput) fileInput.value = "";
   }, []);
 
-  // ✅ ATTACH EVENT LISTENERS
+  // ✅ ATTACH EVENT LISTENERS WITH DRAG & DROP
   useEffect(() => {
     const inputElement = inputRef.current;
     if (!inputElement) return;
 
-    console.log('📋 [PASTE] Attaching paste event listeners');
+    console.log('📋 [EVENTS] Attaching event listeners');
     
     inputElement.addEventListener('paste', handlePaste);
     inputElement.addEventListener('keydown', handleKeyDown);
     
-    // ✅ ALSO ATTACH TO DOCUMENT FOR GLOBAL PASTE
+    // ✅ DRAG & DROP EVENTS
+    document.addEventListener('dragover', handleDragOver);
+    document.addEventListener('dragleave', handleDragLeave);
+    document.addEventListener('drop', handleDrop);
+    
+    // ✅ GLOBAL PASTE
     document.addEventListener('paste', handlePaste);
     document.addEventListener('keydown', handleKeyDown);
 
     return () => {
       inputElement.removeEventListener('paste', handlePaste);
       inputElement.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('dragover', handleDragOver);
+      document.removeEventListener('dragleave', handleDragLeave);
+      document.removeEventListener('drop', handleDrop);
       document.removeEventListener('paste', handlePaste);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [handlePaste, handleKeyDown]);
+  }, [handlePaste, handleKeyDown, handleDragOver, handleDragLeave, handleDrop]);
 
-  // ✅ FALLBACK FETCH FUNCTION - MOVED BEFORE useEffect
+  // ✅ FALLBACK FETCH FUNCTION
   const fetchMessagesViaHTTP = useCallback(async (sessionId) => {
     if (!sessionId || !token) {
       console.log('❌ Cannot fetch messages - missing sessionId or token');
@@ -202,29 +386,29 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     try {
       setIsFetchingFallback(true);
       
-      // ✅ UPDATED ENDPOINT PATH
       const response = await axios.get(`${backendUrl}/api/chat/session/${sessionId}/messages`, {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         },
-        timeout: 15000 // Increased timeout
+        timeout: 15000
       });
       
       console.log('📥 [HTTP FETCH] Response received:', {
         status: response.status,
         success: response.data.success,
-        messageCount: response.data.messages?.length || 0
+        messageCount: response.data.messages?.length || 0,
+        fileCount: response.data.fileCount || 0,
+        imageCount: response.data.imageCount || 0,
+        documentCount: response.data.documentCount || 0
       });
       
       if (response.data.success) {
         const messages = response.data.messages || [];
         console.log('✅ [HTTP FETCH] Messages loaded successfully:', messages.length);
         
-        // ✅ SET MESSAGES AND SYNC WITH CONTEXT
         setFallbackMessages(messages);
         
-        // ✅ ALSO UPDATE CONTEXT IF AVAILABLE
         if (chatContextAvailable && setSessionMessages) {
           console.log('🔄 [HTTP FETCH] Syncing with context...');
           setSessionMessages(sessionId, messages);
@@ -245,7 +429,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       
       setFallbackMessages([]);
       
-      // If it's a network error, try to reconnect context
       if (chatContextAvailable && reconnect) {
         console.log('🔄 [HTTP FETCH] Attempting context reconnection...');
         reconnect();
@@ -257,7 +440,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   }, [backendUrl, token, chatContextAvailable, reconnect, setSessionMessages]);
 
-  // ✅ INITIALIZE SESSION ON MOUNT - NOW fetchMessagesViaHTTP IS AVAILABLE
+  // ✅ INITIALIZE SESSION ON MOUNT
   useEffect(() => {
     const initializeSession = async () => {
       console.log('🚀 [DASHBOARD] Initializing dashboard with session:', selectedSession);
@@ -265,21 +448,17 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       if (selectedSession && selectedSession !== 'null' && selectedSession !== 'undefined') {
         console.log('📍 [DASHBOARD] Setting up session immediately:', selectedSession);
         
-        // Set current session state
         setCurrentSessionId(selectedSession);
         
-        // Sync with context if available
         if (chatContextAvailable && setSession) {
           console.log('📡 [DASHBOARD] Setting session in context:', selectedSession);
           setSession(selectedSession);
         }
         
-        // ✅ FETCH MESSAGES WITH RETRY LOGIC
         console.log('📨 [DASHBOARD] Starting message fetch...');
         try {
           const messages = await fetchMessagesViaHTTP(selectedSession);
           
-          // ✅ DOUBLE-CHECK: Also try context fetch if HTTP didn't get messages
           if ((!messages || messages.length === 0) && chatContextAvailable && fetchSessionMessages) {
             console.log('🔄 [DASHBOARD] Trying context fetch as fallback...');
             await fetchSessionMessages(selectedSession);
@@ -303,33 +482,28 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     if (selectedSession && selectedSession !== currentSessionId) {
       console.log('🔄 [SESSION CHANGE] New session from parent:', selectedSession);
       
-      // Clear old data first
       setFallbackMessages([]);
       setCurrentSessionId(selectedSession);
-      
-      // ✅ CLEAR PASTED IMAGE ON SESSION CHANGE
       clearPastedImage();
+      setFileValidationError(null);
       
-      // Sync with context
       if (chatContextAvailable && setSession) {
         setSession(selectedSession);
       }
       
-      // ✅ FETCH MESSAGES IMMEDIATELY WITH PROPER ERROR HANDLING
       fetchMessagesViaHTTP(selectedSession).then(messages => {
         console.log('📨 [SESSION CHANGE] Messages fetched:', messages?.length || 0);
       }).catch(error => {
         console.error('❌ [SESSION CHANGE] Failed to fetch messages:', error);
       });
       
-      // ✅ ALSO TRY CONTEXT FETCH
       if (chatContextAvailable && fetchSessionMessages) {
         fetchSessionMessages(selectedSession);
       }
     }
   }, [selectedSession, currentSessionId, chatContextAvailable, setSession, fetchMessagesViaHTTP, fetchSessionMessages, clearPastedImage]);
 
-  // ✅ GET CURRENT MESSAGES - PRIORITIZE REAL DATA
+  // ✅ GET CURRENT MESSAGES
   const actualMessages = useMemo(() => {
     if (chatContextAvailable && actualIsConnected && getCurrentSessionMessages) {
       const contextMessages = getCurrentSessionMessages();
@@ -339,7 +513,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       }
     }
     
-    // Fallback to HTTP messages
     console.log('📋 [MESSAGES] Using fallback messages:', fallbackMessages.length);
     return fallbackMessages;
   }, [chatContextAvailable, actualIsConnected, getCurrentSessionMessages, fallbackMessages]);
@@ -355,157 +528,131 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const [isManuallyEditing, setIsManuallyEditing] = useState(false);
   const [hasStoppedListening, setHasStoppedListening] = useState(false);
 
-  // ✅ MODERN USER MESSAGE COMPONENT
-  const UserMessage = ({ message, timestamp, status, fileUrl, type, fileType }) => (
-    <div className="flex justify-end mb-4 animate-fade-in px-4">
-      <div className="flex items-start gap-2 max-w-[85%]">
-        <div className={`px-4 py-3 rounded-2xl shadow-sm transition-all duration-300 ${
-          status === 'failed'
-            ? 'bg-red-500/10 text-red-600 border border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800'
-            : 'bg-gradient-to-br from-blue-600 to-purple-600 text-white shadow-lg'
-        }`}>
-          <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-            {message}
-          </div>
-          
-          {fileUrl && (
-            <div className="mt-3 pt-2 border-t border-white/20">
-              {(type === 'image' || fileType?.startsWith('image/')) ? (
-                <div className="space-y-2">
-                  <img 
-                    src={fileUrl} 
-                    alt="Uploaded" 
-                    className="max-w-full max-h-64 h-auto rounded-lg shadow-md object-cover"
-                    // onLoad={}
-                    // onError={}
-                  />
-                  <div className="text-xs text-white/70 bg-white/10 rounded px-2 py-1">
-                    🖼️ Image will be analyzed by BLIP model
-                  </div>
-                </div>
-              ) : (
-                <a 
-                  href={fileUrl} 
-                  target="_blank" 
-                  rel="noopener noreferrer" 
-                  className="inline-flex items-center gap-2 text-sm text-white/90 hover:text-white transition-colors"
-                >
-                  <IconPaperclip size={16} />
-                  View attachment
-                </a>
-              )}
+  // ✅ ENHANCED USER MESSAGE COMPONENT WITH TEXT EXTRACTION INFO
+  const UserMessage = ({ message, timestamp, status, fileUrl, type, fileType, fileName, isDuplicate, hasTextExtraction, extractedTextLength }) => {
+    const detectedType = detectFileType ? detectFileType(fileUrl, fileName, fileType) : 'unknown';
+    
+    return (
+      <div className="flex justify-end mb-4 animate-fade-in px-4">
+        <div className="flex items-start gap-2 max-w-[85%]">
+          <div className={`px-4 py-3 rounded-2xl shadow-sm transition-all duration-300 ${
+            status === 'failed'
+              ? 'bg-red-500/10 text-red-600 border border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800'
+              : 'bg-gradient-to-br from-blue-600 to-purple-600 text-white shadow-lg'
+          }`}>
+            <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+              {message}
             </div>
-          )}
-          
-          <div className="text-xs text-white/70 mt-2">
-            {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            
+            {fileUrl && (
+              <div className="mt-3 pt-2 border-t border-white/20">
+                {detectedType === 'document' ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 p-2 bg-white/10 rounded-lg">
+                      {getFileIcon(fileType, fileName)}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-white/90 font-medium truncate">
+                          {fileName || 'Document'}
+                        </div>
+                        <div className="text-xs text-white/70">
+                          {fileType || 'Document file'}
+                          {/* ✅ TEXT EXTRACTION STATUS */}
+                          {hasTextExtraction && (
+                            <span className="ml-2 text-green-300">
+                              • {extractedTextLength} chars extracted
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-xs text-white/70 bg-white/10 rounded px-2 py-1 flex items-center gap-1">
+                      📄 <span>
+                        {hasTextExtraction 
+                          ? 'Text extracted & processed by Llama3' 
+                          : 'Document processed by Llama3'
+                        }
+                      </span>
+                      {isDuplicate && <span className="ml-1">• ♻️ Reused existing file</span>}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 p-2 bg-white/10 rounded-lg">
+                      {getFileIcon(fileType, fileName)}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-white/90 font-medium truncate">
+                          {fileName || 'Document'}
+                        </div>
+                        <div className="text-xs text-white/70">
+                          {fileType || 'Document file'}
+                        </div>
+                      </div>
+                      <a 
+                        href={fileUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="p-1 hover:bg-white/10 rounded transition-colors"
+                        title="Download file"
+                      >
+                        <IconDownload size={14} className="text-white/70" />
+                      </a>
+                    </div>
+                    <div className="text-xs text-white/70 bg-white/10 rounded px-2 py-1 flex items-center gap-1">
+                      📄 <span>Document processed by Llama3</span>
+                      {isDuplicate && <span className="ml-1">• ♻️ Reused existing file</span>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            <div className="text-xs text-white/70 mt-2">
+              {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </div>
           </div>
-        </div>
-        
-        <div className="flex-shrink-0 w-7 h-7 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center shadow-md">
-          <IconUser size={14} className="text-white" />
+          
+          <div className="flex-shrink-0 w-7 h-7 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center shadow-md">
+            <IconUser size={14} className="text-white" />
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
-  // ✅ AI MESSAGE COMPONENT - UPDATED WITH AGGRESSIVE EMOJI REMOVAL
-  const AiMessage = ({ message, timestamp, fileUrl, fileType, isStreaming = false }) => {
-    const isBLIPResponse = message.includes('🖼️') || 
-                          message.includes('Image') || 
-                          message.includes('BLIP') ||
-                          (fileUrl && fileType?.startsWith('image/'));
+  // ✅ ENHANCED AI MESSAGE COMPONENT WITH DOCUMENT PROCESSING INDICATORS
+  const AiMessage = ({ message, timestamp, fileUrl, fileType, isStreaming = false, type, processingInfo, completedBy, metadata }) => {
+    const isImageResponse = type === 'image' || completedBy === 'BLIP' || 
+                           message.includes('🖼️') || message.includes('Image');
+    const isDocumentResponse = type === 'document' || completedBy?.includes('Document') ||
+                              message.includes('document') || message.includes('Document');
 
-    // ✅ AGGRESSIVE CLEAN UP FUNCTION - REMOVES ALL EMOJIS AND VERBOSE TEXT
+    // ✅ ENHANCED MESSAGE CLEANING
     const cleanMessage = useCallback((rawMessage) => {
       if (!rawMessage) return '';
       
       let cleaned = rawMessage;
       
-      // ✅ STEP 1: Remove ALL emojis first (most aggressive approach)
-      cleaned = cleaned.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '');
-      
-      // ✅ STEP 2: Remove specific processing patterns
-      const processingPatterns = [
-        // Loading sequences
-        /Loading and analyzing image[^.]*\.*/gi,
-        /Downloading image[^.]*\.*/gi,
-        /Image loaded successfully[^)]*\)[^.]*\.*/gi,
-        /Analyzing image content[^.]*\.*/gi,
-        
-        // Analysis patterns - MORE COMPREHENSIVE
-        /Additional Analysis[:\s]*[^!]*!*/gi,
-        /Analysis complete!*/gi,
-        
-        // Description labels
-        /Image Description[:\s]*/gi,
-        /Description[:\s]*/gi,
-      ];
-      
-      // Apply all patterns
-      processingPatterns.forEach(pattern => {
-        cleaned = cleaned.replace(pattern, '');
-      });
-      
-      // ✅ STEP 3: Remove any remaining emoji-like characters and symbols
+      // Remove emojis and processing indicators
       cleaned = cleaned
-        .replace(/[🖼️📥✅🔍📊🔎📋•\-]/g, '') // Specific problematic emojis
-        .replace(/[\u{1F000}-\u{1F9FF}]/gu, '') // Extended emoji range
-        .replace(/[\u{2000}-\u{2BFF}]/gu, '') // Symbols and punctuation
-        .replace(/[•\-•]/g, '') // Bullet points and dashes
-        .replace(/\s+/g, ' ') // Multiple spaces
+        .replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '')
+        .replace(/Loading and analyzing[^.]*\.*/gi, '')
+        .replace(/Image loaded successfully[^)]*\)[^.]*\.*/gi, '')
+        .replace(/Analysis complete!*/gi, '')
+        .replace(/Document processing[^.]*\.*/gi, '')
+        .replace(/Text extracted[^.]*\.*/gi, '')
+        .replace(/\s+/g, ' ')
         .trim();
       
-      // ✅ STEP 4: Extract meaningful description if still has processing text
-      if (cleaned.includes('pixels') || cleaned.includes('successfully') || cleaned.includes('complete')) {
-        // Try to extract just the actual description
-        const descriptionPatterns = [
-          /(a\s+[^.]*?cat[^.]*?)(?:\s|$)/i,
-          /(the\s+[^.]*?)(?:\s|$)/i,
-          /(.*?(?:cat|dog|person|animal|scene)[^.]*?)(?:\s|$)/i,
-          /([a-z][^.]*?)(?:\s|$)/i
-        ];
-        
-        for (const pattern of descriptionPatterns) {
-          const match = cleaned.match(pattern);
-          if (match && match[1] && match[1].trim().length > 5) {
-            cleaned = match[1].trim();
-            break;
-          }
-        }
-      }
-      
-      // ✅ STEP 5: Final aggressive cleanup
-      cleaned = cleaned
-        .replace(/^[^\w]*/, '') // Remove non-word chars at start
-        .replace(/[^\w\s.!?,]*$/g, '') // Remove non-word chars at end except basic punctuation
-        .replace(/\s+/g, ' ') // Multiple spaces again
-        .trim();
-      
-      // ✅ STEP 6: Remove any trailing single characters or symbols
-      cleaned = cleaned.replace(/\s+[^\w\s.!?]{1}$/, '');
-      
-      // ✅ STEP 7: Capitalize first letter
+      // Capitalize first letter and add period if needed
       if (cleaned && cleaned.length > 0 && /^[a-z]/.test(cleaned)) {
         cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
       }
       
-      // ✅ STEP 8: Add period if missing and it's a proper description
       if (cleaned && cleaned.length > 10 && !/[.!?]$/.test(cleaned)) {
         cleaned += '.';
       }
       
-      // ✅ STEP 9: Final emoji sweep (just to be absolutely sure)
-      cleaned = cleaned.replace(/[\u{1F000}-\u{1FFFF}]/gu, '').trim();
-      
-      // ✅ FALLBACK: Return original if cleaning failed
-      if (!cleaned || cleaned.length < 3) {
-        // Last resort: try to extract just letters, spaces, and basic punctuation
-        const lastResort = rawMessage.replace(/[^\w\s.!?,]/g, ' ').replace(/\s+/g, ' ').trim();
-        return lastResort || rawMessage;
-      }
-      
-      return cleaned;
+      return cleaned || rawMessage;
     }, []);
 
     const displayMessage = cleanMessage(message);
@@ -526,15 +673,35 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                   <span></span>
                 </div>
                 <span className="text-sm text-gray-500 dark:text-gray-400">
-                  {isBLIPResponse ? 'Analyzing image...' : 'AI is thinking...'}
+                  {processingInfo || 
+                   (isImageResponse ? 'Analyzing image with BLIP...' : 
+                    isDocumentResponse ? 'Processing document...' : 'AI is thinking...')}
                 </span>
               </div>
             ) : (
               <div className="space-y-2">
-                {isBLIPResponse && (
-                  <div className="inline-flex items-center gap-2 px-2 py-1 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-md text-xs text-purple-600 dark:text-purple-400 mb-2">
-                    <div className="w-1.5 h-1.5 bg-purple-500 rounded-full"></div>
-                    Image Analysis
+                {/* ✅ PROCESSING TYPE INDICATOR */}
+                {(isImageResponse || isDocumentResponse) && (
+                  <div className={`inline-flex items-center gap-2 px-2 py-1 rounded-md text-xs mb-2 ${
+                    isImageResponse 
+                      ? 'bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 text-purple-600 dark:text-purple-400'
+                      : 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400'
+                  }`}>
+                    <div className={`w-1.5 h-1.5 rounded-full ${
+                      isImageResponse ? 'bg-purple-500' : 'bg-blue-500'
+                    }`}></div>
+                    {isImageResponse ? 'Image Analysis' : 'Document Analysis'}
+                    {/* ✅ TEXT EXTRACTION INFO */}
+                    {metadata?.textExtracted && (
+                      <span className="text-xs opacity-70">
+                        • Text: {metadata.extractedTextLength} chars
+                      </span>
+                    )}
+                    {completedBy && (
+                      <span className="text-xs opacity-70">
+                        • {completedBy}
+                      </span>
+                    )}
                   </div>
                 )}
                 
@@ -542,6 +709,23 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                   <ReactMarkdown
                     components={{
                       p: ({children}) => <p className="mb-1 leading-relaxed">{children}</p>,
+                      code: ({node, inline, className, children, ...props}) => {
+                        const match = /language-(\w+)/.exec(className || '');
+                        return !inline && match ? (
+                          <SyntaxHighlighter
+                            style={oneDark}
+                            language={match[1]}
+                            PreTag="div"
+                            {...props}
+                          >
+                            {String(children).replace(/\n$/, '')}
+                          </SyntaxHighlighter>
+                        ) : (
+                          <code className={className} {...props}>
+                            {children}
+                          </code>
+                        );
+                      }
                     }}
                   >
                     {displayMessage}
@@ -623,148 +807,164 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   }, [listening]);
 
-  // ✅ SUBMIT HANDLER - UPDATED TO HANDLE PASTED IMAGES
-  const handleSubmit = useCallback(async (e) => {
-    e.preventDefault();
-    if (!input.trim() && !file && !pastedImage) return;
-    
-    const sessionToUse = activeSessionId;
-    if (!sessionToUse || isAIStreaming) {
-      console.log('❌ Cannot submit - no session or AI is streaming');
-      return;
-    }
+  // ✅ ENHANCED FILE UPLOAD HANDLER
+  const handleFileSelect = useCallback(async (e) => {
+    const selectedFile = e.target.files[0];
+    if (!selectedFile) return;
 
-    console.log('📤 Submitting message to session:', sessionToUse);
+    try {
+      setIsUploading(true);
+      
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      if (activeSessionId) {
+        formData.append('sessionId', activeSessionId);
+      }
+
+      const uploadResponse = await axios.post(`${backendUrl}/api/chat/upload`, formData, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+
+      console.log('✅ [UPLOAD] Upload successful:', uploadResponse.data);
+      setUploadResult(uploadResponse.data);
+
+      // ✅ CHECK IF ANALYSIS WAS ALREADY COMPLETED
+      if (uploadResponse.data.autoAnalyzed) {
+        console.log('✅ [FRONTEND] Analysis already completed during upload, skipping sendMessage');
+        
+        // ✅ REFRESH MESSAGES USING EXISTING FUNCTIONS
+        try {
+          if (chatContextAvailable && fetchSessionMessages && activeSessionId) {
+            console.log('🔄 [FRONTEND] Refreshing messages via context...');
+            await fetchSessionMessages(activeSessionId);
+          } else if (activeSessionId) {
+            console.log('🔄 [FRONTEND] Refreshing messages via HTTP fallback...');
+            await fetchMessagesViaHTTP(activeSessionId);
+          }
+        } catch (refreshError) {
+          console.error('❌ [FRONTEND] Failed to refresh messages:', refreshError);
+        }
+        
+        // ✅ CLEAR FILE STATE
+        setFile(null);
+        if (e.target) e.target.value = '';
+        
+        return; // ✅ STOP HERE - DON'T TRIGGER sendMessage
+      }
+
+      // ✅ ONLY TRIGGER sendMessage IF NO AUTO-ANALYSIS OCCURRED
+      if (uploadResponse.data.hasExtractedText && uploadResponse.data.uploadId && !uploadResponse.data.autoAnalyzed) {
+        console.log('🤖 [FRONTEND] Auto-triggering AI analysis (fallback)...');
+        
+        const messageData = {
+          sessionId: activeSessionId || uploadResponse.data.sessionId,
+          message: `Please analyze this document: ${selectedFile.name}`,
+          type: 'document',
+          uploadId: uploadResponse.data.uploadId,
+          fileName: uploadResponse.data.fileName,
+          fileUrl: uploadResponse.data.fileUrl,
+          fileType: 'document'
+        };
+
+        if (chatContextAvailable && sendMessage) {
+          await sendMessage(messageData);
+        }
+      }
+
+    } catch (error) {
+      console.error('❌ [UPLOAD] Upload failed:', error);
+      setFileValidationError('Upload failed. Please try again.');
+    } finally {
+      setIsUploading(false);
+    }
+  }, [activeSessionId, token, backendUrl, chatContextAvailable, sendMessage, fetchSessionMessages, fetchMessagesViaHTTP]);
+
+  // ✅ ENHANCED SUBMIT HANDLER WITH DOCUMENT SUPPORT
+// ✅ REPLACE YOUR handleSubmit FUNCTION IN ChatDashBoard.jsx:
+const handleSubmit = useCallback(async (e) => {
+  e.preventDefault();
+  
+  console.log('🚨 [FRONTEND DEBUG] handleSubmit triggered!');
+  console.log('🚨 [FRONTEND DEBUG] uploadResult:', uploadResult);
+  
+  const finalInput = input.trim();
+  const fileToSend = pastedImage || file;
+  
+  if (!finalInput && !fileToSend) return;
+  if (isAIStreaming) return;
+
+  // ✅ CHECK IF FILE IS UPLOADED BUT NO UPLOAD RESULT
+  if (fileToSend && !uploadResult) {
+    setFileValidationError('Please wait for file upload to complete before sending.');
+    return;
+  }
+
+  try {
+    setIsAIStreaming(true);
+
+    // ✅ PREPARE MESSAGE DATA - NO EXTRACTED TEXT, ONLY UPLOAD ID
+    const messageData = {
+      sessionId: activeSessionId,
+      message: finalInput,
+      type: fileToSend ? detectFileType(null, fileToSend.name, fileToSend.type) : 'text',
+      fileUrl: uploadResult?.fileUrl || null,
+      fileType: fileToSend?.type || null,
+      fileName: fileToSend?.name || null,
+      uploadId: uploadResult?.uploadId || null, // ✅ ONLY SEND UPLOAD ID
+      hasExtractedText: uploadResult?.hasExtractedText || false,
+      // ❌ NO EXTRACTED TEXT SENT FROM FRONTEND
+      tempId: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      senderId: userId
+    };
+
+    console.log('📤 [SUBMIT] Frontend sending message data (no extracted text):', {
+      hasUploadId: !!messageData.uploadId,
+      uploadId: messageData.uploadId,
+      type: messageData.type,
+      fileName: messageData.fileName,
+      extractedTextSent: false // ✅ Confirm no text sent
+    });
+
+    // ✅ ADD THIS RIGHT BEFORE SENDING THE MESSAGE:
+    console.log('🚨 [FRONTEND DEBUG] About to call sendMessage with:', messageData);
     
-    setIsManuallyEditing(false);
-    setHasStoppedListening(false);
+    if (chatContextAvailable && sendMessage) {
+      console.log('🚨 [FRONTEND DEBUG] Using ChatContext sendMessage');
+      await sendMessage(messageData);
+    } else {
+      console.log('🚨 [FRONTEND DEBUG] Using direct API call fallback');
+      const response = await axios.post(`${backendUrl}/api/chat/send`, messageData, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        responseType: 'text',
+        timeout: 120000
+      });
+    }
     
-    const originalInput = input;
-    const tempMessageId = `temp-${Date.now()}-${Math.random()}`;
-    const isFirstMessage = actualMessages.length === 0;
-    const fileToUpload = pastedImage || file; // ✅ PRIORITIZE PASTED IMAGE
-    
-    // Clear input immediately
-    setInput("");
+    // Clear form
+    setInput('');
     setFile(null);
-    clearPastedImage(); // ✅ CLEAR PASTED IMAGE
-    resetTranscript();
+    setPastedImage(null);
+    setPastePreview(null);
+    setUploadResult(null);
+    setFileValidationError(null);
+    
+    // Clear file input
     const fileInput = document.getElementById("fileUpload");
     if (fileInput) fileInput.value = "";
 
-    // Handle file upload
-    let fileUrl = null;
-    let fileType = null;
-    let requestType = 'chat';
-
-    if (fileToUpload) {
-      try {
-        setIsUploading(true);
-        
-        const isImage = fileToUpload.type.startsWith("image/");
-        console.log('📎 [UPLOAD] File detected:', {
-          name: fileToUpload.name,
-          type: fileToUpload.type,
-          size: fileToUpload.size,
-          isImage: isImage,
-          isPasted: !!pastedImage
-        });
-
-        if (isImage) {
-          console.log('🖼️ [UPLOAD] Image detected - Will route to BLIP model');
-          requestType = 'image';
-          fileType = 'image';
-        } else {
-          console.log('📄 [UPLOAD] Document detected - Will route to Llama3 model');
-          requestType = 'chat';
-          fileType = 'document';
-        }
-
-        const formData = new FormData();
-        formData.append("file", fileToUpload);
-
-        console.log('📤 [UPLOAD] Uploading file to backend...');
-        const res = await axios.post(`${backendUrl}/api/chat/upload`, formData, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "multipart/form-data",
-          },
-        });
-
-        if (res.data.success) {
-          fileUrl = res.data.fileUrl || res.data.url;
-          console.log('✅ [UPLOAD] File uploaded successfully:', {
-            fileUrl: fileUrl,
-            type: requestType,
-            willUseBLIP: requestType === 'image',
-            wasPasted: !!pastedImage
-          });
-        }
-      } catch (err) {
-        console.error('❌ [UPLOAD] File upload failed:', err);
-        return;
-      } finally {
-        setIsUploading(false);
-      }
-    }
-
-    // Create user message
-    const userMessage = {
-      _id: tempMessageId,
-      message: originalInput,
-      sender: userId,
-      type: fileType || "text",
-      fileUrl,
-      fileType: fileToUpload?.type || null,
-      timestamp: new Date().toISOString(),
-      status: 'sent'
-    };
-
-    // Add user message to session
-    if (chatContextAvailable && setSessionMessages) {
-      const currentMessages = getCurrentSessionMessages();
-      setSessionMessages(sessionToUse, [...currentMessages, userMessage]);
-    } else {
-      // Fallback: add to local state
-      setFallbackMessages(prev => [...prev, userMessage]);
-    }
-
-    const messagePayload = {
-      sessionId: sessionToUse,
-      senderId: userId,
-      message: originalInput,
-      type: requestType,
-      fileUrl,
-      fileType: fileToUpload?.type || null,
-      tempId: tempMessageId
-    };
-
-    console.log('📤 [AI REQUEST] Sending to AI service:', {
-      type: messagePayload.type,
-      hasFileUrl: !!messagePayload.fileUrl,
-      expectedModel: messagePayload.type === 'image' ? 'BLIP' : 'Llama3',
-      wasPasted: !!pastedImage
-    });
-
-    try {
-      if (chatContextAvailable && sendMessage) {
-        console.log('🌊 [STREAMING] Starting AI request...');
-        const result = await sendMessage(messagePayload);
-        
-        if (result.success) {
-          console.log('✅ [AI RESPONSE] Message processed successfully');
-          
-          if (isFirstMessage && originalInput.trim()) {
-            updateSessionTitle(sessionToUse, originalInput.trim());
-          }
-        } else {
-          console.error('❌ [AI RESPONSE] Message processing failed:', result.error);
-        }
-      }
-    } catch (error) {
-      console.error('❌ [AI ERROR] Error during message submission:', error);
-    }
-  }, [input, file, pastedImage, activeSessionId, isAIStreaming, actualMessages.length, userId, resetTranscript, backendUrl, token, chatContextAvailable, setSessionMessages, getCurrentSessionMessages, sendMessage, updateSessionTitle, clearPastedImage]);
+  } catch (error) {
+    console.error('❌ [SUBMIT] Send message failed:', error);
+    setFileValidationError('Failed to send message. Please try again.');
+  } finally {
+    setIsAIStreaming(false);
+  }
+}, [input, file, pastedImage, uploadResult, activeSessionId, isAIStreaming, chatContextAvailable, sendMessage, backendUrl, token, userId]);
 
   // ✅ AUTO-SCROLL
   useEffect(() => {
@@ -790,17 +990,45 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       actualIsConnected,
       messagesCount: actualMessages.length,
       isFetching: isFetchingFallback,
-      hasPastedImage: !!pastedImage
+      hasPastedImage: !!pastedImage,
+      hasFile: !!file,
+      fileValidationError,
+      supportedFileTypes: supportedFileTypes ? 'Loaded' : 'Loading...',
+      aiServiceHealth: aiServiceHealth?.status || 'Unknown'
     });
-  }, [selectedSession, currentSessionId, activeSessionId, hasInitialized, actualIsConnected, actualMessages.length, isFetchingFallback, pastedImage]);
+  }, [selectedSession, currentSessionId, activeSessionId, hasInitialized, actualIsConnected, actualMessages.length, isFetchingFallback, pastedImage, file, fileValidationError, supportedFileTypes, aiServiceHealth]);
 
-  // ✅ MAIN RENDER
+  // ✅ MAIN RENDER WITH DRAG & DROP OVERLAY
   return (
-    <div className={`flex flex-col h-screen transition-all duration-300 ${
+    <div className={`flex flex-col h-screen transition-all duration-300 relative ${
       isDark 
         ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900' 
         : 'bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50'
     } ${isTransitioning ? 'animate-pulse' : ''}`}>
+      
+      {/* ✅ DRAG & DROP OVERLAY */}
+      {dragOver && (
+        <div className="absolute inset-0 z-50 bg-blue-500/20 backdrop-blur-sm flex items-center justify-center border-4 border-dashed border-blue-400">
+          <div className="text-center space-y-4 p-8 bg-white/90 dark:bg-gray-800/90 rounded-2xl shadow-2xl">
+            <div className="w-16 h-16 mx-auto bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center">
+              <IconUpload size={32} className="text-white" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-2">
+                Drop your file here
+              </h3>
+              <p className="text-gray-600 dark:text-gray-400 text-sm">
+                Supports images and documents
+              </p>
+              {supportedFileTypes && (
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  {[...supportedFileTypes.images?.extensions || [], ...supportedFileTypes.documents?.extensions || []].join(', ')}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* ✅ PASTE INDICATOR */}
       {showPasteIndicator && (
@@ -810,19 +1038,37 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         </div>
       )}
       
-      {/* ✅ HEADER */}
+      {/* ✅ ENHANCED HEADER WITH AI SERVICE STATUS */}
       <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-b border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-7 h-7 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-lg flex items-center justify-center">
               <IconRobot size={16} className="text-white" />
             </div>
-            <h1 className="text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
-              Nexus AI Assistant
-            </h1>
+            <div>
+              <h1 className="text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
+                Nexus AI Assistant
+              </h1>
+              {aiServiceHealth && (
+                <div className="text-xs text-gray-500 dark:text-gray-400">
+                  BLIP • Document Processor • Llama3
+                </div>
+              )}
+            </div>
           </div>
           
           <div className="flex items-center gap-3">
+            {/* ✅ AI SERVICE STATUS */}
+            {aiServiceHealth && (
+              <div className={`text-xs px-2 py-1 rounded-full ${
+                aiServiceHealth.status === 'healthy' 
+                  ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                  : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+              }`}>
+                {aiServiceHealth.status === 'healthy' ? '✅ All services online' : '⚠️ Partial services'}
+              </div>
+            )}
+            
             {!actualIsConnected && (
               <div className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2">
                 <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></div>
@@ -875,25 +1121,24 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                   Hello! I'm your AI assistant
                 </h2>
                 <p className="text-gray-600 dark:text-gray-400 leading-relaxed text-sm">
-                  I'm here to help you with coding, writing, analysis, and much more. 
-                  Start a conversation by typing a message below.
+                  I can analyze images with BLIP, process documents (PDF, DOCX, TXT), and help with general questions using Llama3.
                 </p>
                 <p className="text-gray-500 dark:text-gray-500 text-xs mt-2">
-                  💡 <strong>Tip:</strong> You can paste images directly with <kbd className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">Ctrl+V</kbd>
+                  💡 <strong>Tip:</strong> Paste images with <kbd className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">Ctrl+V</kbd> or drag & drop files
                 </p>
               </div>
               
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="p-3 bg-white/60 dark:bg-gray-800/60 rounded-xl border border-gray-200/50 dark:border-gray-700/50 backdrop-blur-sm">
-                  <div className="text-xl mb-1">💭</div>
-                  <div className="font-medium text-gray-700 dark:text-gray-300 text-xs">Ask Questions</div>
-                  <div className="text-gray-500 dark:text-gray-400 text-xs mt-1">Get instant answers</div>
+                  <div className="text-xl mb-1">🖼️</div>
+                  <div className="font-medium text-gray-700 dark:text-gray-300 text-xs">Image Analysis</div>
+                  <div className="text-gray-500 dark:text-gray-400 text-xs mt-1">BLIP model</div>
                 </div>
                 
                 <div className="p-3 bg-white/60 dark:bg-gray-800/60 rounded-xl border border-gray-200/50 dark:border-gray-700/50 backdrop-blur-sm">
-                  <div className="text-xl mb-1">🖼️</div>
-                  <div className="font-medium text-gray-700 dark:text-gray-300 text-xs">Paste Images</div>
-                  <div className="text-gray-500 dark:text-gray-400 text-xs mt-1">Ctrl+V to paste</div>
+                  <div className="text-xl mb-1">📄</div>
+                  <div className="font-medium text-gray-700 dark:text-gray-300 text-xs">Document Processing</div>
+                  <div className="text-gray-500 dark:text-gray-400 text-xs mt-1">PDF, DOCX, TXT</div>
                 </div>
               </div>
             </div>
@@ -907,8 +1152,12 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                     message={msg.message}
                     timestamp={msg.timestamp}
                     fileUrl={msg.fileUrl}
-                    fileType={msg.type}
+                    fileType={msg.fileType}
+                    type={msg.type}
                     isStreaming={msg.isStreaming}
+                    processingInfo={msg.processingInfo}
+                    completedBy={msg.completedBy}
+                    metadata={msg.metadata}
                   />
                 ) : (
                   <UserMessage
@@ -917,6 +1166,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                     status={msg.status}
                     fileUrl={msg.fileUrl}
                     type={msg.type}
+                    fileType={msg.fileType}
+                    fileName={msg.fileName}
+                    hasTextExtraction={msg.hasTextExtraction}
+                    extractedTextLength={msg.extractedTextLength}
                   />
                 )}
               </div>
@@ -926,20 +1179,75 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         )}
       </div>
 
-      {/* ✅ INPUT AREA - UPDATED WITH PASTE PREVIEW */}
+      {/* ✅ ENHANCED INPUT AREA WITH DOCUMENT SUPPORT */}
       <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-t border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
         <div className="max-w-4xl mx-auto">
+          
+          {/* ✅ FILE VALIDATION ERROR */}
+          {fileValidationError && (
+            <div className="mb-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg flex items-start gap-2">
+              <IconAlertCircle size={16} className="text-red-500 mt-0.5 flex-shrink-0" />
+              <div className="text-sm text-red-600 dark:text-red-400">
+                {fileValidationError}
+              </div>
+            </div>
+          )}
+          
+          {/* ✅ DUPLICATE FILE WARNING */}
+          {showDuplicateWarning && duplicateCheck?.isDuplicate && (
+            <div className="mb-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg">
+              <div className="flex items-start gap-2">
+                <div className="text-amber-500 mt-0.5 flex-shrink-0">
+                  ♻️
+                </div>
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-amber-800 dark:text-amber-200 mb-1">
+                    Duplicate File Detected
+                  </div>
+                  <div className="text-xs text-amber-600 dark:text-amber-400 mb-2">
+                    This file already exists (uploaded {new Date(duplicateCheck.existingFile?.created_at).toLocaleDateString()}). 
+                    We'll reuse the existing file and the AI will still analyze it for you.
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowDuplicateWarning(false)}
+                      className="text-xs bg-amber-100 dark:bg-amber-800 text-amber-700 dark:text-amber-300 px-2 py-1 rounded hover:bg-amber-200 dark:hover:bg-amber-700 transition-colors"
+                    >
+                      Continue with analysis
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowDuplicateWarning(false);
+                        setDuplicateCheck(null);
+                        setFile(null);
+                        const fileInput = document.getElementById("fileUpload");
+                        if (fileInput) fileInput.value = "";
+                      }}
+                      className="text-xs text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* ✅ PASTED IMAGE PREVIEW */}
+          {pastedImage && pastePreview && (
+            <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl border border-blue-200 dark:border-blue-700">
+              <div className="flex items-start gap-3">
+                </div>
+            </div>
+           
+          )}
           
           {/* ✅ PASTED IMAGE PREVIEW */}
           {pastedImage && pastePreview && (
             <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl border border-blue-200 dark:border-blue-700">
               <div className="flex items-start gap-3">
                 <div className="flex-shrink-0">
-                  <img 
-                    src={pastePreview} 
-                    alt="Pasted" 
-                    className="w-16 h-16 rounded-lg object-cover border-2 border-blue-300 dark:border-blue-600"
-                  />
+                  <img src={pastePreview} alt="Pasted" className="w-16 h-16 rounded-lg object-cover border-2 border-blue-300 dark:border-blue-600" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
@@ -952,16 +1260,50 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                     {pastedImage.name} • {(pastedImage.size / 1024).toFixed(1)} KB
                   </p>
                   <p className="text-xs text-blue-500 dark:text-blue-500 mt-1">
-                    Press <kbd className="px-1 py-0.5 bg-blue-100 dark:bg-blue-800 rounded">Enter</kbd> to send or <kbd className="px-1 py-0.5 bg-blue-100 dark:bg-blue-800 rounded">Esc</kbd> to cancel
+                    Will be analyzed by BLIP model
                   </p>
                 </div>
-                <button
-                  onClick={clearPastedImage}
-                  className="flex-shrink-0 p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
-                  title="Remove pasted image"
-                >
-                  <IconX size={16} className="text-red-500" />
-                </button>
+              </div>
+            </div>
+          )}
+          
+          {/* ✅ DOCUMENT PREVIEW FOR DRAG & DROP */}
+          {file && !pastedImage && detectFileType(null, file.name, file.type) === 'document' && (
+            <div className="mb-3 p-3 bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 rounded-xl border border-green-200 dark:border-green-700">
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 w-16 h-16 bg-gradient-to-br from-green-500 to-blue-500 rounded-lg flex items-center justify-center">
+                  {getFileIcon(file.type, file.name)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <IconFileText size={16} className="text-green-600 dark:text-green-400" />
+                    <span className="text-sm font-medium text-green-800 dark:text-green-200">
+                      Document Ready for Processing
+                    </span>
+                  </div>
+                  <p className="text-xs text-green-600 dark:text-green-400">
+                    {file.name} • {(file.size / 1024 / 1024).toFixed(1)} MB
+                  </p>
+                  <p className="text-xs text-green-500 dark:text-green-500 mt-1">
+                    Text will be extracted and processed by Llama3
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* ✅ UPLOAD PROGRESS */}
+          {isUploading && uploadProgress > 0 && (
+            <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-blue-600 dark:text-blue-400">Uploading...</span>
+                <span className="text-sm text-blue-600 dark:text-blue-400">{uploadProgress}%</span>
+              </div>
+              <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-2">
+                <div 
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                ></div>
               </div>
             </div>
           )}
@@ -970,22 +1312,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-2xl shadow-sm border border-gray-200/50 dark:border-gray-600/50 px-3 py-2">
               <input
                 type="file"
-                onChange={(e) => {
-                  const selectedFile = e.target.files[0];
-                  if (selectedFile) {
-                    console.log('📎 [FILE SELECT] File selected:', {
-                      name: selectedFile.name,
-                      type: selectedFile.type,
-                      isImage: selectedFile.type.startsWith('image/')
-                    });
-                    
-                    // ✅ CLEAR PASTED IMAGE IF FILE IS SELECTED
-                    if (pastedImage) {
-                      clearPastedImage();
-                    }
-                  }
-                  setFile(selectedFile);
-                }}
+                onChange={handleFileSelect}
                 className="hidden"
                 id="fileUpload"
                 accept="image/*,.pdf,.doc,.docx,.txt"
@@ -993,7 +1320,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
               <label
                 htmlFor="fileUpload"
                 className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors cursor-pointer group"
-                title="Upload file"
+                title="Upload file (images or documents)"
               >
                 <IconUpload size={18} className="text-gray-500 group-hover:text-gray-700 dark:text-gray-400 dark:group-hover:text-gray-200 transition-colors" />
               </label>
@@ -1018,7 +1345,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                 type="text"
                 value={input}
                 onChange={handleInputChange}
-                placeholder={listening ? "Listening..." : pastedImage ? "Add a message (optional)..." : "Ask me anything or paste an image..."}
+                placeholder={listening ? "Listening..." : 
+                           pastedImage ? "Add a message (optional)..." : 
+                           "Ask me anything, paste images, or drag & drop documents..."}
                 className="flex-1 bg-transparent border-none outline-none text-gray-800 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-400 text-sm py-1"
                 disabled={isAIStreaming}
               />
@@ -1042,13 +1371,36 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             </div>
           </form>
 
-          {/* ✅ FILE/VOICE STATUS INDICATORS */}
+          {/* ✅ ENHANCED FILE/VOICE STATUS INDICATORS WITH TEXT EXTRACTION */}
           {((file && !pastedImage) || listening) && (
             <div className="flex items-center gap-4 mt-2 px-2 text-xs">
               {file && !pastedImage && (
                 <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                  <IconPaperclip size={12} />
+                  {getFileIcon(file.type, file.name)}
                   <span>{file.name}</span>
+                  <span className="text-gray-400">•</span>
+                  <span>{(file.size / 1024 / 1024).toFixed(1)} MB</span>
+                  {detectFileType && (
+                    <>
+                      <span className="text-gray-400">•</span>
+                      <span className="capitalize">{detectFileType(null, file.name, file.type)}</span>
+                      {/* ✅ TEXT EXTRACTION INDICATOR */}
+                      {detectFileType(null, file.name, file.type) === 'document' && (
+                        <span className="text-green-600 dark:text-green-400 ml-1">
+                          📄 Text extractable
+                        </span>
+                      )}
+                    </>
+                  )}
+                  {/* ✅ DUPLICATE INDICATOR WITH TEXT REUSE */}
+                  {duplicateCheck?.isDuplicate && (
+                    <>
+                      <span className="text-gray-400">•</span>
+                      <span className="text-amber-600 dark:text-amber-400">
+                        ♻️ Duplicate (will reuse existing + extracted text)
+                      </span>
+                    </>
+                  )}
                 </div>
               )}
               
@@ -1065,7 +1417,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             </div>
           )}
 
-          {/* ✅ AI STREAMING INDICATOR */}
+          {/* ✅ AI STREAMING INDICATOR WITH PROCESSING TYPE */}
           {isAIStreaming && (
             <div className="text-xs text-blue-500 dark:text-blue-400 mt-2 px-2 flex items-center gap-2">
               <div className="typing-indicator">
@@ -1074,6 +1426,14 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                 <span></span>
               </div>
               AI is responding...
+            </div>
+          )}
+
+          {/* ✅ SUPPORTED FILE TYPES INFO */}
+          {supportedFileTypes && (
+            <div className="text-xs text-gray-400 dark:text-gray-500 mt-2 px-2 text-center">
+              Supports: Images ({supportedFileTypes.images?.extensions?.join(', ')}) • 
+              Documents ({supportedFileTypes.documents?.extensions?.join(', ')})
             </div>
           )}
         </div>
