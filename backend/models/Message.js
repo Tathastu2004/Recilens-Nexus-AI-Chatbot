@@ -8,10 +8,11 @@ const messageSchema = new mongoose.Schema({
     required: true
   },
   sender: {
-    type: mongoose.Schema.Types.Mixed,  // Can be ObjectId or 'AI'
+    type: mongoose.Schema.Types.Mixed, // ✅ Allow both ObjectId and string
     required: true,
     validate: {
       validator: function(value) {
+        // ✅ Only allows "AI" string or valid ObjectId
         return value === 'AI' || mongoose.Types.ObjectId.isValid(value);
       },
       message: 'Sender must be "AI" or a valid ObjectId'
@@ -23,30 +24,35 @@ const messageSchema = new mongoose.Schema({
   },
   type: {
     type: String,
+    enum: ['text', 'image', 'document'],
     default: 'text'
   },
-  fileUrl: {
-    type: String,
-    default: null
+  fileUrl: String,
+  fileType: String,
+  fileName: String,
+  // ✅ ADD TEXT EXTRACTION FIELDS
+  extractedText: String,
+  hasTextExtraction: {
+    type: Boolean,
+    default: false
   },
-  fileType: {
-    type: String,
-    default: null
+  textLength: {
+    type: Number,
+    default: 0
   },
-  timestamp: {
-    type: Date,
-    default: Date.now
+  // ✅ REMOVE extractionStatus OR ADD VALID ENUM VALUES:
+  extractionStatus: {
+    type: String,
+    enum: ['pending', 'processing', 'completed', 'failed', 'not_applicable'], // ✅ Add valid values
+    default: 'not_applicable'
+  },
+  completedBy: String,
+  metadata: {
+    type: Object,
+    default: {}
   }
 }, {
   timestamps: true
 });
 
-// Indexes for performance
-messageSchema.index({ session: 1, timestamp: 1 });
-messageSchema.index({ sender: 1 });
-
-console.log('📄 [MESSAGE MODEL] Message schema defined with Mixed sender type');
-
-const Message = mongoose.model('Message', messageSchema);
-
-export default Message;
+export default mongoose.model('Message', messageSchema);

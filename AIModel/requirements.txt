@@ -1,14 +1,7 @@
 fastapi
-uvicorn[standard]
-httpx
+uvicorn
+ollama
+pydantic
 python-dotenv
-pdfplumber              # PDF processing
-pillow                  # Image processing
-tqdm                    # Progress bars
-
-# Required for BLIP / HuggingFace models
-torch                   # Core deep learning (PyTorch)
-torchvision             # Required for image transforms
-transformers            # HuggingFace Transformers (includes BLIP)
-accelerate              # For faster inference and device handling
-requests                # Optional but often useful for downloading images
+requests
+httpx

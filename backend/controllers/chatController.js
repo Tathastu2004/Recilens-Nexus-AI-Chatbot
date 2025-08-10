@@ -1,10 +1,80 @@
 // /controllers/chatController.js
 import ChatSession from '../models/ChatSession.js';
 import Message from '../models/Message.js';
-import path from 'path';
 import fs from 'fs';
-import { cloudinary } from '../config/cloudinary.js';
+import path from 'path';
+import { v2 as cloudinary } from 'cloudinary';
 import { getAIResponse } from '../services/aiService.js';
+import fetch from 'node-fetch';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import crypto from 'crypto';
+import { cacheService } from '../services/cacheService.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+const generateFileHash = (fileBuffer) => {
+  try {
+    return crypto.createHash('md5').update(fileBuffer).digest('hex');
+  } catch (error) {
+    console.error('❌ [HASH] Failed to generate file hash:', error.message);
+    return 'hash_failed_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
+};
+
+const uploadWithDeduplication = async (filePath, options = {}) => {
+  try {
+    console.log('☁️ [DEDUP] Starting upload with deduplication...');
+    const fileBuffer = fs.readFileSync(filePath);
+    const fileHash = generateFileHash(fileBuffer);
+    console.log('🔍 [DEDUP] File hash generated:', fileHash.substring(0, 8) + '...');
+    try {
+      const searchResult = await cloudinary.search
+        .expression(`tags=${fileHash}`)
+        .max_results(1)
+        .execute();
+      if (searchResult.resources && searchResult.resources.length > 0) {
+        const existingFile = searchResult.resources[0];
+        console.log('♻️ [DEDUP] Duplicate found, reusing existing file:', existingFile.public_id);
+        return {
+          ...existingFile,
+          isDuplicate: true,
+          originalHash: fileHash,
+          message: 'Duplicate file found, reusing existing upload'
+        };
+      }
+    } catch (searchError) {
+      console.warn('⚠️ [DEDUP] Search failed, proceeding with new upload:', searchError.message);
+    }
+    console.log('📤 [DEDUP] Uploading new file...');
+    const uploadResult = await cloudinary.uploader.upload(filePath, {
+      ...options,
+      tags: [...(options.tags || []), fileHash, 'nexus_chat'],
+      context: {
+        ...options.context,
+        file_hash: fileHash,
+        uploaded_at: new Date().toISOString()
+      }
+    });
+    console.log('✅ [DEDUP] New file uploaded successfully:', uploadResult.public_id);
+    return {
+      ...uploadResult,
+      isDuplicate: false,
+      originalHash: fileHash,
+      message: 'New file uploaded successfully'
+    };
+  } catch (error) {
+    console.error('❌ [DEDUP] Upload with deduplication failed:', error.message);
+    throw error;
+  }
+};
 
 // 🔹 Create new chat session
 export const createChatSession = async (req, res) => {
@@ -63,174 +133,323 @@ export const deleteChatSession = async (req, res) => {
   try {
     const { sessionId } = req.params;
     const userId = req.user._id;
-
     const messages = await Message.find({ session: sessionId });
     const publicIds = messages
       .map(msg => msg.fileUrl?.match(/\/upload\/(?:v\d+\/)?(.+)\.\w+$/)?.[1])
       .filter(Boolean);
-
     if (publicIds.length > 0) await cloudinary.api.delete_resources(publicIds);
     await Message.deleteMany({ session: sessionId });
     const deletedSession = await ChatSession.findOneAndDelete({ _id: sessionId, user: userId });
     if (!deletedSession) return res.status(404).json({ message: 'Session not found or unauthorized' });
-
     res.json({ success: true, message: 'Session and files deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: 'Failed to delete session' });
   }
 };
 
-// 🔹 Upload file (image or doc) to Cloudinary
 export const uploadFileHandler = async (req, res) => {
+  console.log('📤 [UPLOAD] Starting file upload and text extraction...');
   try {
-    if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
-    const result = await cloudinary.uploader.upload(req.file.path, {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+    console.log('📋 [UPLOAD] File received:', req.file.originalname);
+
+    let uploadResult;
+    let extractedText = null;
+
+    // --- Cloudinary Upload ---
+    uploadResult = await cloudinary.uploader.upload(req.file.path, {
       folder: 'nexus_chat_files',
-      resource_type: 'auto',
+      resource_type: 'raw',
       use_filename: true,
       unique_filename: true,
-      timeout: 30000
+      access_mode: 'public',
     });
-    fs.unlinkSync(req.file.path);
+
+    // --- Text Extraction ---
+    const fileExtension = path.extname(req.file.originalname).toLowerCase();
+    if (fileExtension === '.pdf' || fileExtension === '.txt') {
+      const fileBuffer = fs.readFileSync(req.file.path);
+      if (fileExtension === '.pdf') {
+        try {
+          const { parsePdf } = await import('../utils/pdfParser.js');
+          extractedText = await parsePdf(fileBuffer);
+        } catch (pdfError) {
+          extractedText = `❌ PDF text extraction failed: ${pdfError.message}`;
+        }
+      } else {
+        extractedText = fileBuffer.toString('utf8').trim();
+      }
+      if (extractedText && !extractedText.startsWith('❌')) {
+        console.log(`✅ [EXTRACTION] Text successfully extracted from ${req.file.originalname}. Length: ${extractedText.length} characters.`);
+      }
+    }
+
+    const hasValidText = extractedText && !extractedText.startsWith('❌');
     res.status(200).json({
       success: true,
-      message: 'File uploaded successfully',
-      fileUrl: result.secure_url,
-      publicId: result.public_id,
-      type: req.file.mimetype.startsWith('image/') ? 'image' : 'document',
-      fileType: req.file.mimetype,
+      message: 'File processed successfully. Ready for user prompt.',
+      fileUrl: uploadResult.secure_url,
       fileName: req.file.originalname,
-      fileSize: req.file.size
+      extractedText: extractedText,
+      hasText: hasValidText,
+      textLength: hasValidText ? extractedText.length : 0,
     });
+
   } catch (error) {
-    if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-    res.status(500).json({ success: false, message: 'Error uploading file', error: error.message });
+    console.error('❌ [UPLOAD] A critical error occurred:', error);
+    res.status(500).json({ success: false, error: error.message });
+  } finally {
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
   }
 };
 
-// 🔹 Stream AI response over HTTP with JSON fallback
+// 🔹 Stream AI response over HTTP with full context support - ENHANCED WITH TEXT EXTRACTION
 export const sendMessage = async (req, res) => {
-  console.log('📨 [SEND MESSAGE] Request received');
-  
+  console.log('📨 [SEND MESSAGE] Request received...');
   try {
-    const { sessionId, message, type = 'text', fileUrl, fileType, tempId } = req.body;
+    const { sessionId, message, type = 'text', fileUrl, fileType, fileName, extractedText } = req.body;
     const userId = req.user._id;
 
-    console.log('📋 [SEND MESSAGE] Payload:', {
-      sessionId: sessionId?.substring(0, 8),
-      messageLength: message?.length,
-      type,
-      hasFile: !!fileUrl,
-      tempId
-    });
-
-    // ✅ VALIDATE REQUIRED FIELDS
     if (!sessionId || !message) {
-      return res.status(400).json({
-        success: false,
-        error: 'Session ID and message are required'
-      });
+      return res.status(400).json({ success: false, error: 'Session ID and message are required' });
     }
-
-    // ✅ VERIFY SESSION EXISTS AND BELONGS TO USER
     const session = await ChatSession.findById(sessionId);
-    if (!session) {
-      return res.status(404).json({
-        success: false,
-        error: 'Chat session not found'
-      });
+    if (!session || session.user.toString() !== userId.toString()) {
+      return res.status(403).json({ success: false, error: 'Access denied or session not found' });
     }
 
-    if (session.user.toString() !== userId.toString()) {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied'
-      });
-    }
-
-    // ✅ SAVE USER MESSAGE TO DATABASE (FIXED FIELD NAMES)
+    // --- Save User's Message ---
     const userMessage = new Message({
-      session: sessionId,  // ✅ Changed from sessionId to session
+      session: sessionId,
       message,
-      sender: userId,      // ✅ Changed from 'User' to actual user ObjectId
+      sender: userId,
       type,
       fileUrl: fileUrl || null,
       fileType: fileType || null,
-      tempId
+      fileName: fileName || null,
+      extractedText: extractedText || null,
+      hasTextExtraction: !!(extractedText && !extractedText.startsWith('❌')),
+      textLength: extractedText ? extractedText.length : 0,
+    });
+    await userMessage.save();
+    console.log('✅ User message saved.');
+
+    // --- Get AI Response ---
+    console.log('🤖 Calling AI service with user prompt and extracted text...');
+    // ✅ Always pass all relevant fields to AI service
+    const aiResponse = await getAIResponse({
+      message,
+      extractedText,
+      type,
+      fileUrl,
+      fileType,
+      fileName,
+      sessionId,
+    });
+    console.log('✅ AI response received.');
+
+    // --- Save AI's Message ---
+    const aiMessage = new Message({
+      session: sessionId,
+      message: typeof aiResponse === 'string' ? aiResponse : aiResponse.message,
+      sender: 'AI',
+      type: type || 'text',
+      fileUrl: fileUrl || null,
+      fileType: fileType || null,
+      fileName: fileName || null,
+      extractedText: extractedText || null,
+      hasTextExtraction: !!(extractedText && !extractedText.startsWith('❌')),
+      textLength: extractedText ? extractedText.length : 0,
+      metadata: {
+        usedExtractedText: !!(extractedText && !extractedText.startsWith('❌')),
+      }
+    });
+    await aiMessage.save();
+    console.log('✅ AI message saved.');
+
+    // --- Update Session and Send Response ---
+    session.lastActivity = new Date();
+    await session.save();
+
+    res.status(200).json({
+      success: true,
+      aiMessage: aiMessage,
     });
 
-    await userMessage.save();
-    console.log('✅ [SEND MESSAGE] User message saved:', userMessage._id);
-
-    // ✅ SET STREAMING HEADERS
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Transfer-Encoding', 'chunked');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-
-    // ✅ GET AI RESPONSE WITH STREAMING
-    console.log('🤖 [SEND MESSAGE] Getting AI response...');
-    
-    try {
-      const aiResponse = await getAIResponse({
-        message,
-        type,
-        fileUrl,
-        fileType
-      });
-
-      console.log('✅ [SEND MESSAGE] AI response received:', aiResponse?.length || 0, 'chars');
-
-      // ✅ SAVE AI MESSAGE TO DATABASE (FIXED FIELD NAMES)
-      const aiMessage = new Message({
-        session: sessionId,  // ✅ Changed from sessionId to session
-        message: aiResponse,
-        sender: 'AI',        // ✅ Keep as 'AI' string for AI responses
-        type: 'text'
-      });
-
-      await aiMessage.save();
-      console.log('✅ [SEND MESSAGE] AI message saved:', aiMessage._id);
-
-      // ✅ UPDATE SESSION ACTIVITY
-      session.lastActivity = new Date();
-      await session.save();
-
-      // ✅ STREAM AI RESPONSE TO CLIENT
-      res.write(aiResponse);
-      res.end();
-
-    } catch (aiError) {
-      console.error('❌ [SEND MESSAGE] AI Error:', aiError.message);
-      
-      const errorMessage = `❌ AI Error: ${aiError.message}`;
-      
-      // ✅ SAVE ERROR MESSAGE (FIXED FIELD NAMES)
-      const errorMsg = new Message({
-        session: sessionId,  // ✅ Changed from sessionId to session
-        message: errorMessage,
-        sender: 'AI',        // ✅ Keep as 'AI' string for error messages
-        type: 'error'
-      });
-      
-      await errorMsg.save();
-      
-      res.write(errorMessage);
-      res.end();
-    }
-
   } catch (error) {
-    console.error('❌ [SEND MESSAGE] Server Error:', error);
-    
-    if (!res.headersSent) {
-      res.status(500).json({
-        success: false,
-        error: 'Failed to send message',
-        details: error.message
-      });
-    } else {
-      res.write(`❌ Server Error: ${error.message}`);
-      res.end();
+    console.error('❌ [SEND MESSAGE] Error:', error);
+    res.status(500).json({ success: false, error: 'Failed to send message', details: error.message });
+  }
+};
+
+// ✅ NEW: Get file type validation
+export const validateFileType = async (req, res) => {
+  try {
+    const { fileName, fileType } = req.body;
+    const supportedTypes = {
+      images: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.svg'],
+      documents: ['.pdf', '.docx', '.doc', '.txt']
+    };
+    const ext = path.extname(fileName).toLowerCase();
+    const isImage = supportedTypes.images.includes(ext);
+    const isDocument = supportedTypes.documents.includes(ext);
+    res.json({
+      isValid: isImage || isDocument,
+      detectedType: isImage ? 'image' : isDocument ? 'document' : 'unknown',
+      supportedTypes,
+      canExtractText: isDocument
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Validation failed' });
+  }
+};
+
+// ✅ NEW: Get session statistics
+export const getSessionStats = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const messages = await Message.find({ session: sessionId }).lean();
+    const stats = {
+      totalMessages: messages.length,
+      userMessages: messages.filter(m => m.sender !== 'AI').length,
+      aiMessages: messages.filter(m => m.sender === 'AI').length,
+      imageMessages: messages.filter(m => m.type === 'image').length,
+      documentMessages: messages.filter(m => m.type === 'document').length,
+      filesUploaded: messages.filter(m => m.fileUrl).length,
+      documentsWithText: messages.filter(m => m.extractedText && !m.extractedText.startsWith('❌')).length,
+      totalExtractedChars: messages.reduce((sum, m) => sum + (m.extractedText?.length || 0), 0)
+    };
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get session stats' });
+  }
+};
+
+// ✅ NEW: Get duplicate files statistics
+export const getDuplicateStats = async (req, res) => {
+  try {
+    const duplicateSearch = await cloudinary.search
+      .expression('tags:nexus_chat')
+      .with_field('tags')
+      .with_field('context')
+      .max_results(500)
+      .execute();
+    const filesByHash = {};
+    let totalFiles = 0;
+    let duplicateFiles = 0;
+    let savedBandwidth = 0;
+    duplicateSearch.resources.forEach(file => {
+      totalFiles++;
+      const hash = file.tags?.find(tag => tag.length === 32);
+      if (hash) {
+        if (!filesByHash[hash]) {
+          filesByHash[hash] = [];
+        }
+        filesByHash[hash].push(file);
+        if (filesByHash[hash].length > 1) {
+          duplicateFiles++;
+          savedBandwidth += file.bytes || 0;
+        }
+      }
+    });
+    const duplicateGroups = Object.values(filesByHash).filter(group => group.length > 1);
+    res.json({
+      success: true,
+      stats: {
+        totalFiles,
+        uniqueFiles: Object.keys(filesByHash).length,
+        duplicateFiles,
+        duplicateGroups: duplicateGroups.length,
+        savedBandwidth,
+        savedBandwidthMB: (savedBandwidth / (1024 * 1024)).toFixed(2),
+        topDuplicates: duplicateGroups
+          .sort((a, b) => b.length - a.length)
+          .slice(0, 5)
+          .map(group => ({
+            hash: group[0].tags?.find(tag => tag.length === 32),
+            count: group.length,
+            firstUpload: group[0].created_at,
+            lastUpload: group[group.length - 1].created_at,
+            totalSize: group.reduce((sum, file) => sum + (file.bytes || 0), 0)
+          }))
+      }
+    });
+  } catch (error) {
+    console.error('❌ [DUPLICATE STATS] Error:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to get duplicate statistics' 
+    });
+  }
+};
+
+// ✅ NEW: Clean up duplicate files (keep only the first one)
+export const cleanupDuplicates = async (req, res) => {
+  try {
+    const { dryRun = true } = req.query;
+    console.log('🧹 [CLEANUP] Starting duplicate cleanup...', { dryRun });
+    const duplicateSearch = await cloudinary.search
+      .expression('tags:nexus_chat')
+      .with_field('tags')
+      .with_field('context')
+      .sort_by([['created_at', 'asc']])
+      .max_results(500)
+      .execute();
+    const filesByHash = {};
+    duplicateSearch.resources.forEach(file => {
+      const hash = file.tags?.find(tag => tag.length === 32);
+      if (hash) {
+        if (!filesByHash[hash]) {
+          filesByHash[hash] = [];
+        }
+        filesByHash[hash].push(file);
+      }
+    });
+    const duplicateGroups = Object.values(filesByHash).filter(group => group.length > 1);
+    let deletedFiles = 0;
+    let savedSpace = 0;
+    const deletedPublicIds = [];
+    for (const group of duplicateGroups) {
+      const [keepFile, ...deleteFiles] = group;
+      console.log(`📋 [CLEANUP] Hash group: ${keepFile.tags?.find(tag => tag.length === 32)?.substring(0, 8)}... - Keep: ${keepFile.public_id}, Delete: ${deleteFiles.length} files`);
+      for (const file of deleteFiles) {
+        if (!dryRun) {
+          try {
+            await cloudinary.uploader.destroy(file.public_id);
+            console.log(`🗑️ [CLEANUP] Deleted: ${file.public_id}`);
+          } catch (deleteError) {
+            console.error(`❌ [CLEANUP] Failed to delete ${file.public_id}:`, deleteError.message);
+            continue;
+          }
+        }
+        deletedFiles++;
+        savedSpace += file.bytes || 0;
+        deletedPublicIds.push(file.public_id);
+      }
     }
+    res.json({
+      success: true,
+      cleanup: {
+        dryRun,
+        duplicateGroups: duplicateGroups.length,
+        deletedFiles,
+        savedSpace,
+        savedSpaceMB: (savedSpace / (1024 * 1024)).toFixed(2),
+        deletedPublicIds: dryRun ? deletedPublicIds : deletedPublicIds.slice(0, 10),
+        message: dryRun ? 
+          `Dry run completed. Would delete ${deletedFiles} duplicate files (${(savedSpace / (1024 * 1024)).toFixed(2)} MB)` :
+          `Deleted ${deletedFiles} duplicate files, saved ${(savedSpace / (1024 * 1024)).toFixed(2)} MB`
+      }
+    });
+  } catch (error) {
+    console.error('❌ [CLEANUP] Error:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to cleanup duplicates' 
+    });
   }
 };
