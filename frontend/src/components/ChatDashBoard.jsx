@@ -1,22 +1,9 @@
 "use client";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { 
-  IconSend, 
-  IconRobot, 
-  IconUpload, 
-  IconMicrophone, 
-  IconCheck, 
-  IconPaperclip, 
-  IconUser, 
-  IconSun, 
-  IconMoon, 
-  IconClipboard, 
-  IconX, 
-  IconFileText, 
-  IconFile,  // Use IconFile instead of IconFilePdf
-  IconFileWord, 
-  IconDownload, 
-  IconAlertCircle 
+  IconSend, IconRobot, IconUpload, IconMicrophone, IconCheck, IconPaperclip, IconUser, 
+  IconSun, IconMoon, IconClipboard, IconX, IconFileText, IconFile, IconFileWord, 
+  IconDownload, IconAlertCircle 
 } from "@tabler/icons-react";
 import axios from "axios";
 import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
@@ -28,47 +15,44 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import '../styles/animations.css';
 
 const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) => {
-  // ✅ Constants and token
+  // Constants and token
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
   const token = localStorage.getItem("token");
   const userId = JSON.parse(localStorage.getItem("user"))?._id;
 
-  // ✅ THEME CONTEXT
+  // THEME CONTEXT
   const { theme, isDark, toggleTheme, isTransitioning } = useTheme();
 
-  // ✅ STATE MANAGEMENT
- // ✅ STATE MANAGEMENT
-const [input, setInput] = useState("");
-const [file, setFile] = useState(null);
-const [isUploading, setIsUploading] = useState(false);
-const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-const [hasInitialized, setHasInitialized] = useState(false);
-const [currentSessionId, setCurrentSessionId] = useState(null);
-const [uploadResult, setUploadResult] = useState(null);
-/* Removed duplicate isAIStreaming state, as it is derived from context below */
-const [isAIStreaming, setIsAIStreaming] = useState(false);
+  // STATE MANAGEMENT
+  const [input, setInput] = useState("");
+  const [file, setFile] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [hasInitialized, setHasInitialized] = useState(false);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
+  const [uploadResult, setUploadResult] = useState(null);
+  const [isAIStreaming, setIsAIStreaming] = useState(false);
 
-// ✅ NEW STATE FOR COPY-PASTE FUNCTIONALITY
-const [pastedImage, setPastedImage] = useState(null);
-const [pastePreview, setPastePreview] = useState(null);
-const [showPasteIndicator, setShowPasteIndicator] = useState(false);
-  
-  // ✅ NEW STATE FOR DOCUMENT SUPPORT
+  // NEW STATE FOR COPY-PASTE FUNCTIONALITY
+  const [pastedImage, setPastedImage] = useState(null);
+  const [pastePreview, setPastePreview] = useState(null);
+  const [showPasteIndicator, setShowPasteIndicator] = useState(false);
+
+  // NEW STATE FOR DOCUMENT SUPPORT
   const [dragOver, setDragOver] = useState(false);
   const [fileValidationError, setFileValidationError] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
-  
-  // ✅ NEW STATE FOR DEDUPLICATION
+
+  // NEW STATE FOR DEDUPLICATION
   const [duplicateCheck, setDuplicateCheck] = useState(null);
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // ✅ CHAT CONTEXT INTEGRATION
+  // CHAT CONTEXT INTEGRATION
   let chatContext = null;
   let chatContextAvailable = false;
-
   try {
     chatContext = useChat();
     chatContextAvailable = true;
@@ -76,7 +60,7 @@ const [showPasteIndicator, setShowPasteIndicator] = useState(false);
     chatContextAvailable = false;
   }
 
-  // ✅ DESTRUCTURE CONTEXT VALUES WITH DOCUMENT SUPPORT
+  // DESTRUCTURE CONTEXT VALUES
   const {
     currentSessionId: contextSessionId,
     setSession,
@@ -89,39 +73,35 @@ const [showPasteIndicator, setShowPasteIndicator] = useState(false);
     isSessionStreaming,
     initializeContext,
     reconnect,
-    // ✅ DOCUMENT FEATURES
     detectFileType,
     validateFile,
     supportedFileTypes,
     getSessionStats,
     clearSessionCache,
     aiServiceHealth,
-    // ✅ NEW: DEDUPLICATION FEATURES
     generateFileHash,
     checkDuplicateFile,
     getDuplicateStats,
     cleanupDuplicates
   } = chatContext || {};
 
-  // ✅ FALLBACK MESSAGE FETCHING
+  // FALLBACK MESSAGE FETCHING
   const [fallbackMessages, setFallbackMessages] = useState([]);
   const [isFetchingFallback, setIsFetchingFallback] = useState(false);
 
-  // ✅ CONNECTION STATUS
+  // CONNECTION STATUS
   const actualIsConnected = chatContextAvailable ? (isConnected ?? false) : false;
   const activeSessionId = selectedSession || currentSessionId;
-  // const isAIStreaming = chatContextAvailable ? (isSessionStreaming ? isSessionStreaming(activeSessionId) : false) : false;
 
-  // ✅ ENHANCED FILE TYPE DETECTION
+  // ENHANCED FILE TYPE DETECTION
   const getFileIcon = useCallback((fileType, fileName) => {
     const type = detectFileType ? detectFileType(null, fileName, fileType) : 'unknown';
-    
     switch (type) {
       case 'image':
         return <IconClipboard size={16} className="text-purple-500" />;
       case 'document':
         if (fileName?.toLowerCase().endsWith('.pdf') || fileType?.includes('pdf')) {
-          return <IconFile size={16} className="text-red-500" />; // Changed from IconFilePdf
+          return <IconFile size={16} className="text-red-500" />;
         } else if (fileName?.toLowerCase().match(/\.(docx?|doc)$/i) || fileType?.includes('word')) {
           return <IconFileWord size={16} className="text-blue-500" />;
         } else {
@@ -132,51 +112,31 @@ const [showPasteIndicator, setShowPasteIndicator] = useState(false);
     }
   }, [detectFileType]);
 
-  // ✅ ENHANCED FILE VALIDATION
+  // ENHANCED FILE VALIDATION
   const validateFileBeforeUpload = useCallback(async (file) => {
     if (!file) return { isValid: false, error: 'No file selected' };
-    
-    // Clear previous errors
     setFileValidationError(null);
     setDuplicateCheck(null);
     setShowDuplicateWarning(false);
-    
     try {
-      // ✅ ENHANCED VALIDATION WITH TEXT EXTRACTION CAPABILITY
       if (validateFile) {
         const validation = await validateFile(file);
         if (!validation.isValid) {
           setFileValidationError(validation.error);
           return validation;
         }
-        
-        // ✅ SHOW TEXT EXTRACTION CAPABILITY
-        if (validation.canExtractText) {
-          console.log('📄 [VALIDATION] Document can have text extracted:', {
-            fileName: file.name,
-            processingInfo: validation.processingInfo
-          });
-        }
       }
-      
-      // ✅ CHECK FOR DUPLICATES
       if (generateFileHash && checkDuplicateFile) {
-        console.log('🔍 [DUPLICATE CHECK] Checking for duplicate file...');
         const fileHash = await generateFileHash(file);
-        
         if (fileHash) {
           const duplicateResult = await checkDuplicateFile(fileHash);
-          
           if (duplicateResult.success && duplicateResult.isDuplicate) {
-            console.log('⚠️ [DUPLICATE CHECK] Duplicate file detected:', duplicateResult.existingFile);
             setDuplicateCheck({
               isDuplicate: true,
               existingFile: duplicateResult.existingFile,
               fileHash
             });
             setShowDuplicateWarning(true);
-            
-            // Don't return error, just show warning
             return { 
               isValid: true, 
               isDuplicate: true, 
@@ -184,14 +144,11 @@ const [showPasteIndicator, setShowPasteIndicator] = useState(false);
               warning: 'This file already exists in your uploads. Using existing version will save bandwidth.'
             };
           } else {
-            console.log('✅ [DUPLICATE CHECK] File is unique');
             setDuplicateCheck({ isDuplicate: false, fileHash });
           }
         }
       }
-      
       return { isValid: true, detectedType: 'unknown' };
-      
     } catch (error) {
       const errorMsg = `Validation failed: ${error.message}`;
       setFileValidationError(errorMsg);
@@ -199,49 +156,36 @@ const [showPasteIndicator, setShowPasteIndicator] = useState(false);
     }
   }, [validateFile, generateFileHash, checkDuplicateFile]);
 
-  // ✅ DRAG AND DROP HANDLERS
+  // DRAG AND DROP HANDLERS
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragOver(true);
   }, []);
-
   const handleDragLeave = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
   }, []);
-
   const handleDrop = useCallback(async (e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
-    
     const files = e.dataTransfer.files;
     if (files.length > 0) {
       const droppedFile = files[0];
-      console.log('📁 [DRAG DROP] File dropped:', {
-        name: droppedFile.name,
-        type: droppedFile.type,
-        size: droppedFile.size
-      });
-      
       const validation = await validateFileBeforeUpload(droppedFile);
       if (validation.isValid) {
         setFile(droppedFile);
-        // Clear pasted image if file is dropped
-        if (pastedImage) {
-          clearPastedImage();
-        }
+        if (pastedImage) clearPastedImage();
       }
     }
   }, [validateFileBeforeUpload, pastedImage]);
 
-  // ✅ IMAGE PASTE UTILITY FUNCTIONS
+  // IMAGE PASTE UTILITY FUNCTIONS
   const createFileFromBlob = (blob, filename = 'pasted-image.png') => {
     return new File([blob], filename, { type: blob.type });
   };
-
   const createImagePreview = useCallback((file) => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -250,119 +194,65 @@ const [showPasteIndicator, setShowPasteIndicator] = useState(false);
     });
   }, []);
 
-  // ✅ HANDLE CLIPBOARD PASTE
+  // HANDLE CLIPBOARD PASTE
   const handlePaste = useCallback(async (e) => {
-    console.log('📋 [PASTE] Paste event triggered');
-    
     const clipboardData = e.clipboardData || window.clipboardData;
     if (!clipboardData) return;
-
     const items = clipboardData.items;
     let imageFound = false;
-
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      
-      // ✅ CHECK FOR IMAGE TYPES
       if (item.type.indexOf('image') !== -1) {
-        e.preventDefault(); // Prevent default paste behavior
+        e.preventDefault();
         imageFound = true;
-        
-        console.log('🖼️ [PASTE] Image detected in clipboard:', item.type);
-        
         const blob = item.getAsFile();
         if (blob) {
-          // ✅ CREATE FILE FROM BLOB
           const imageFile = createFileFromBlob(blob, `pasted-image-${Date.now()}.png`);
-          
-          // ✅ VALIDATE PASTED IMAGE
           const validation = await validateFileBeforeUpload(imageFile);
-          if (!validation.isValid) {
-            console.error('❌ [PASTE] Validation failed:', validation.error);
-            return;
-          }
-          
-          // ✅ CREATE PREVIEW
+          if (!validation.isValid) return;
           const previewUrl = await createImagePreview(imageFile);
-          
-          console.log('✅ [PASTE] Image processed:', {
-            size: imageFile.size,
-            type: imageFile.type,
-            name: imageFile.name
-          });
-          
-          // ✅ SET PASTED IMAGE STATE
           setPastedImage(imageFile);
           setPastePreview(previewUrl);
-          setFile(imageFile); // Also set as file for upload
-          
-          // ✅ SHOW PASTE INDICATOR
+          setFile(imageFile);
           setShowPasteIndicator(true);
           setTimeout(() => setShowPasteIndicator(false), 2000);
-          
           break;
         }
       }
     }
-
-    if (!imageFound) {
-      console.log('📋 [PASTE] No image found in clipboard');
-    }
   }, [createImagePreview, validateFileBeforeUpload]);
 
-  // ✅ KEYBOARD SHORTCUTS
+  // KEYBOARD SHORTCUTS
   const handleKeyDown = useCallback((e) => {
-    // ✅ CTRL/CMD + V for paste (handled by handlePaste)
-    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-      console.log('📋 [KEYBOARD] Paste shortcut detected');
-    }
-    
-    // ✅ CTRL/CMD + ENTER to send message
+    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {}
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
-      if (input.trim() || file || pastedImage) {
-        handleSubmit(e);
-      }
+      if (input.trim() || file || pastedImage) handleSubmit(e);
     }
-    
-    // ✅ ESC to clear pasted image
-    if (e.key === 'Escape' && pastedImage) {
-      clearPastedImage();
-    }
+    if (e.key === 'Escape' && pastedImage) clearPastedImage();
   }, [input, file, pastedImage]);
 
-  // ✅ CLEAR PASTED IMAGE
+  // CLEAR PASTED IMAGE
   const clearPastedImage = useCallback(() => {
-    console.log('🗑️ [PASTE] Clearing pasted image');
     setPastedImage(null);
     setPastePreview(null);
     setFile(null);
     setFileValidationError(null);
-    
-    // Clear file input
     const fileInput = document.getElementById("fileUpload");
     if (fileInput) fileInput.value = "";
   }, []);
 
-  // ✅ ATTACH EVENT LISTENERS WITH DRAG & DROP
+  // ATTACH EVENT LISTENERS
   useEffect(() => {
     const inputElement = inputRef.current;
     if (!inputElement) return;
-
-    console.log('📋 [EVENTS] Attaching event listeners');
-    
     inputElement.addEventListener('paste', handlePaste);
     inputElement.addEventListener('keydown', handleKeyDown);
-    
-    // ✅ DRAG & DROP EVENTS
     document.addEventListener('dragover', handleDragOver);
     document.addEventListener('dragleave', handleDragLeave);
     document.addEventListener('drop', handleDrop);
-    
-    // ✅ GLOBAL PASTE
     document.addEventListener('paste', handlePaste);
     document.addEventListener('keydown', handleKeyDown);
-
     return () => {
       inputElement.removeEventListener('paste', handlePaste);
       inputElement.removeEventListener('keydown', handleKeyDown);
@@ -374,150 +264,74 @@ const [showPasteIndicator, setShowPasteIndicator] = useState(false);
     };
   }, [handlePaste, handleKeyDown, handleDragOver, handleDragLeave, handleDrop]);
 
-  // ✅ FALLBACK FETCH FUNCTION
+  // FALLBACK FETCH FUNCTION
   const fetchMessagesViaHTTP = useCallback(async (sessionId) => {
-    if (!sessionId || !token) {
-      console.log('❌ Cannot fetch messages - missing sessionId or token');
-      return [];
-    }
-    
-    console.log('📡 [HTTP FETCH] Fetching messages for session:', sessionId);
-    
+    if (!sessionId || !token) return [];
     try {
       setIsFetchingFallback(true);
-      
       const response = await axios.get(`${backendUrl}/api/chat/session/${sessionId}/messages`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         timeout: 15000
       });
-      
-      console.log('📥 [HTTP FETCH] Response received:', {
-        status: response.status,
-        success: response.data.success,
-        messageCount: response.data.messages?.length || 0,
-        fileCount: response.data.fileCount || 0,
-        imageCount: response.data.imageCount || 0,
-        documentCount: response.data.documentCount || 0
-      });
-      
       if (response.data.success) {
         const messages = response.data.messages || [];
-        console.log('✅ [HTTP FETCH] Messages loaded successfully:', messages.length);
-        
         setFallbackMessages(messages);
-        
-        if (chatContextAvailable && setSessionMessages) {
-          console.log('🔄 [HTTP FETCH] Syncing with context...');
-          setSessionMessages(sessionId, messages);
-        }
-        
+        if (chatContextAvailable && setSessionMessages) setSessionMessages(sessionId, messages);
         return messages;
       } else {
-        console.log('❌ [HTTP FETCH] Failed:', response.data.error || response.data.message);
         setFallbackMessages([]);
         return [];
       }
     } catch (error) {
-      console.error('❌ [HTTP FETCH] Error:', {
-        message: error.message,
-        status: error.response?.status,
-        statusText: error.response?.statusText
-      });
-      
       setFallbackMessages([]);
-      
-      if (chatContextAvailable && reconnect) {
-        console.log('🔄 [HTTP FETCH] Attempting context reconnection...');
-        reconnect();
-      }
-      
+      if (chatContextAvailable && reconnect) reconnect();
       return [];
     } finally {
       setIsFetchingFallback(false);
     }
   }, [backendUrl, token, chatContextAvailable, reconnect, setSessionMessages]);
 
-  // ✅ INITIALIZE SESSION ON MOUNT
+  // INITIALIZE SESSION ON MOUNT
   useEffect(() => {
     const initializeSession = async () => {
-      console.log('🚀 [DASHBOARD] Initializing dashboard with session:', selectedSession);
-      
       if (selectedSession && selectedSession !== 'null' && selectedSession !== 'undefined') {
-        console.log('📍 [DASHBOARD] Setting up session immediately:', selectedSession);
-        
         setCurrentSessionId(selectedSession);
-        
-        if (chatContextAvailable && setSession) {
-          console.log('📡 [DASHBOARD] Setting session in context:', selectedSession);
-          setSession(selectedSession);
-        }
-        
-        console.log('📨 [DASHBOARD] Starting message fetch...');
+        if (chatContextAvailable && setSession) setSession(selectedSession);
         try {
           const messages = await fetchMessagesViaHTTP(selectedSession);
-          
           if ((!messages || messages.length === 0) && chatContextAvailable && fetchSessionMessages) {
-            console.log('🔄 [DASHBOARD] Trying context fetch as fallback...');
             await fetchSessionMessages(selectedSession);
           }
-        } catch (error) {
-          console.error('❌ [DASHBOARD] Failed to fetch messages:', error);
-        }
+        } catch (error) {}
       }
-      
       setHasInitialized(true);
     };
-
-    // ✅ IMMEDIATE INITIALIZATION - NO DELAYS
-    if (!hasInitialized) {
-      initializeSession();
-    }
+    if (!hasInitialized) initializeSession();
   }, [selectedSession, hasInitialized, chatContextAvailable, fetchMessagesViaHTTP, setSession, fetchSessionMessages]);
 
-  // ✅ WATCH FOR SESSION CHANGES FROM PARENT
+  // WATCH FOR SESSION CHANGES FROM PARENT
   useEffect(() => {
     if (selectedSession && selectedSession !== currentSessionId) {
-      console.log('🔄 [SESSION CHANGE] New session from parent:', selectedSession);
-      
       setFallbackMessages([]);
       setCurrentSessionId(selectedSession);
       clearPastedImage();
       setFileValidationError(null);
-      
-      if (chatContextAvailable && setSession) {
-        setSession(selectedSession);
-      }
-      
-      fetchMessagesViaHTTP(selectedSession).then(messages => {
-        console.log('📨 [SESSION CHANGE] Messages fetched:', messages?.length || 0);
-      }).catch(error => {
-        console.error('❌ [SESSION CHANGE] Failed to fetch messages:', error);
-      });
-      
-      if (chatContextAvailable && fetchSessionMessages) {
-        fetchSessionMessages(selectedSession);
-      }
+      if (chatContextAvailable && setSession) setSession(selectedSession);
+      fetchMessagesViaHTTP(selectedSession);
+      if (chatContextAvailable && fetchSessionMessages) fetchSessionMessages(selectedSession);
     }
   }, [selectedSession, currentSessionId, chatContextAvailable, setSession, fetchMessagesViaHTTP, fetchSessionMessages, clearPastedImage]);
 
-  // ✅ GET CURRENT MESSAGES
+  // GET CURRENT MESSAGES
   const actualMessages = useMemo(() => {
     if (chatContextAvailable && actualIsConnected && getCurrentSessionMessages) {
       const contextMessages = getCurrentSessionMessages();
-      if (contextMessages.length > 0) {
-        console.log('📋 [MESSAGES] Using context messages:', contextMessages.length);
-        return contextMessages;
-      }
+      if (contextMessages.length > 0) return contextMessages;
     }
-    
-    console.log('📋 [MESSAGES] Using fallback messages:', fallbackMessages.length);
     return fallbackMessages;
   }, [chatContextAvailable, actualIsConnected, getCurrentSessionMessages, fallbackMessages]);
 
-  // ✅ SPEECH RECOGNITION
+  // SPEECH RECOGNITION
   const {
     transcript,
     listening,
@@ -528,7 +342,7 @@ const [showPasteIndicator, setShowPasteIndicator] = useState(false);
   const [isManuallyEditing, setIsManuallyEditing] = useState(false);
   const [hasStoppedListening, setHasStoppedListening] = useState(false);
 
-  // ✅ ENHANCED USER MESSAGE COMPONENT WITH TEXT EXTRACTION INFO
+  // ENHANCED USER MESSAGE COMPONENT WITH TEXT EXTRACTION INFO
   const UserMessage = ({ message, timestamp, status, fileUrl, type, fileType, fileName, isDuplicate, hasTextExtraction, extractedTextLength }) => {
     const detectedType = detectFileType ? detectFileType(fileUrl, fileName, fileType) : 'unknown';
     
@@ -627,33 +441,51 @@ const [showPasteIndicator, setShowPasteIndicator] = useState(false);
                               message.includes('document') || message.includes('Document');
 
     // ✅ ENHANCED MESSAGE CLEANING
-    const cleanMessage = useCallback((rawMessage) => {
-      if (!rawMessage) return '';
-      
-      let cleaned = rawMessage;
-      
-      // Remove emojis and processing indicators
-      cleaned = cleaned
-        .replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '')
-        .replace(/Loading and analyzing[^.]*\.*/gi, '')
-        .replace(/Image loaded successfully[^)]*\)[^.]*\.*/gi, '')
-        .replace(/Analysis complete!*/gi, '')
-        .replace(/Document processing[^.]*\.*/gi, '')
-        .replace(/Text extracted[^.]*\.*/gi, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      
-      // Capitalize first letter and add period if needed
-      if (cleaned && cleaned.length > 0 && /^[a-z]/.test(cleaned)) {
-        cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-      }
-      
-      if (cleaned && cleaned.length > 10 && !/[.!?]$/.test(cleaned)) {
-        cleaned += '.';
-      }
-      
-      return cleaned || rawMessage;
-    }, []);
+  const cleanMessage = useCallback((rawMessage) => {
+  if (!rawMessage) return '';
+
+  let messageToClean = rawMessage;
+
+  // Check if the rawMessage is a JSON string and try to parse it.
+  try {
+    // This will handle cases where the message is a stringified JSON object.
+    const parsed = JSON.parse(rawMessage);
+    if (parsed && typeof parsed.message === 'string') {
+      messageToClean = parsed.message;
+    }
+  } catch (e) {
+    // If parsing fails, it's not a JSON string, so we treat it as a regular string.
+    // This is the expected behavior for already cleaned messages (e.g., after a refresh).
+  }
+  
+  // This regex is a more compatible way to remove a wide range of emojis and symbols.
+  const emojiRegex = /([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g;
+
+  let cleaned = messageToClean;
+  
+  // Remove emojis and processing indicators from the (potentially parsed) message
+  cleaned = cleaned
+    .replace(emojiRegex, '') // Use the corrected regex
+    .replace(/Loading and analyzing[^.]*\.*/gi, '')
+    .replace(/Image loaded successfully[^)]*\)[^.]*\.*/gi, '')
+    .replace(/Analysis complete!*/gi, '')
+    .replace(/Document processing[^.]*\.*/gi, '')
+    .replace(/Text extracted[^.]*\.*/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  
+  // Capitalize first letter and add period if needed
+  if (cleaned && cleaned.length > 0 && /^[a-z]/.test(cleaned)) {
+    cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  }
+  
+  if (cleaned && cleaned.length > 10 && !/[.!?]$/.test(cleaned)) {
+    cleaned += '.';
+  } 
+  
+  return cleaned || rawMessage;
+}, []);
+   
 
     const displayMessage = cleanMessage(message);
 
@@ -807,180 +639,148 @@ const [showPasteIndicator, setShowPasteIndicator] = useState(false);
     }
   }, [listening]);
 
-  // ✅ ENHANCED FILE UPLOAD HANDLER
-  const handleFileSelect = useCallback(async (e) => {
+  // ENHANCED FILE UPLOAD HANDLER
+  const handleFileSelect = async (e) => {
     const selectedFile = e.target.files[0];
     if (!selectedFile) return;
-
+    setFile(selectedFile);
+    setIsUploading(true);
+    setFileValidationError(null);
+    setUploadProgress(0);
+    const formData = new FormData();
+    formData.append('file', selectedFile);
     try {
-      setIsUploading(true);
-      
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      if (activeSessionId) {
-        formData.append('sessionId', activeSessionId);
-      }
-
-      const uploadResponse = await axios.post(`${backendUrl}/api/chat/upload`, formData, {
+      const response = await axios.post(`${backendUrl}/api/chat/upload`, formData, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data'
-        }
+          'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          setUploadProgress(percentCompleted);
+        },
       });
-
-      console.log('✅ [UPLOAD] Upload successful:', uploadResponse.data);
-      setUploadResult(uploadResponse.data);
-
-      // ✅ CHECK IF ANALYSIS WAS ALREADY COMPLETED
-      if (uploadResponse.data.autoAnalyzed) {
-        console.log('✅ [FRONTEND] Analysis already completed during upload, skipping sendMessage');
-        
-        // ✅ REFRESH MESSAGES USING EXISTING FUNCTIONS
-        try {
-          if (chatContextAvailable && fetchSessionMessages && activeSessionId) {
-            console.log('🔄 [FRONTEND] Refreshing messages via context...');
-            await fetchSessionMessages(activeSessionId);
-          } else if (activeSessionId) {
-            console.log('🔄 [FRONTEND] Refreshing messages via HTTP fallback...');
-            await fetchMessagesViaHTTP(activeSessionId);
-          }
-        } catch (refreshError) {
-          console.error('❌ [FRONTEND] Failed to refresh messages:', refreshError);
-        }
-        
-        // ✅ CLEAR FILE STATE
-        setFile(null);
-        if (e.target) e.target.value = '';
-        
-        return; // ✅ STOP HERE - DON'T TRIGGER sendMessage
-      }
-
-      // ✅ ONLY TRIGGER sendMessage IF NO AUTO-ANALYSIS OCCURRED
-      if (uploadResponse.data.hasExtractedText && uploadResponse.data.uploadId && !uploadResponse.data.autoAnalyzed) {
-        console.log('🤖 [FRONTEND] Auto-triggering AI analysis (fallback)...');
-        
-        const messageData = {
-          sessionId: activeSessionId || uploadResponse.data.sessionId,
-          message: `Please analyze this document: ${selectedFile.name}`,
-          type: 'document',
-          uploadId: uploadResponse.data.uploadId,
-          fileName: uploadResponse.data.fileName,
-          fileUrl: uploadResponse.data.fileUrl,
-          fileType: 'document'
-        };
-
-        if (chatContextAvailable && sendMessage) {
-          await sendMessage(messageData);
-        }
-      }
-
+      setUploadResult(response.data);
     } catch (error) {
-      console.error('❌ [UPLOAD] Upload failed:', error);
-      setFileValidationError('Upload failed. Please try again.');
+      setFileValidationError('File upload failed. Please try again.');
+      setFile(null);
     } finally {
       setIsUploading(false);
     }
-  }, [activeSessionId, token, backendUrl, chatContextAvailable, sendMessage, fetchSessionMessages, fetchMessagesViaHTTP]);
+  };
 
-  // ✅ ENHANCED SUBMIT HANDLER WITH DOCUMENT SUPPORT
-// ✅ REPLACE YOUR handleSubmit FUNCTION IN ChatDashBoard.jsx:
-const handleSubmit = useCallback(async (e) => {
-  e.preventDefault();
-  
-  console.log('🚨 [FRONTEND DEBUG] handleSubmit triggered!');
-  console.log('🚨 [FRONTEND DEBUG] uploadResult:', uploadResult);
-  
-  const finalInput = input.trim();
-  const fileToSend = pastedImage || file;
-  
-  if (!finalInput && !fileToSend) return;
-  if (isAIStreaming) return;
+  // --- MAIN FIX: HANDLE SUBMIT, OPTIMISTIC UPDATE, AND AI RESPONSE ---
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    let finalInput = input.trim();
 
-  // ✅ CHECK IF FILE IS UPLOADED BUT NO UPLOAD RESULT
-  if (fileToSend && !uploadResult) {
-    setFileValidationError('Please wait for file upload to complete before sending.');
-    return;
-  }
+    // If no text input but a file is uploaded, set a default message
+    if (!finalInput && uploadResult) {
+      if (uploadResult.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i)) {
+        finalInput = `Uploaded document: ${uploadResult.fileName}`;
+      } else if (uploadResult.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i)) {
+        finalInput = `Uploaded image: ${uploadResult.fileName}`;
+      } else {
+        finalInput = "Uploaded a file.";
+      }
+    }
 
-  try {
-    setIsAIStreaming(true);
+    if (!finalInput && !uploadResult) return;
+    if (isAIStreaming) return;
 
-    // ✅ PREPARE MESSAGE DATA - NO EXTRACTED TEXT, ONLY UPLOAD ID
+    // Make sure activeSessionId is defined and not null/undefined
+    if (!activeSessionId) {
+      setFileValidationError("No session selected. Please start or select a chat session.");
+      return;
+    }
+
+    // --- Optimistically add user message to chat state ---
+    const optimisticUserMsg = {
+      _id: `user-${Date.now()}`,
+      sender: userId,
+      message: finalInput,
+      timestamp: new Date().toISOString(),
+      fileUrl: uploadResult?.fileUrl || null,
+      fileName: uploadResult?.fileName || null,
+      type: uploadResult ? 'document' : 'text',
+      hasTextExtraction: !!uploadResult?.extractedText,
+      extractedTextLength: uploadResult?.extractedText?.length || 0,
+      status: 'sending'
+    };
+    if (addMessageToSession) addMessageToSession(activeSessionId, optimisticUserMsg);
+
+    // --- Prepare messageData for backend ---
     const messageData = {
       sessionId: activeSessionId,
       message: finalInput,
-      type: fileToSend ? detectFileType(null, fileToSend.name, fileToSend.type) : 'text',
+      type: uploadResult ? 'document' : 'text',
       fileUrl: uploadResult?.fileUrl || null,
-      fileType: fileToSend?.type || null,
-      fileName: fileToSend?.name || null,
-      uploadId: uploadResult?.uploadId || null, // ✅ ONLY SEND UPLOAD ID
-      hasExtractedText: uploadResult?.hasExtractedText || false,
-      // ❌ NO EXTRACTED TEXT SENT FROM FRONTEND
-      tempId: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-      senderId: userId
+      fileName: uploadResult?.fileName || null,
+      extractedText: uploadResult?.extractedText || null,
     };
 
-    console.log('📤 [SUBMIT] Frontend sending message data (no extracted text):', {
-      hasUploadId: !!messageData.uploadId,
-      uploadId: messageData.uploadId,
-      type: messageData.type,
-      fileName: messageData.fileName,
-      extractedTextSent: false // ✅ Confirm no text sent
-    });
+    setIsAIStreaming(true);
 
-    // ✅ ADD THIS RIGHT BEFORE SENDING THE MESSAGE:
-    console.log('🚨 [FRONTEND DEBUG] About to call sendMessage with:', messageData);
-    
-    if (chatContextAvailable && sendMessage) {
-      console.log('🚨 [FRONTEND DEBUG] Using ChatContext sendMessage');
-      await sendMessage(messageData);
-    } else {
-      console.log('🚨 [FRONTEND DEBUG] Using direct API call fallback');
-      const response = await axios.post(`${backendUrl}/api/chat/send`, messageData, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        responseType: 'text',
-        timeout: 120000
-      });
+    try {
+      let response;
+      if (sendMessage) {
+        response = await sendMessage(messageData);
+      } else {
+        response = await axios.post(`${backendUrl}/api/chat/send`, messageData, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+      }
+
+      // --- Handle AI response (extract only aiMessage/message) ---
+      let aiMsg = response?.data?.aiMessage || response?.aiMessage;
+      if (aiMsg) {
+        // If backend returns a Mongoose doc, ensure timestamp is present
+        const aiTimestamp = aiMsg.createdAt || aiMsg.timestamp || new Date().toISOString();
+        // Add AI message to chat state
+        if (addMessageToSession) {
+          addMessageToSession(activeSessionId, {
+            _id: aiMsg._id,
+            sender: aiMsg.sender || 'AI',
+            message: aiMsg.message,
+            timestamp: aiTimestamp,
+            fileUrl: aiMsg.fileUrl,
+            fileName: aiMsg.fileName,
+            type: aiMsg.type,
+            hasTextExtraction: aiMsg.hasTextExtraction,
+            extractedTextLength: aiMsg.textLength,
+            metadata: aiMsg.metadata,
+            status: 'sent'
+          });
+        }
+      }
+      // Mark user message as sent (optional: update status)
+      // Optionally, you can update the status of the optimistic message here
+
+    } catch (error) {
+      setFileValidationError('Failed to send message. Please try again.');
+    } finally {
+      setInput('');
+      setFile(null);
+      setUploadResult(null);
+      setIsAIStreaming(false);
     }
-    
-    // Clear form
-    setInput('');
-    setFile(null);
-    setPastedImage(null);
-    setPastePreview(null);
-    setUploadResult(null);
-    setFileValidationError(null);
-    
-    // Clear file input
-    const fileInput = document.getElementById("fileUpload");
-    if (fileInput) fileInput.value = "";
+  };
 
-  } catch (error) {
-    console.error('❌ [SUBMIT] Send message failed:', error);
-    setFileValidationError('Failed to send message. Please try again.');
-  } finally {
-    setIsAIStreaming(false);
-  }
-}, [input, file, pastedImage, uploadResult, activeSessionId, isAIStreaming, chatContextAvailable, sendMessage, backendUrl, token, userId]);
-
-  // ✅ AUTO-SCROLL
+  // AUTO-SCROLL
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [actualMessages, isAIStreaming]);
 
-  // ✅ VOICE INPUT TRANSCRIPT HANDLING
+  // VOICE INPUT TRANSCRIPT HANDLING
   useEffect(() => {
     if (listening && transcript && !isManuallyEditing && !hasStoppedListening) {
       setInput(transcript);
     }
   }, [transcript, listening, isManuallyEditing, hasStoppedListening]);
 
-  // ✅ DEBUG LOGGING
+  // DEBUG LOGGING
   useEffect(() => { 
     console.log('🔍 Dashboard state:', {
       selectedSession,
@@ -1231,15 +1031,6 @@ const handleSubmit = useCallback(async (e) => {
                 </div>
               </div>
             </div>
-          )}
-          
-          {/* ✅ PASTED IMAGE PREVIEW */}
-          {pastedImage && pastePreview && (
-            <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl border border-blue-200 dark:border-blue-700">
-              <div className="flex items-start gap-3">
-                </div>
-            </div>
-           
           )}
           
           {/* ✅ PASTED IMAGE PREVIEW */}

@@ -262,527 +262,86 @@ export const ChatProvider = ({ children }) => {
   }, [backendUrl, token]);
 
   // ✅ ENHANCED STREAMING SEND MESSAGE WITH BACKEND TEXT EXTRACTION
-  const sendMessage = useCallback(async (messageData) => {
-    console.log('🚨 [CONTEXT DEBUG] ChatContext sendMessage called!');
-    console.log('🚨 [CONTEXT DEBUG] messageData:', messageData);
-    
-    const startTime = Date.now();
-    const { sessionId, message, tempId, senderId, fileUrl, fileType, type, fileName, file, extractedText } = messageData;
-    
-    // ✅ DETECT APPROACH: Backend text processing is preferred for documents
-    const hasDirectFile = file instanceof File;
-    const hasPreProcessedData = fileUrl && extractedText;
-    const hasCloudinaryUrl = fileUrl && !hasDirectFile && !extractedText;
-    
-    console.log('📤 [STREAMING] Starting enhanced message send with backend text extraction:', {
-      sessionId: sessionId?.substring(0, 8),
-      messageLength: message?.length,
-      hasDirectFile,
-      hasPreProcessedData,
-      hasCloudinaryUrl,
-      fileName: hasDirectFile ? file.name : fileName,
-      fileSize: hasDirectFile ? file.size : 'unknown',
-      type,
-      extractedTextLength: extractedText?.length || 0,
-      approach: hasDirectFile && detectFileType(null, file.name, file.type) === 'document' ? 
-                'Backend Text Processing (Preferred)' : 
-                hasPreProcessedData ? 'Pre-processed Data' :
-                hasDirectFile ? 'Direct Upload' : 'Text Chat'
+ // In ChatContext.jsx
+
+const sendMessage = useCallback(async (messageData) => {
+  const { sessionId, message, file, extractedText } = messageData;
+
+  // ✅ CORRECTED VALIDATION:
+  // Check for a session ID, and then check if there's EITHER a text message OR a file to process.
+  if (!sessionId || (!message.trim() && !file && !extractedText)) {
+    console.error('❌ [STREAMING] Missing required fields: A message or a file is required.');
+    return { success: false, error: 'A message or a file is required to start.' };
+  }
+
+  setStreamingStates(prev => ({ ...prev, [sessionId]: true }));
+  const abortController = new AbortController();
+  setActiveStreams(prev => ({ ...prev, [sessionId]: abortController }));
+
+  try {
+    const aiMessageId = `ai-${Date.now()}`;
+    // Optimistically add a placeholder for the AI response
+    setMessages(prev => ({
+      ...prev,
+      [sessionId]: [...(prev[sessionId] || []), { _id: aiMessageId, message: '', sender: 'AI', isStreaming: true }]
+    }));
+
+    let response;
+    const finalUrl = `${backendUrl}/api/chat/send`;
+
+    // The backend now handles the logic, so we just pass the data
+    response = await fetch(finalUrl, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(messageData), // Pass the whole messageData object
+      signal: abortController.signal
     });
 
-    if (!sessionId || !message) {
-      console.error('❌ [STREAMING] Missing required fields');
-      return { success: false, error: 'Session ID and message are required' };
+    if (!response.ok || !response.body) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
+    
+    // Handle the streaming response
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let accumulatedText = '';
 
-    // ✅ MARK SESSION AS STREAMING
-    setStreamingStates(prev => ({ ...prev, [sessionId]: true }));
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    // ✅ CREATE ABORT CONTROLLER
-    const abortController = new AbortController();
-    setActiveStreams(prev => ({ ...prev, [sessionId]: abortController }));
-
-    try {
-      // ✅ PREPARE AI MESSAGE PLACEHOLDER
-      const aiMessageId = `ai-${Date.now()}-${Math.random()}`;
-      const detectedType = type || detectFileType(fileUrl, fileName, fileType);
-      
-      const aiMessage = {
-        _id: aiMessageId,
-        message: '',
-        sender: 'AI',
-        type: detectedType === 'image' || detectedType === 'document' ? detectedType : 'text',
-        timestamp: new Date().toISOString(),
-        isStreaming: true,
-        fileUrl: fileUrl || null,
-        fileType: fileType || (hasDirectFile ? file.type : null),
-        fileName: hasDirectFile ? file.name : fileName,
-        processingInfo: hasDirectFile ? 
-          `Processing ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB) with backend text extraction...` :
-          detectedType === 'image' ? 'Analyzing image with BLIP...' :
-          detectedType === 'document' ? 'Processing document with backend text extraction...' :
-          'Generating response...'
-      };
-
+      accumulatedText += decoder.decode(value, { stream: true });
       setMessages(prev => ({
         ...prev,
-        [sessionId]: [...(prev[sessionId] || []), aiMessage]
+        [sessionId]: (prev[sessionId] || []).map(msg => 
+          msg._id === aiMessageId ? { ...msg, message: accumulatedText } : msg
+        )
       }));
-
-      let response;
-      let finalUrl;
-      let approach;
-      let processingMetadata = {};
-
-      // ✅ APPROACH 1: Backend text processing (PREFERRED for documents)
-      if (hasDirectFile && detectedType === 'document') {
-        console.log('📄 [BACKEND PROCESSING] Uploading to backend first for text extraction...');
-        approach = 'Backend Text Processing';
-        
-        // Update processing info
-        setMessages(prev => ({
-          ...prev,
-          [sessionId]: prev[sessionId].map(msg => 
-            msg._id === aiMessageId 
-              ? { ...msg, processingInfo: 'Uploading to backend for text extraction...' }
-              : msg
-          )
-        }));
-        
-        // Upload to backend first for text extraction
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        const uploadResponse = await fetch(`${backendUrl}/api/chat/upload`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-          signal: abortController.signal
-        });
-        
-        if (!uploadResponse.ok) {
-          throw new Error(`Backend upload failed: ${uploadResponse.status}`);
-        }
-        
-        const uploadResult = await uploadResponse.json();
-        console.log('✅ [BACKEND PROCESSING] File uploaded with text extraction:', {
-          hasText: !!uploadResult.extractedText,
-          textLength: uploadResult.extractedText?.length || 0,
-          textPreview: uploadResult.extractedText?.substring(0, 100) + '...',
-          fileUrl: uploadResult.fileUrl?.substring(0, 50) + '...',
-          extractionMethod: uploadResult.extractionMethod,
-          isDuplicate: uploadResult.isDuplicate
-        });
-        
-        processingMetadata = {
-          textExtracted: !!uploadResult.extractedText,
-          extractedTextLength: uploadResult.extractedText?.length || 0,
-          extractionMethod: uploadResult.extractionMethod,
-          isDuplicate: uploadResult.isDuplicate,
-          backendProcessingTime: uploadResult.processingTime
-        };
-        
-        // Update processing info
-        setMessages(prev => ({
-          ...prev,
-          [sessionId]: prev[sessionId].map(msg => 
-            msg._id === aiMessageId 
-              ? { ...msg, processingInfo: `Text extracted (${uploadResult.extractedText?.length || 0} chars), sending to AI...` }
-              : msg
-          )
-        }));
-        
-        // Now send to backend's AI service (which will route to FastAPI with extracted text)
-        const payload = {
-          message: message,
-          sessionId: sessionId,
-          fileUrl: uploadResult.fileUrl,
-          fileType: uploadResult.fileType,
-          fileName: uploadResult.fileName,
-          extractedText: uploadResult.extractedText, // ✅ Pass extracted text
-          type: 'document',
-          tempId: tempId
-        };
-
-        finalUrl = `${backendUrl}/api/chat/send`;
-        
-        response = await fetch(finalUrl, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify(payload),
-          signal: abortController.signal
-        });
-      } 
-      // ✅ APPROACH 2: Pre-processed data from previous upload
-      else if (hasPreProcessedData) {
-        console.log('🔄 [PRE-PROCESSED] Using pre-processed data with extracted text...');
-        approach = 'Pre-processed Data';
-        
-        processingMetadata = {
-          textExtracted: !!extractedText,
-          extractedTextLength: extractedText?.length || 0,
-          usingPreProcessedData: true
-        };
-        
-        const payload = {
-          message: message,
-          sessionId: sessionId,
-          fileUrl: fileUrl,
-          fileType: fileType,
-          fileName: fileName,
-          extractedText: extractedText, // ✅ Use pre-extracted text
-          type: detectedType,
-          tempId: tempId
-        };
-
-        finalUrl = `${backendUrl}/api/chat/send`;
-        
-        response = await fetch(finalUrl, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify(payload),
-          signal: abortController.signal
-        });
-      }
-      // ✅ APPROACH 3: Direct file upload (for images or fallback)
-      else if (hasDirectFile) {
-        console.log('📁 [DIRECT UPLOAD] Sending file directly to backend for processing...');
-        approach = 'Direct Backend Upload';
-        
-        processingMetadata = {
-          directUpload: true,
-          fileType: detectedType
-        };
-        
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('message', message);
-        formData.append('sessionId', sessionId);
-        formData.append('type', detectedType);
-        if (tempId) formData.append('tempId', tempId);
-
-        finalUrl = `${backendUrl}/api/chat/upload`;
-        
-        response = await fetch(finalUrl, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-          signal: abortController.signal
-        });
-      }
-      // ✅ APPROACH 4: Existing file URL
-      else if (hasCloudinaryUrl) {
-        console.log('☁️ [CLOUDINARY] Using existing Cloudinary URL...');
-        approach = 'Existing File URL';
-        
-        processingMetadata = {
-          usingExistingUrl: true,
-          fileType: detectedType
-        };
-        
-        const payload = {
-          message: message,
-          sessionId: sessionId,
-          fileUrl: fileUrl,
-          fileType: fileType,
-          fileName: fileName,
-          type: detectedType,
-          tempId: tempId
-        };
-
-        finalUrl = `${backendUrl}/api/chat/send`;
-        
-        response = await fetch(finalUrl, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify(payload),
-          signal: abortController.signal
-        });
-      }
-      // ✅ APPROACH 5: Regular text chat
-      else {
-        console.log('💬 [TEXT CHAT] Sending text message...');
-        approach = 'Text Chat';
-        
-        processingMetadata = {
-          textOnly: true
-        };
-        
-        const payload = {
-          message: message,
-          sessionId: sessionId,
-          type: 'chat',
-          tempId: tempId
-        };
-
-        finalUrl = `${backendUrl}/api/chat/send`;
-        
-        response = await fetch(finalUrl, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify(payload),
-          signal: abortController.signal
-        });
-      }
-
-      console.log('📡 [STREAMING] Backend response received:', {
-        status: response.status,
-        ok: response.ok,
-        contentType: response.headers.get('content-type'),
-        approach,
-        url: finalUrl.replace(backendUrl, '[backend]')
-      });
-
-      // ✅ HANDLE RESPONSE ERRORS
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ [RESPONSE ERROR]:', {
-          status: response.status,
-          statusText: response.statusText,
-          url: finalUrl.replace(backendUrl, '[backend]'),
-          approach,
-          body: errorText.substring(0, 200)
-        });
-        
-        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
-      }
-
-      // ✅ HANDLE STREAMING RESPONSE FROM BACKEND
-      const contentType = response.headers.get('content-type');
-      const isJson = contentType?.includes('application/json');
-      const isStreamable = !isJson && response.body;
-
-      console.log('🌊 [STREAMING] Response analysis:', {
-        contentType,
-        isJson,
-        isStreamable,
-        hasBody: !!response.body,
-        approach
-      });
-
-      if (isStreamable) {
-        console.log('🌊 [STREAMING] Starting to read backend stream...');
-        
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let accumulatedText = '';
-        let chunkCount = 0;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            console.log(`✅ [STREAMING] Stream completed after ${chunkCount} chunks`);
-            break;
-          }
-
-          const chunk = decoder.decode(value, { stream: true });
-          accumulatedText += chunk;
-          chunkCount++;
-
-          // Update the AI message with streaming content
-          setMessages(prev => ({
-            ...prev,
-            [sessionId]: (prev[sessionId] || []).map(msg => 
-              msg._id === aiMessageId 
-                ? { 
-                    ...msg, 
-                    message: accumulatedText, 
-                    isStreaming: true,
-                    processingInfo: `Streaming AI response (${approach}) - ${chunkCount} chunks...`
-                  }
-                : msg
-            )
-          }));
-
-          // Log progress every 10 chunks
-          if (chunkCount % 10 === 0) {
-            console.log(`🌊 [STREAMING] Progress: ${chunkCount} chunks, ${accumulatedText.length} characters`);
-          }
-        }
-
-        // ✅ FINALIZE STREAMING MESSAGE
-        setMessages(prev => ({
-          ...prev,
-          [sessionId]: (prev[sessionId] || []).map(msg => 
-            msg._id === aiMessageId 
-              ? { 
-                  ...msg, 
-                  message: accumulatedText, 
-                  isStreaming: false, 
-                  processingInfo: null,
-                  timestamp: new Date().toISOString(),
-                  metadata: {
-                    processingTime: Date.now() - startTime,
-                    chunks: chunkCount,
-                    approach,
-                    fileProcessed: hasDirectFile ? file.name : fileName,
-                    ...processingMetadata
-                  }
-                }
-              : msg
-          )
-        }));
-
-        console.log('✅ [STREAMING] Message completed:', {
-          responseLength: accumulatedText.length,
-          chunks: chunkCount,
-          processingTime: `${Date.now() - startTime}ms`,
-          approach,
-          processingMetadata
-        });
-
-        return { 
-          success: true, 
-          aiMessageId, 
-          responseLength: accumulatedText.length,
-          processingTime: Date.now() - startTime,
-          approach,
-          metadata: processingMetadata
-        };
-      } else if (isJson) {
-        // ✅ HANDLE JSON RESPONSE
-        console.log('📋 [JSON] Processing JSON response from backend...');
-        
-        const responseData = await response.json();
-        const aiText = responseData.response || responseData.message || responseData.data || 'No response received';
-        
-        setMessages(prev => ({
-          ...prev,
-          [sessionId]: (prev[sessionId] || []).map(msg => 
-            msg._id === aiMessageId 
-              ? { 
-                  ...msg, 
-                  message: aiText, 
-                  isStreaming: false, 
-                  processingInfo: null,
-                  timestamp: new Date().toISOString(),
-                  metadata: {
-                    processingTime: Date.now() - startTime,
-                    approach,
-                    fileProcessed: hasDirectFile ? file.name : fileName,
-                    ...processingMetadata,
-                    backendResponse: true
-                  }
-                }
-              : msg
-          )
-        }));
-
-        console.log('✅ [JSON] Response completed:', { 
-          responseLength: aiText.length,
-          processingTime: `${Date.now() - startTime}ms`,
-          approach,
-          processingMetadata
-        });
-        
-        return { 
-          success: true, 
-          aiMessageId, 
-          responseLength: aiText.length,
-          processingTime: Date.now() - startTime,
-          approach,
-          metadata: processingMetadata
-        };
-      } else {
-        // ✅ FALLBACK TO TEXT RESPONSE
-        console.log('📄 [TEXT] Processing text response from backend...');
-        
-        const textResponse = await response.text();
-        
-        setMessages(prev => ({
-          ...prev,
-          [sessionId]: (prev[sessionId] || []).map(msg => 
-            msg._id === aiMessageId 
-              ? { 
-                  ...msg, 
-                  message: textResponse || 'Empty response received', 
-                  isStreaming: false, 
-                  processingInfo: null,
-                  timestamp: new Date().toISOString(),
-                  metadata: {
-                    processingTime: Date.now() - startTime,
-                    approach,
-                    fileProcessed: hasDirectFile ? file.name : fileName,
-                    ...processingMetadata,
-                    fallbackTextResponse: true
-                  }
-                }
-              : msg
-          )
-        }));
-        
-        return { 
-          success: true, 
-          aiMessageId, 
-          responseLength: textResponse.length,
-          processingTime: Date.now() - startTime,
-          approach,
-          metadata: processingMetadata
-        };
-      }
-
-    } catch (error) {
-      console.error('❌ [STREAMING] Error occurred:', {
-        name: error.name,
-        message: error.message,
-        approach: approach || 'Unknown',
-        processingTime: `${Date.now() - startTime}ms`,
-        stack: error.stack?.split('\n').slice(0, 3).join('\n')
-      });
-      
-      const errorMessage = error.name === 'AbortError' ? 
-        'Request was cancelled' : 
-        `Failed to send message: ${error.message}`;
-
-      const errorMessageObj = {
-        _id: `error-${Date.now()}`,
-        message: `❌ ${errorMessage}`,
-        sender: 'AI',
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        isError: true,
-        metadata: {
-          originalError: error.message,
-          approach: approach || 'Unknown',
-          processingTime: Date.now() - startTime,
-          errorType: error.name
-        }
-      };
-
-      setMessages(prev => ({
-        ...prev,
-        [sessionId]: [
-          ...(prev[sessionId] || []).filter(msg => !msg.isStreaming), 
-          errorMessageObj
-        ]
-      }));
-
-      return { success: false, error: errorMessage, metadata: { approach, processingTime: Date.now() - startTime } };
-
-    } finally {
-      // ✅ CLEANUP
-      setStreamingStates(prev => ({ ...prev, [sessionId]: false }));
-      setActiveStreams(prev => {
-        const updated = { ...prev };
-        delete updated[sessionId];
-        return updated;
-      });
-      
-      console.log('🧹 [CLEANUP] Stream cleanup completed for session:', sessionId);
     }
-  }, [detectFileType, backendUrl, token]);
+
+    // Finalize the message
+    setMessages(prev => ({
+      ...prev,
+      [sessionId]: (prev[sessionId] || []).map(msg => 
+        msg._id === aiMessageId ? { ...msg, isStreaming: false, timestamp: new Date().toISOString() } : msg
+      )
+    }));
+
+  } catch (error) {
+    console.error('❌ [STREAMING] Error occurred:', error);
+    // Handle error state in UI
+  } finally {
+    setStreamingStates(prev => ({ ...prev, [sessionId]: false }));
+    setActiveStreams(prev => {
+      const updated = { ...prev };
+      delete updated[sessionId];
+      return updated;
+    });
+  }
+}, [backendUrl, token]);
 
   // ✅ CANCEL STREAMING FOR SESSION
   const cancelStream = useCallback((sessionId) => {
