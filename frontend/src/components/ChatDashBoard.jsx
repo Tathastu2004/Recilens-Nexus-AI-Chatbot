@@ -32,6 +32,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [uploadResult, setUploadResult] = useState(null);
   const [isAIStreaming, setIsAIStreaming] = useState(false);
+  const [activeFileContext, setActiveFileContext] = useState(null);
 
   // NEW STATE FOR COPY-PASTE FUNCTIONALITY
   const [pastedImage, setPastedImage] = useState(null);
@@ -421,7 +422,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             )}
             
             <div className="text-xs text-white/70 mt-2">
-              {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {timestamp && !isNaN(new Date(timestamp).getTime())
+                ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : ""}
             </div>
           </div>
           
@@ -436,54 +439,34 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   // ✅ ENHANCED AI MESSAGE COMPONENT WITH DOCUMENT PROCESSING INDICATORS
   const AiMessage = ({ message, timestamp, fileUrl, fileType, isStreaming = false, type, processingInfo, completedBy, metadata }) => {
     const isImageResponse = type === 'image' || completedBy === 'BLIP' || 
-                           message.includes('🖼️') || message.includes('Image');
-    const isDocumentResponse = type === 'document' || completedBy?.includes('Document') ||
-                              message.includes('document') || message.includes('Document');
+                           (typeof message === 'string' && (message.includes('🖼️') || message.includes('Image')));
+    const isDocumentResponse = type === 'document' || (completedBy && completedBy.includes('Document')) ||
+                              (typeof message === 'string' && (message.includes('document') || message.includes('Document')));
 
     // ✅ ENHANCED MESSAGE CLEANING
   const cleanMessage = useCallback((rawMessage) => {
   if (!rawMessage) return '';
 
-  let messageToClean = rawMessage;
-
-  // Check if the rawMessage is a JSON string and try to parse it.
-  try {
-    // This will handle cases where the message is a stringified JSON object.
-    const parsed = JSON.parse(rawMessage);
-    if (parsed && typeof parsed.message === 'string') {
-      messageToClean = parsed.message;
-    }
-  } catch (e) {
-    // If parsing fails, it's not a JSON string, so we treat it as a regular string.
-    // This is the expected behavior for already cleaned messages (e.g., after a refresh).
+  // If it's an object with a .message property, use it
+  if (typeof rawMessage === 'object' && rawMessage.message) {
+    return rawMessage.message;
   }
-  
-  // This regex is a more compatible way to remove a wide range of emojis and symbols.
-  const emojiRegex = /([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g;
 
-  let cleaned = messageToClean;
-  
-  // Remove emojis and processing indicators from the (potentially parsed) message
-  cleaned = cleaned
-    .replace(emojiRegex, '') // Use the corrected regex
-    .replace(/Loading and analyzing[^.]*\.*/gi, '')
-    .replace(/Image loaded successfully[^)]*\)[^.]*\.*/gi, '')
-    .replace(/Analysis complete!*/gi, '')
-    .replace(/Document processing[^.]*\.*/gi, '')
-    .replace(/Text extracted[^.]*\.*/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  
-  // Capitalize first letter and add period if needed
-  if (cleaned && cleaned.length > 0 && /^[a-z]/.test(cleaned)) {
-    cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  // If it's a JSON string, parse and extract .message or .aiMessage.message
+  if (typeof rawMessage === 'string' && rawMessage.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(rawMessage);
+      if (parsed && typeof parsed.message === 'string') {
+        return parsed.message;
+      }
+      if (parsed && parsed.aiMessage && typeof parsed.aiMessage.message === 'string') {
+        return parsed.aiMessage.message;
+      }
+    } catch (e) {}
   }
-  
-  if (cleaned && cleaned.length > 10 && !/[.!?]$/.test(cleaned)) {
-    cleaned += '.';
-  } 
-  
-  return cleaned || rawMessage;
+
+  // Otherwise, return as is
+  return rawMessage;
 }, []);
    
 
@@ -569,7 +552,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           
           {!isStreaming && (
             <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 px-1">
-              {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {timestamp && !isNaN(new Date(timestamp).getTime())
+                ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : ""}
             </div>
           )}
         </div>
@@ -661,6 +646,14 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         },
       });
       setUploadResult(response.data);
+      // After setUploadResult(response.data);
+if (response.data && response.data.extractedText) {
+  setActiveFileContext({
+    extractedText: response.data.extractedText,
+    fileUrl: response.data.fileUrl,
+    fileName: response.data.fileName,
+  });
+}
     } catch (error) {
       setFileValidationError('File upload failed. Please try again.');
       setFile(null);
@@ -672,6 +665,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   // --- MAIN FIX: HANDLE SUBMIT, OPTIMISTIC UPDATE, AND AI RESPONSE ---
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setInput("");
     let finalInput = input.trim();
 
     // If no text input but a file is uploaded, set a default message
@@ -685,38 +679,65 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       }
     }
 
-    if (!finalInput && !uploadResult) return;
+    if (!finalInput && !uploadResult && !activeFileContext) return;
     if (isAIStreaming) return;
 
-    // Make sure activeSessionId is defined and not null/undefined
     if (!activeSessionId) {
       setFileValidationError("No session selected. Please start or select a chat session.");
       return;
     }
 
-    // --- Optimistically add user message to chat state ---
+    // --- IMAGE CONTEXT ---
+    let fileContext = null;
+    let messageType = 'text';
+    if (uploadResult && uploadResult.fileUrl) {
+      const isImage = uploadResult.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
+      const isDocument = uploadResult.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i);
+      if (isImage) {
+        fileContext = {
+          fileUrl: uploadResult.fileUrl,
+          fileName: uploadResult.fileName,
+          fileType: uploadResult.fileType || 'image',
+        };
+        messageType = 'image';
+      } else if (isDocument && uploadResult.extractedText) {
+        fileContext = {
+          extractedText: uploadResult.extractedText,
+          fileUrl: uploadResult.fileUrl,
+          fileName: uploadResult.fileName,
+        };
+        messageType = 'document';
+        setActiveFileContext(fileContext);
+      }
+    } else if (activeFileContext) {
+      fileContext = activeFileContext;
+      messageType = 'document';
+    }
+
+    // Optimistically add user message
     const optimisticUserMsg = {
       _id: `user-${Date.now()}`,
       sender: userId,
       message: finalInput,
       timestamp: new Date().toISOString(),
-      fileUrl: uploadResult?.fileUrl || null,
-      fileName: uploadResult?.fileName || null,
-      type: uploadResult ? 'document' : 'text',
-      hasTextExtraction: !!uploadResult?.extractedText,
-      extractedTextLength: uploadResult?.extractedText?.length || 0,
+      fileUrl: fileContext?.fileUrl || null,
+      fileName: fileContext?.fileName || null,
+      type: messageType,
+      hasTextExtraction: !!fileContext?.extractedText,
+      extractedTextLength: fileContext?.extractedText?.length || 0,
       status: 'sending'
     };
     if (addMessageToSession) addMessageToSession(activeSessionId, optimisticUserMsg);
 
-    // --- Prepare messageData for backend ---
+    // Prepare messageData for backend
     const messageData = {
       sessionId: activeSessionId,
       message: finalInput,
-      type: uploadResult ? 'document' : 'text',
-      fileUrl: uploadResult?.fileUrl || null,
-      fileName: uploadResult?.fileName || null,
-      extractedText: uploadResult?.extractedText || null,
+      type: messageType,
+      fileUrl: fileContext?.fileUrl || null,
+      fileName: fileContext?.fileName || null,
+      fileType: fileContext?.fileType || null,
+      extractedText: fileContext?.extractedText || null,
     };
 
     setIsAIStreaming(true);
@@ -731,12 +752,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         });
       }
 
-      // --- Handle AI response (extract only aiMessage/message) ---
       let aiMsg = response?.data?.aiMessage || response?.aiMessage;
       if (aiMsg) {
-        // If backend returns a Mongoose doc, ensure timestamp is present
         const aiTimestamp = aiMsg.createdAt || aiMsg.timestamp || new Date().toISOString();
-        // Add AI message to chat state
         if (addMessageToSession) {
           addMessageToSession(activeSessionId, {
             _id: aiMsg._id,
@@ -753,13 +771,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           });
         }
       }
-      // Mark user message as sent (optional: update status)
-      // Optionally, you can update the status of the optimistic message here
-
     } catch (error) {
       setFileValidationError('Failed to send message. Please try again.');
     } finally {
-      setInput('');
       setFile(null);
       setUploadResult(null);
       setIsAIStreaming(false);
@@ -979,6 +993,28 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         )}
       </div>
 
+      {/* === ACTIVE DOCUMENT CONTEXT BANNER === */}
+      {activeFileContext && (
+        <div className="max-w-4xl mx-auto px-4">
+          <div className="flex items-center justify-between bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/30 dark:to-blue-900/30 border border-green-200 dark:border-green-700 rounded-xl px-4 py-2 mb-2 mt-2 relative">
+            <div className="flex items-center gap-2">
+              <IconFileText size={18} className="text-green-600 dark:text-green-400" />
+              <span className="text-sm text-green-800 dark:text-green-200 font-medium">
+                Chat is referencing:&nbsp;
+                <span className="font-semibold">{activeFileContext.fileName}</span>
+              </span>
+            </div>
+            <button
+              className="ml-2 p-1 rounded-full bg-blue-600 hover:bg-red-500 hover:text-white transition-colors"
+              title="Detach document from chat"
+              onClick={() => setActiveFileContext(null)}
+            >
+              <IconX size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ✅ ENHANCED INPUT AREA WITH DOCUMENT SUPPORT */}
       <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-t border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
         <div className="max-w-4xl mx-auto">
@@ -1060,8 +1096,18 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           
           {/* ✅ DOCUMENT PREVIEW FOR DRAG & DROP */}
           {file && !pastedImage && detectFileType(null, file.name, file.type) === 'document' && (
-            <div className="mb-3 p-3 bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 rounded-xl border border-green-200 dark:border-green-700">
-              <div className="flex items-start gap-3">
+            <div className="mb-3 p-3 bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 rounded-xl border border-green-200 dark:border-green-700 relative">
+              {/* Place the detach button here */}
+              {activeFileContext && (
+                <button
+                  className="absolute top-2 right-2 p-1 rounded-full bg-gray-200 hover:bg-red-500 hover:text-white transition-colors"
+                  title="Detach document from chat"
+                  onClick={() => setActiveFileContext(null)}
+                >
+                  <IconX size={16} />
+                </button>
+              )}
+              <div className="flex items-start gap-2">
                 <div className="flex-shrink-0 w-16 h-16 bg-gradient-to-br from-green-500 to-blue-500 rounded-lg flex items-center justify-center">
                   {getFileIcon(file.type, file.name)}
                 </div>

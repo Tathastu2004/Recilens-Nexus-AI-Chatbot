@@ -8,6 +8,9 @@ from io import BytesIO
 import asyncio
 import time
 
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
 print("🚀 [BLIP] Loading BLIP model and processor...")
 
 # Load processor and model
@@ -20,10 +23,18 @@ print("✅ [BLIP] Model loaded successfully on device:", device)
 
 # 🔹 Download image from URL and convert to PIL image
 def load_image_from_url(url):
-    try:
+    try
         print(f"🌐 [BLIP] Downloading image from: {url}")
-        response = requests.get(url, timeout=10)
+        
+        # ✅ FIX: Add a User-Agent header to mimic a browser request
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        # Use the headers in the request
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
+        
         image = Image.open(BytesIO(response.content)).convert("RGB")
         print(f"✅ [BLIP] Image loaded successfully: {image.size}")
         return image
@@ -110,8 +121,6 @@ async def generate_blip_response_stream(user_input, image_url):
                 if i % 2 == 0 and i > 0:  # Small pause every 2 words
                     await asyncio.sleep(0.08)
         
-        # ✅ NO ADDITIONAL ANALYSIS - JUST THE CORE RESPONSE
-        
     except Exception as e:
         print(f"❌ [BLIP STREAM] Error: {e}")
         yield f"I'm sorry, I couldn't analyze this image. Please try with a different image."
@@ -120,10 +129,8 @@ async def generate_blip_response_stream(user_input, image_url):
 def check_blip_health():
     """Check if BLIP service is working"""
     try:
-        # Test with a simple tensor
         test_input = torch.randn(1, 3, 224, 224).to(device)
         with torch.no_grad():
-            # Quick forward pass test
             _ = model.vision_model(test_input)
         return True, "BLIP model is working"
     except Exception as e:
@@ -134,14 +141,11 @@ def test_blip_initialization():
     """Test BLIP with a dummy image"""
     print("🧪 [BLIP] Running initialization test...")
     try:
-        # Create a simple test image
         from PIL import Image
         import numpy as np
         
-        # Create a simple 100x100 RGB image
         test_image = Image.fromarray(np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8))
         
-        # Test caption generation
         inputs = processor(images=test_image, return_tensors="pt").to(device)
         out = model.generate(**inputs, max_length=20)
         caption = processor.decode(out[0], skip_special_tokens=True)
@@ -152,15 +156,37 @@ def test_blip_initialization():
         print(f"❌ [BLIP] Test failed: {e}")
         return False
 
+# === FASTAPI SERVER INTEGRATION ===
+
+app = FastAPI()
+
+class AnalyzeRequest(BaseModel):
+    image_url: str
+    question: str = None
+
+@app.post("/analyze")
+async def analyze_image(req: AnalyzeRequest):
+    if not req.image_url:
+        raise HTTPException(status_code=400, detail="Missing image_url")
+    try:
+        if req.question and req.question.strip():
+            result = answer_question_about_image(req.image_url, req.question)
+        else:
+            result = generate_image_caption(req.image_url)
+        return {"result": result}
+    except Exception as e:
+        print(f"❌ [BLIP API] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health")
+def health_check():
+    ok, msg = check_blip_health()
+    return {"ok": ok, "msg": msg}
+
 # ✅ RUN INITIALIZATION TEST
 if __name__ == "__main__":
     test_blip_initialization()
 else:
-    # Test when imported
     test_blip_initialization()
 
 print("🎯 [BLIP] Handler ready for image analysis!")
-print("📋 [BLIP] Available functions:")
-print("   - generate_image_caption(image_url)")
-print("   - answer_question_about_image(image_url, question)")
-print("   - generate_blip_response_stream(user_input, image_url) [FOR FASTAPI]")
