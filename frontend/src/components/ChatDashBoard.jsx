@@ -233,6 +233,8 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     if (e.key === 'Escape' && pastedImage) clearPastedImage();
   }, [input, file, pastedImage]);
 
+  
+
   // CLEAR PASTED IMAGE
   const clearPastedImage = useCallback(() => {
     setPastedImage(null);
@@ -668,6 +670,29 @@ if (response.data && response.data.extractedText) {
     setInput("");
     let finalInput = input.trim();
 
+    // --- HANDLE PASTED IMAGE UPLOAD ---
+    let pastedImageUploadResult = null;
+    if (pastedImage) {
+      const formData = new FormData();
+      formData.append('file', pastedImage);
+      try {
+        const response = await axios.post(`${backendUrl}/api/chat/upload`, formData, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data',
+          }
+        });
+        pastedImageUploadResult = response.data;
+        setUploadResult(response.data);
+        setPastedImage(null);
+        setPastePreview(null);
+        setFile(null);
+      } catch (error) {
+        setFileValidationError('Failed to upload pasted image. Please try again.');
+        return;
+      }
+    }
+
     // If no text input but a file is uploaded, set a default message
     if (!finalInput && uploadResult) {
       if (uploadResult.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i)) {
@@ -995,25 +1020,52 @@ if (response.data && response.data.extractedText) {
 
       {/* === ACTIVE DOCUMENT CONTEXT BANNER === */}
       {activeFileContext && (
-        <div className="max-w-4xl mx-auto px-4">
-          <div className="flex items-center justify-between bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/30 dark:to-blue-900/30 border border-green-200 dark:border-green-700 rounded-xl px-4 py-2 mb-2 mt-2 relative">
-            <div className="flex items-center gap-2">
+  <div className="max-w-4xl mx-auto px-4">
+    <div className="flex items-center justify-between bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/30 dark:to-blue-900/30 border border-green-200 dark:border-green-700 rounded-xl px-4 py-2 mb-2 mt-2 relative">
+      <div className="flex items-center gap-2">
+        {(() => {
+          const isImage = activeFileContext.fileType?.startsWith('image') ||
+            activeFileContext.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
+          if (isImage) {
+            return (
+              <>
+                <IconClipboard size={18} className="text-purple-600 dark:text-purple-400" />
+                <span className="text-sm text-purple-800 dark:text-purple-200 font-medium">
+                  Chat is referencing image:&nbsp;
+                  <span className="font-semibold">{activeFileContext.fileName}</span>
+                </span>
+                {activeFileContext.fileUrl && (
+                  <img
+                    src={activeFileContext.fileUrl}
+                    alt={activeFileContext.fileName}
+                    className="ml-2 w-8 h-8 object-cover rounded border border-purple-200 dark:border-purple-700"
+                  />
+                )}
+              </>
+            );
+          }
+          // Default: document
+          return (
+            <>
               <IconFileText size={18} className="text-green-600 dark:text-green-400" />
               <span className="text-sm text-green-800 dark:text-green-200 font-medium">
-                Chat is referencing:&nbsp;
+                Chat is referencing document:&nbsp;
                 <span className="font-semibold">{activeFileContext.fileName}</span>
               </span>
-            </div>
-            <button
-              className="ml-2 p-1 rounded-full bg-blue-600 hover:bg-red-500 hover:text-white transition-colors"
-              title="Detach document from chat"
-              onClick={() => setActiveFileContext(null)}
-            >
-              <IconX size={16} />
-            </button>
-          </div>
-        </div>
-      )}
+            </>
+          );
+        })()}
+      </div>
+      <button
+        className="ml-2 p-1 rounded-full bg-blue-600 hover:bg-red-500 hover:text-white transition-colors"
+        title="Detach file from chat"
+        onClick={() => setActiveFileContext(null)}
+      >
+        <IconX size={16} />
+      </button>
+    </div>
+  </div>
+)}
 
       {/* ✅ ENHANCED INPUT AREA WITH DOCUMENT SUPPORT */}
       <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-t border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
@@ -1070,29 +1122,37 @@ if (response.data && response.data.extractedText) {
           )}
           
           {/* ✅ PASTED IMAGE PREVIEW */}
-          {pastedImage && pastePreview && (
-            <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl border border-blue-200 dark:border-blue-700">
-              <div className="flex items-start gap-3">
-                <div className="flex-shrink-0">
-                  <img src={pastePreview} alt="Pasted" className="w-16 h-16 rounded-lg object-cover border-2 border-blue-300 dark:border-blue-600" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <IconClipboard size={16} className="text-blue-600 dark:text-blue-400" />
-                    <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                      Pasted Image Ready
-                    </span>
-                  </div>
-                  <p className="text-xs text-blue-600 dark:text-blue-400">
-                    {pastedImage.name} • {(pastedImage.size / 1024).toFixed(1)} KB
-                  </p>
-                  <p className="text-xs text-blue-500 dark:text-blue-500 mt-1">
-                    Will be analyzed by BLIP model
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
+         {pastedImage && pastePreview && (
+  <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl border border-blue-200 dark:border-blue-700 relative">
+    <button
+      className="absolute top-2 right-2 p-1 rounded-full bg-gray-200 hover:bg-red-500 hover:text-white transition-colors"
+      title="Remove pasted image"
+      onClick={clearPastedImage}
+    >
+      <IconX size={16} />
+    </button>
+    <div className="flex items-start gap-3">
+      <div className="flex-shrink-0">
+        <img src={pastePreview} alt="Pasted" className="w-16 h-16 rounded-lg object-cover border-2 border-blue-300 dark:border-blue-600" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1">
+          <IconClipboard size={16} className="text-blue-600 dark:text-blue-400" />
+          <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+            Pasted Image Ready
+          </span>
+        </div>
+        <p className="text-xs text-blue-600 dark:text-blue-400">
+          {pastedImage.name} • {(pastedImage.size / 1024).toFixed(1)} KB
+        </p>
+        <p className="text-xs text-blue-500 dark:text-blue-500 mt-1">
+          Will be analyzed by BLIP model
+        </p>
+      </div>
+    </div>
+  </div>
+)}
+
           
           {/* ✅ DOCUMENT PREVIEW FOR DRAG & DROP */}
           {file && !pastedImage && detectFileType(null, file.name, file.type) === 'document' && (
@@ -1144,6 +1204,37 @@ if (response.data && response.data.extractedText) {
               </div>
             </div>
           )}
+              {/* ✅ IMAGE FILE PREVIEW (for normal uploads) */}
+    {file && !pastedImage && detectFileType(null, file.name, file.type) === 'image' && (
+      <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl border border-blue-200 dark:border-blue-700 relative">
+        <button
+          className="absolute top-2 right-2 p-1 rounded-full bg-gray-200 hover:bg-red-500 hover:text-white transition-colors"
+          title="Remove uploaded image"
+          onClick={() => setFile(null)}
+        >
+          <IconX size={16} />
+        </button>
+        <div className="flex items-start gap-3">
+          <div className="flex-shrink-0">
+            <img src={URL.createObjectURL(file)} alt="Uploaded" className="w-16 h-16 rounded-lg object-cover border-2 border-blue-300 dark:border-blue-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <IconClipboard size={16} className="text-blue-600 dark:text-blue-400" />
+              <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                Uploaded Image Ready
+              </span>
+            </div>
+            <p className="text-xs text-blue-600 dark:text-blue-400">
+              {file.name} • {(file.size / 1024).toFixed(1)} KB
+            </p>
+            <p className="text-xs text-blue-500 dark:text-blue-500 mt-1">
+              Will be analyzed by BLIP model
+            </p>
+          </div>
+        </div>
+      </div>
+    )}
           
           <form onSubmit={handleSubmit} className="relative">
             <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-2xl shadow-sm border border-gray-200/50 dark:border-gray-600/50 px-3 py-2">

@@ -70,18 +70,29 @@ def generate_session_id():
 # ✅ HEALTH CHECK
 @app.get("/health")
 async def health_check():
+    blip_ok = False
+    llama_ok = False
+    # Check BLIP
     try:
-        return {
-            "status": "ok",
-            "message": "FastAPI is running",
-            "services": {
-                "ollama": {"connected": True},
-                "blip": {"connected": True}
-            },
-            "supported_types": ["text", "image", "document"]
-        }
-    except Exception as e:
-        return {"status": "error", "message": "Health check failed", "error": str(e)}
+        r = requests.get("http://127.0.0.1:5001/health", timeout=2)
+        blip_ok = r.status_code == 200 and r.json().get("ok", False)
+    except Exception:
+        blip_ok = False
+    # Check Llama (Ollama)
+    try:
+        r = requests.get("http://127.0.0.1:11434/health", timeout=2)
+        llama_ok = r.status_code == 200
+    except Exception:
+        llama_ok = False
+    return {
+        "status": "ok",
+        "message": "FastAPI is running",
+        "services": {
+            "ollama": {"connected": llama_ok},
+            "blip": {"connected": blip_ok}
+        },
+        "supported_types": ["text", "image", "document"]
+    }
 
 # ✅ MAIN CHAT ROUTE - HANDLES ALL TYPES
 @app.post("/chat")
@@ -205,7 +216,7 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
                 
                 return StreamingResponse(error_response(), media_type="text/plain")
         
-        # ✅ IMAGE PROCESSING
+        # ✅ IMAGE PROCESSING - FIXED
         elif request_type == "image":
             print(f"🖼️ [FASTAPI] Image analysis request...")
             print(f"🖼️ [FASTAPI] Image URL: {file_url}")
@@ -213,15 +224,47 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
             async def blip_response():
                 try:
                     print(f"📡 [BLIP] Sending request to BLIP server...")
-                    blip_response = requests.post("http://127.0.0.1:5000/analyze", 
-                                                json={"image_url": file_url}, 
-                                                timeout=60)
+                    
+                    # ✅ FIX: Use correct request payload format
+                    # Don't send filename as question - let BLIP generate a caption
+                    payload = {
+                        "image_url": file_url,
+                        "question": user_message if user_message and not user_message.startswith("Uploaded image:") else None
+                    }
+                    
+                    # ✅ FIX: Add proper headers
+                    headers = {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json"
+                    }
+                    
+                    print(f"📡 [BLIP] Request payload: {payload}")
+                    print(f"📡 [BLIP] Request headers: {headers}")
+                    print(f"📡 [BLIP] Target URL: http://127.0.0.1:5001/analyze")
+                    
+                    # ✅ FIX: Check if BLIP server is running first
+                    try:
+                        health_check = requests.get("http://127.0.0.1:5001/health", timeout=5)
+                        print(f"📡 [BLIP] Health check: {health_check.status_code}")
+                        if health_check.status_code != 200:
+                            yield "❌ BLIP server is not healthy. Please restart the BLIP service."
+                            return
+                    except requests.exceptions.ConnectionError:
+                        yield "❌ Cannot connect to BLIP server. Please make sure it's running on port 5001."
+                        return
+                    
+                    blip_response = requests.post(
+                        "http://127.0.0.1:5001/analyze", 
+                        json=payload,
+                        headers=headers,
+                        timeout=60
+                    )
                     
                     print(f"📥 [BLIP] BLIP response: {blip_response.status_code}")
                     
                     if blip_response.status_code == 200:
                         result = blip_response.json()
-                        content = result.get('description', 'Image analysis completed')
+                        content = result.get('result', 'Image analysis completed')
                         
                         print(f"✅ [BLIP] Analysis successful: {content[:100]}...")
                         
@@ -232,9 +275,19 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
                         print(f"✅ [BLIP] Image analysis completed")
                     else:
                         error_msg = f"❌ BLIP Error: HTTP {blip_response.status_code}"
+                        if blip_response.text:
+                            error_msg += f" - {blip_response.text}"
                         print(f"❌ [BLIP] Error: {error_msg}")
                         yield error_msg
                         
+                except requests.exceptions.ConnectionError:
+                    error_msg = "❌ Cannot connect to BLIP server. Make sure it's running on port 5000."
+                    print(f"❌ [BLIP] Connection Error: {error_msg}")
+                    yield error_msg
+                except requests.exceptions.Timeout:
+                    error_msg = "❌ BLIP server timeout. Image analysis took too long."
+                    print(f"❌ [BLIP] Timeout Error: {error_msg}")
+                    yield error_msg
                 except Exception as e:
                     error_msg = f"❌ Image Analysis Error: {str(e)}"
                     print(f"❌ [BLIP] Exception: {error_msg}")
@@ -299,9 +352,18 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
 # ✅ MAIN SERVER STARTUP
 if __name__ == "__main__":
     import uvicorn
+
+    print("="*60)
     print("🚀 Starting FastAPI server...")
     print("📡 Endpoint: POST /chat")
     print("🎯 Supported types: text, image, document")
     print("✅ [FASTAPI] Backend text extraction integration enabled")
-    
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    print("="*60)
+
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+        print("✅ [FASTAPI] Server is READY and listening for requests!")
+        print("✅ [LLAMA] Llama (Ollama) integration is READY!")
+        print("✅ [BLIP] BLIP integration is READY (make sure BLIP server is running)!")
+    except Exception as e:
+        print("❌ [FASTAPI] Server failed to start:", str(e))
