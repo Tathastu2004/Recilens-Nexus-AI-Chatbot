@@ -34,17 +34,17 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const [isAIStreaming, setIsAIStreaming] = useState(false);
   const [activeFileContext, setActiveFileContext] = useState(null);
 
-  // NEW STATE FOR COPY-PASTE FUNCTIONALITY
+  // STATE FOR COPY-PASTE FUNCTIONALITY
   const [pastedImage, setPastedImage] = useState(null);
   const [pastePreview, setPastePreview] = useState(null);
   const [showPasteIndicator, setShowPasteIndicator] = useState(false);
 
-  // NEW STATE FOR DOCUMENT SUPPORT
+  // STATE FOR DOCUMENT SUPPORT
   const [dragOver, setDragOver] = useState(false);
   const [fileValidationError, setFileValidationError] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
 
-  // NEW STATE FOR DEDUPLICATION
+  // STATE FOR DEDUPLICATION
   const [duplicateCheck, setDuplicateCheck] = useState(null);
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
 
@@ -113,6 +113,12 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   }, [detectFileType]);
 
+  // ✅ IMAGE CONTEXT INJECTION FUNCTION
+  const getImageContextText = useCallback(() => {
+    if (!activeFileContext?.imageAnalysis) return "";
+    return `\n--- IMAGE CONTEXT ---\nImage: ${activeFileContext.fileName}\nPrevious Analysis: ${activeFileContext.imageAnalysis}\n---\n`;
+  }, [activeFileContext]);
+
   // ENHANCED FILE VALIDATION
   const validateFileBeforeUpload = useCallback(async (file) => {
     if (!file) return { isValid: false, error: 'No file selected' };
@@ -163,11 +169,13 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     e.stopPropagation();
     setDragOver(true);
   }, []);
+  
   const handleDragLeave = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
   }, []);
+  
   const handleDrop = useCallback(async (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -187,6 +195,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const createFileFromBlob = (blob, filename = 'pasted-image.png') => {
     return new File([blob], filename, { type: blob.type });
   };
+  
   const createImagePreview = useCallback((file) => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -225,15 +234,12 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
 
   // KEYBOARD SHORTCUTS
   const handleKeyDown = useCallback((e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {}
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       if (input.trim() || file || pastedImage) handleSubmit(e);
     }
     if (e.key === 'Escape' && pastedImage) clearPastedImage();
   }, [input, file, pastedImage]);
-
-  
 
   // CLEAR PASTED IMAGE
   const clearPastedImage = useCallback(() => {
@@ -345,7 +351,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const [isManuallyEditing, setIsManuallyEditing] = useState(false);
   const [hasStoppedListening, setHasStoppedListening] = useState(false);
 
-  // ENHANCED USER MESSAGE COMPONENT WITH TEXT EXTRACTION INFO
+  // USER MESSAGE COMPONENT
   const UserMessage = ({ message, timestamp, status, fileUrl, type, fileType, fileName, isDuplicate, hasTextExtraction, extractedTextLength }) => {
     const detectedType = detectFileType ? detectFileType(fileUrl, fileName, fileType) : 'unknown';
     
@@ -373,7 +379,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                         </div>
                         <div className="text-xs text-white/70">
                           {fileType || 'Document file'}
-                          {/* ✅ TEXT EXTRACTION STATUS */}
                           {hasTextExtraction && (
                             <span className="ml-2 text-green-300">
                               • {extractedTextLength} chars extracted
@@ -438,41 +443,69 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     );
   };
 
-  // ✅ ENHANCED AI MESSAGE COMPONENT WITH DOCUMENT PROCESSING INDICATORS
+  // ✅ AI MESSAGE COMPONENT WITH IMAGE CONTEXT INTEGRATION
   const AiMessage = ({ message, timestamp, fileUrl, fileType, isStreaming = false, type, processingInfo, completedBy, metadata }) => {
-    const isImageResponse = type === 'image' || completedBy === 'BLIP' || 
-                           (typeof message === 'string' && (message.includes('🖼️') || message.includes('Image')));
-    const isDocumentResponse = type === 'document' || (completedBy && completedBy.includes('Document')) ||
-                              (typeof message === 'string' && (message.includes('document') || message.includes('Document')));
+    // ✅ DEFINE isImageResponse HERE
+    const isImageResponse = type === 'image' || 
+                            completedBy === 'BLIP' || 
+                            (typeof message === 'string' && 
+                             (message.includes('🖼️') || message.includes('Image')));
+    
+    const isDocumentResponse = type === 'document' || 
+                               (completedBy && completedBy.includes('Document')) ||
+                               (typeof message === 'string' && 
+                                (message.includes('document') || message.includes('Document')));
 
     // ✅ ENHANCED MESSAGE CLEANING
-  const cleanMessage = useCallback((rawMessage) => {
-  if (!rawMessage) return '';
+    const cleanMessage = useCallback((rawMessage) => {
+      if (!rawMessage) return '';
 
-  // If it's an object with a .message property, use it
-  if (typeof rawMessage === 'object' && rawMessage.message) {
-    return rawMessage.message;
-  }
-
-  // If it's a JSON string, parse and extract .message or .aiMessage.message
-  if (typeof rawMessage === 'string' && rawMessage.trim().startsWith('{')) {
-    try {
-      const parsed = JSON.parse(rawMessage);
-      if (parsed && typeof parsed.message === 'string') {
-        return parsed.message;
+      // If it's an object with a .message property, use it
+      if (typeof rawMessage === 'object' && rawMessage.message) {
+        return rawMessage.message;
       }
-      if (parsed && parsed.aiMessage && typeof parsed.aiMessage.message === 'string') {
-        return parsed.aiMessage.message;
-      }
-    } catch (e) {}
-  }
 
-  // Otherwise, return as is
-  return rawMessage;
-}, []);
-   
+      // If it's a JSON string, parse and extract .message or .aiMessage.message
+      if (typeof rawMessage === 'string' && rawMessage.trim().startsWith('{')) {
+        try {
+          const parsed = JSON.parse(rawMessage);
+          if (parsed && typeof parsed.message === 'string') {
+            return parsed.message;
+          }
+          if (parsed && parsed.aiMessage && typeof parsed.aiMessage.message === 'string') {
+            return parsed.aiMessage.message;
+          }
+        } catch (e) {}
+      }
+
+      // Otherwise, return as is
+      return rawMessage;
+    }, []);
 
     const displayMessage = cleanMessage(message);
+
+    // ✅ STORE IMAGE ANALYSIS IN CONTEXT
+    useEffect(() => {
+      if (
+        isImageResponse &&
+        completedBy === "BLIP" &&
+        activeFileContext?.fileType?.startsWith("image") &&
+        !activeFileContext.imageAnalysis &&
+        displayMessage &&
+        !isStreaming
+      ) {
+        setActiveFileContext((prev) => ({
+          ...prev,
+          imageAnalysis: displayMessage
+        }));
+      }
+    }, [
+      isImageResponse,
+      completedBy,
+      displayMessage,
+      activeFileContext,
+      isStreaming
+    ]);
 
     return (
       <div className="flex items-start gap-2 mb-4 animate-fade-in px-4">
@@ -482,22 +515,23 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         
         <div className="flex-1 max-w-[85%]">
           <div className="bg-white dark:bg-gray-800 rounded-2xl px-4 py-3 shadow-sm border border-gray-200 dark:border-gray-700">
-            {isStreaming ? (
+            {isStreaming && (!displayMessage || displayMessage.length === 0) ? (
               <div className="flex items-center gap-3">
                 <div className="typing-indicator">
-                  <span></span>
-                  <span></span>
-                  <span></span>
+                  <span />
+                  <span />
+                  <span />
                 </div>
                 <span className="text-sm text-gray-500 dark:text-gray-400">
-                  {processingInfo || 
-                   (isImageResponse ? 'Analyzing image with BLIP...' : 
-                    isDocumentResponse ? 'Processing document...' : 'AI is thinking...')}
+                  {isImageResponse
+                    ? "Analyzing image with BLIP..."
+                    : isDocumentResponse
+                    ? "Processing document..."
+                    : "AI is thinking..."}
                 </span>
               </div>
             ) : (
               <div className="space-y-2">
-                {/* ✅ PROCESSING TYPE INDICATOR */}
                 {(isImageResponse || isDocumentResponse) && (
                   <div className={`inline-flex items-center gap-2 px-2 py-1 rounded-md text-xs mb-2 ${
                     isImageResponse 
@@ -508,7 +542,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                       isImageResponse ? 'bg-purple-500' : 'bg-blue-500'
                     }`}></div>
                     {isImageResponse ? 'Image Analysis' : 'Document Analysis'}
-                    {/* ✅ TEXT EXTRACTION INFO */}
                     {metadata?.textExtracted && (
                       <span className="text-xs opacity-70">
                         • Text: {metadata.extractedTextLength} chars
@@ -547,6 +580,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                   >
                     {displayMessage}
                   </ReactMarkdown>
+
+                  {isStreaming && displayMessage && displayMessage.length > 0 && (
+                    <span className="animate-pulse ml-0.5 text-gray-400">▍</span>
+                  )}
                 </div>
               </div>
             )}
@@ -554,44 +591,18 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           
           {!isStreaming && (
             <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 px-1">
-              {timestamp && !isNaN(new Date(timestamp).getTime())
-                ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                : ""}
+              {timestamp &&
+                !isNaN(new Date(timestamp)) &&
+                new Date(timestamp).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit"
+                })}
             </div>
           )}
         </div>
       </div>
     );
   };
-
-  // ✅ UPDATE SESSION TITLE
-  const updateSessionTitle = useCallback(async (sessionId, firstMessage) => {
-    if (!sessionId || !sessionId.match(/^[0-9a-fA-F]{24}$/)) return;
-
-    try {
-      const title = firstMessage.length > 30 
-        ? `${firstMessage.substring(0, 30)}...` 
-        : firstMessage;
-
-      const res = await axios.patch(
-        `${backendUrl}/api/chat/session/${sessionId}`,
-        { title },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          }
-        }
-      );
-      
-      window.dispatchEvent(new CustomEvent('sessionUpdated', {
-        detail: { session: res.data.session }
-      }));
-      
-    } catch (err) {
-      console.error('Failed to update session title:', err);
-    }
-  }, [backendUrl, token]);
 
   // ✅ VOICE INPUT HANDLERS
   const handleVoiceInput = useCallback(() => {
@@ -626,7 +637,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   }, [listening]);
 
-  // ENHANCED FILE UPLOAD HANDLER
+  // ✅ ENHANCED FILE UPLOAD HANDLER WITH IMAGE CONTEXT
   const handleFileSelect = async (e) => {
     const selectedFile = e.target.files[0];
     if (!selectedFile) return;
@@ -634,8 +645,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     setIsUploading(true);
     setFileValidationError(null);
     setUploadProgress(0);
+    
     const formData = new FormData();
     formData.append('file', selectedFile);
+    
     try {
       const response = await axios.post(`${backendUrl}/api/chat/upload`, formData, {
         headers: {
@@ -647,15 +660,27 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           setUploadProgress(percentCompleted);
         },
       });
+      
       setUploadResult(response.data);
-      // After setUploadResult(response.data);
-if (response.data && response.data.extractedText) {
-  setActiveFileContext({
-    extractedText: response.data.extractedText,
-    fileUrl: response.data.fileUrl,
-    fileName: response.data.fileName,
-  });
-}
+      
+      // ✅ Establish context for both images and documents
+      if (response.data && response.data.extractedText) {
+        // Document context
+        setActiveFileContext({
+          extractedText: response.data.extractedText,
+          fileUrl: response.data.fileUrl,
+          fileName: response.data.fileName,
+        });
+      } else if (/\.(png|jpe?g|gif|bmp|webp)$/i.test(response.data.fileName || "")) {
+        // ✅ Image context - will be populated after BLIP analysis
+        setActiveFileContext({
+          fileUrl: response.data.fileUrl,
+          fileName: response.data.fileName,
+          fileType: response.data.fileType || 'image',
+          imageAnalysis: null // Will be filled by AI response
+        });
+      }
+      
     } catch (error) {
       setFileValidationError('File upload failed. Please try again.');
       setFile(null);
@@ -664,13 +689,13 @@ if (response.data && response.data.extractedText) {
     }
   };
 
-  // --- MAIN FIX: HANDLE SUBMIT, OPTIMISTIC UPDATE, AND AI RESPONSE ---
+  // ✅ ENHANCED HANDLE SUBMIT WITH IMAGE CONTEXT
   const handleSubmit = async (e) => {
     e.preventDefault();
     setInput("");
     let finalInput = input.trim();
 
-    // --- HANDLE PASTED IMAGE UPLOAD ---
+    // Handle pasted image upload
     let pastedImageUploadResult = null;
     if (pastedImage) {
       const formData = new FormData();
@@ -712,7 +737,7 @@ if (response.data && response.data.extractedText) {
       return;
     }
 
-    // --- IMAGE CONTEXT ---
+    // Image/Document context handling
     let fileContext = null;
     let messageType = 'text';
     if (uploadResult && uploadResult.fileUrl) {
@@ -754,10 +779,14 @@ if (response.data && response.data.extractedText) {
     };
     if (addMessageToSession) addMessageToSession(activeSessionId, optimisticUserMsg);
 
+    // ✅ INJECT IMAGE CONTEXT INTO MESSAGE
+    const contextText = getImageContextText();
+    const messageWithContext = finalInput + contextText;
+
     // Prepare messageData for backend
     const messageData = {
       sessionId: activeSessionId,
-      message: finalInput,
+      message: messageWithContext, // ✅ Include image context
       type: messageType,
       fileUrl: fileContext?.fileUrl || null,
       fileName: fileContext?.fileName || null,
@@ -789,6 +818,7 @@ if (response.data && response.data.extractedText) {
             fileUrl: aiMsg.fileUrl,
             fileName: aiMsg.fileName,
             type: aiMsg.type,
+            completedBy: aiMsg.completedBy,
             hasTextExtraction: aiMsg.hasTextExtraction,
             extractedTextLength: aiMsg.textLength,
             metadata: aiMsg.metadata,
@@ -819,25 +849,7 @@ if (response.data && response.data.extractedText) {
     }
   }, [transcript, listening, isManuallyEditing, hasStoppedListening]);
 
-  // DEBUG LOGGING
-  useEffect(() => { 
-    console.log('🔍 Dashboard state:', {
-      selectedSession,
-      currentSessionId,
-      activeSessionId,
-      hasInitialized,
-      actualIsConnected,
-      messagesCount: actualMessages.length,
-      isFetching: isFetchingFallback,
-      hasPastedImage: !!pastedImage,
-      hasFile: !!file,
-      fileValidationError,
-      supportedFileTypes: supportedFileTypes ? 'Loaded' : 'Loading...',
-      aiServiceHealth: aiServiceHealth?.status || 'Unknown'
-    });
-  }, [selectedSession, currentSessionId, activeSessionId, hasInitialized, actualIsConnected, actualMessages.length, isFetchingFallback, pastedImage, file, fileValidationError, supportedFileTypes, aiServiceHealth]);
-
-  // ✅ MAIN RENDER WITH DRAG & DROP OVERLAY
+  // MAIN RENDER
   return (
     <div className={`flex flex-col h-screen transition-all duration-300 relative ${
       isDark 
@@ -845,7 +857,7 @@ if (response.data && response.data.extractedText) {
         : 'bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50'
     } ${isTransitioning ? 'animate-pulse' : ''}`}>
       
-      {/* ✅ DRAG & DROP OVERLAY */}
+      {/* DRAG & DROP OVERLAY */}
       {dragOver && (
         <div className="absolute inset-0 z-50 bg-blue-500/20 backdrop-blur-sm flex items-center justify-center border-4 border-dashed border-blue-400">
           <div className="text-center space-y-4 p-8 bg-white/90 dark:bg-gray-800/90 rounded-2xl shadow-2xl">
@@ -859,17 +871,12 @@ if (response.data && response.data.extractedText) {
               <p className="text-gray-600 dark:text-gray-400 text-sm">
                 Supports images and documents
               </p>
-              {supportedFileTypes && (
-                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  {[...supportedFileTypes.images?.extensions || [], ...supportedFileTypes.documents?.extensions || []].join(', ')}
-                </p>
-              )}
             </div>
           </div>
         </div>
       )}
       
-      {/* ✅ PASTE INDICATOR */}
+      {/* PASTE INDICATOR */}
       {showPasteIndicator && (
         <div className="absolute top-4 right-4 z-50 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg animate-fade-in flex items-center gap-2">
           <IconClipboard size={16} />
@@ -877,7 +884,7 @@ if (response.data && response.data.extractedText) {
         </div>
       )}
       
-      {/* ✅ ENHANCED HEADER WITH AI SERVICE STATUS */}
+      {/* ENHANCED HEADER */}
       <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-b border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -888,58 +895,35 @@ if (response.data && response.data.extractedText) {
               <h1 className="text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
                 Nexus AI Assistant
               </h1>
-              {aiServiceHealth && (
-                <div className="text-xs text-gray-500 dark:text-gray-400">
-                  BLIP • Document Processor • Llama3
-                </div>
-              )}
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                BLIP • Document Processor • Llama3
+              </div>
             </div>
           </div>
           
-          <div className="flex items-center gap-3">
-            {/* ✅ AI SERVICE STATUS */}
-            {aiServiceHealth && (
-              <div className={`text-xs px-2 py-1 rounded-full ${
-                aiServiceHealth.status === 'healthy' 
-                  ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                  : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-              }`}>
-                {aiServiceHealth.status === 'healthy' ? '✅ All services online' : '⚠️ Partial services'}
-              </div>
+          <button
+            onClick={toggleTheme}
+            className={`p-2 rounded-lg transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 ${
+              isTransitioning ? 'animate-spin' : ''
+            }`}
+            title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+          >
+            {isDark ? (
+              <IconSun size={18} className="text-yellow-500" />
+            ) : (
+              <IconMoon size={18} className="text-gray-600" />
             )}
-            
-            {!actualIsConnected && (
-              <div className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2">
-                <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></div>
-                Reconnecting...
-              </div>
-            )}
-            
-            <button
-              onClick={toggleTheme}
-              className={`p-2 rounded-lg transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 ${
-                isTransitioning ? 'animate-spin' : ''
-              }`}
-              title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
-            >
-              {isDark ? (
-                <IconSun size={18} className="text-yellow-500" />
-              ) : (
-                <IconMoon size={18} className="text-gray-600" />
-              )}
-            </button>
-          </div>
+          </button>
         </div>
       </div>
 
-      {/* ✅ MESSAGES AREA */}
+      {/* MESSAGES AREA */}
       <div className="flex-1 overflow-y-auto py-4">
         {(isFetchingFallback || isLoadingMessages) ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center space-y-3">
               <div className="relative">
                 <div className="w-10 h-10 bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-500 rounded-full animate-pulse"></div>
-                <div className="absolute inset-0 w-10 h-10 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 rounded-full animate-ping opacity-20"></div>
               </div>
               <p className="text-sm text-gray-600 dark:text-gray-400 font-medium">Loading conversation...</p>
             </div>
@@ -951,9 +935,6 @@ if (response.data && response.data.extractedText) {
                 <div className="w-16 h-16 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-2xl flex items-center justify-center shadow-xl">
                   <IconRobot size={32} className="text-white" />
                 </div>
-                <div className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-br from-green-400 to-green-500 rounded-full flex items-center justify-center shadow-lg">
-                  <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-                </div>
               </div>
               <div className="space-y-2">
                 <h2 className="text-xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
@@ -962,23 +943,6 @@ if (response.data && response.data.extractedText) {
                 <p className="text-gray-600 dark:text-gray-400 leading-relaxed text-sm">
                   I can analyze images with BLIP, process documents (PDF, DOCX, TXT), and help with general questions using Llama3.
                 </p>
-                <p className="text-gray-500 dark:text-gray-500 text-xs mt-2">
-                  💡 <strong>Tip:</strong> Paste images with <kbd className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">Ctrl+V</kbd> or drag & drop files
-                </p>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="p-3 bg-white/60 dark:bg-gray-800/60 rounded-xl border border-gray-200/50 dark:border-gray-700/50 backdrop-blur-sm">
-                  <div className="text-xl mb-1">🖼️</div>
-                  <div className="font-medium text-gray-700 dark:text-gray-300 text-xs">Image Analysis</div>
-                  <div className="text-gray-500 dark:text-gray-400 text-xs mt-1">BLIP model</div>
-                </div>
-                
-                <div className="p-3 bg-white/60 dark:bg-gray-800/60 rounded-xl border border-gray-200/50 dark:border-gray-700/50 backdrop-blur-sm">
-                  <div className="text-xl mb-1">📄</div>
-                  <div className="font-medium text-gray-700 dark:text-gray-300 text-xs">Document Processing</div>
-                  <div className="text-gray-500 dark:text-gray-400 text-xs mt-1">PDF, DOCX, TXT</div>
-                </div>
               </div>
             </div>
           </div>
@@ -1018,60 +982,63 @@ if (response.data && response.data.extractedText) {
         )}
       </div>
 
-      {/* === ACTIVE DOCUMENT CONTEXT BANNER === */}
+      {/* ✅ ACTIVE FILE CONTEXT BANNER */}
       {activeFileContext && (
-  <div className="max-w-4xl mx-auto px-4">
-    <div className="flex items-center justify-between bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/30 dark:to-blue-900/30 border border-green-200 dark:border-green-700 rounded-xl px-4 py-2 mb-2 mt-2 relative">
-      <div className="flex items-center gap-2">
-        {(() => {
-          const isImage = activeFileContext.fileType?.startsWith('image') ||
-            activeFileContext.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
-          if (isImage) {
-            return (
-              <>
-                <IconClipboard size={18} className="text-purple-600 dark:text-purple-400" />
-                <span className="text-sm text-purple-800 dark:text-purple-200 font-medium">
-                  Chat is referencing image:&nbsp;
-                  <span className="font-semibold">{activeFileContext.fileName}</span>
-                </span>
-                {activeFileContext.fileUrl && (
-                  <img
-                    src={activeFileContext.fileUrl}
-                    alt={activeFileContext.fileName}
-                    className="ml-2 w-8 h-8 object-cover rounded border border-purple-200 dark:border-purple-700"
-                  />
-                )}
-              </>
-            );
-          }
-          // Default: document
-          return (
-            <>
-              <IconFileText size={18} className="text-green-600 dark:text-green-400" />
-              <span className="text-sm text-green-800 dark:text-green-200 font-medium">
-                Chat is referencing document:&nbsp;
-                <span className="font-semibold">{activeFileContext.fileName}</span>
-              </span>
-            </>
-          );
-        })()}
-      </div>
-      <button
-        className="ml-2 p-1 rounded-full bg-blue-600 hover:bg-red-500 hover:text-white transition-colors"
-        title="Detach file from chat"
-        onClick={() => setActiveFileContext(null)}
-      >
-        <IconX size={16} />
-      </button>
-    </div>
-  </div>
-)}
+        <div className="max-w-4xl mx-auto px-4">
+          <div className="flex items-center justify-between bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/30 dark:to-blue-900/30 border border-green-200 dark:border-green-700 rounded-xl px-4 py-2 mb-2 mt-2 relative">
+            <div className="flex items-center gap-2">
+              {(() => {
+                const isImage = activeFileContext.fileType?.startsWith('image') ||
+                  activeFileContext.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
+                if (isImage) {
+                  return (
+                    <>
+                      <IconClipboard size={18} className="text-purple-600 dark:text-purple-400" />
+                      <span className="text-sm text-purple-800 dark:text-purple-200 font-medium">
+                        Chat is referencing image:&nbsp;
+                        <span className="font-semibold">{activeFileContext.fileName}</span>
+                        {activeFileContext.imageAnalysis && (
+                          <span className="ml-2 text-xs">• analysis saved</span>
+                        )}
+                      </span>
+                      {activeFileContext.fileUrl && (
+                        <img
+                          src={activeFileContext.fileUrl}
+                          alt={activeFileContext.fileName}
+                          className="ml-2 w-8 h-8 object-cover rounded border border-purple-200 dark:border-purple-700"
+                        />
+                      )}
+                    </>
+                  );
+                }
+                // Document context
+                return (
+                  <>
+                    <IconFileText size={18} className="text-green-600 dark:text-green-400" />
+                    <span className="text-sm text-green-800 dark:text-green-200 font-medium">
+                      Chat is referencing document:&nbsp;
+                      <span className="font-semibold">{activeFileContext.fileName}</span>
+                    </span>
+                  </>
+                );
+              })()}
+            </div>
+            <button
+              className="ml-2 p-1 rounded-full bg-blue-600 hover:bg-red-500 hover:text-white transition-colors"
+              title="Detach file from chat"
+              onClick={() => setActiveFileContext(null)}
+            >
+              <IconX size={16} />
+            </button>
+          </div>
+        </div>
+      )}
 
-      {/* ✅ ENHANCED INPUT AREA WITH DOCUMENT SUPPORT */}
+      {/* INPUT AREA */}
       <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-t border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
         <div className="max-w-4xl mx-auto">
           
-          {/* ✅ FILE VALIDATION ERROR */}
+          {/* FILE VALIDATION ERROR */}
           {fileValidationError && (
             <div className="mb-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg flex items-start gap-2">
               <IconAlertCircle size={16} className="text-red-500 mt-0.5 flex-shrink-0" />
@@ -1081,160 +1048,69 @@ if (response.data && response.data.extractedText) {
             </div>
           )}
           
-          {/* ✅ DUPLICATE FILE WARNING */}
-          {showDuplicateWarning && duplicateCheck?.isDuplicate && (
-            <div className="mb-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg">
-              <div className="flex items-start gap-2">
-                <div className="text-amber-500 mt-0.5 flex-shrink-0">
-                  ♻️
-                </div>
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-amber-800 dark:text-amber-200 mb-1">
-                    Duplicate File Detected
-                  </div>
-                  <div className="text-xs text-amber-600 dark:text-amber-400 mb-2">
-                    This file already exists (uploaded {new Date(duplicateCheck.existingFile?.created_at).toLocaleDateString()}). 
-                    We'll reuse the existing file and the AI will still analyze it for you.
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setShowDuplicateWarning(false)}
-                      className="text-xs bg-amber-100 dark:bg-amber-800 text-amber-700 dark:text-amber-300 px-2 py-1 rounded hover:bg-amber-200 dark:hover:bg-amber-700 transition-colors"
-                    >
-                      Continue with analysis
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowDuplicateWarning(false);
-                        setDuplicateCheck(null);
-                        setFile(null);
-                        const fileInput = document.getElementById("fileUpload");
-                        if (fileInput) fileInput.value = "";
-                      }}
-                      className="text-xs text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          
-          {/* ✅ PASTED IMAGE PREVIEW */}
-         {pastedImage && pastePreview && (
-  <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl border border-blue-200 dark:border-blue-700 relative">
-    <button
-      className="absolute top-2 right-2 p-1 rounded-full bg-gray-200 hover:bg-red-500 hover:text-white transition-colors"
-      title="Remove pasted image"
-      onClick={clearPastedImage}
-    >
-      <IconX size={16} />
-    </button>
-    <div className="flex items-start gap-3">
-      <div className="flex-shrink-0">
-        <img src={pastePreview} alt="Pasted" className="w-16 h-16 rounded-lg object-cover border-2 border-blue-300 dark:border-blue-600" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <IconClipboard size={16} className="text-blue-600 dark:text-blue-400" />
-          <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
-            Pasted Image Ready
-          </span>
-        </div>
-        <p className="text-xs text-blue-600 dark:text-blue-400">
-          {pastedImage.name} • {(pastedImage.size / 1024).toFixed(1)} KB
-        </p>
-        <p className="text-xs text-blue-500 dark:text-blue-500 mt-1">
-          Will be analyzed by BLIP model
-        </p>
-      </div>
-    </div>
-  </div>
-)}
-
-          
-          {/* ✅ DOCUMENT PREVIEW FOR DRAG & DROP */}
-          {file && !pastedImage && detectFileType(null, file.name, file.type) === 'document' && (
-            <div className="mb-3 p-3 bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 rounded-xl border border-green-200 dark:border-green-700 relative">
-              {/* Place the detach button here */}
-              {activeFileContext && (
-                <button
-                  className="absolute top-2 right-2 p-1 rounded-full bg-gray-200 hover:bg-red-500 hover:text-white transition-colors"
-                  title="Detach document from chat"
-                  onClick={() => setActiveFileContext(null)}
-                >
-                  <IconX size={16} />
-                </button>
-              )}
-              <div className="flex items-start gap-2">
-                <div className="flex-shrink-0 w-16 h-16 bg-gradient-to-br from-green-500 to-blue-500 rounded-lg flex items-center justify-center">
-                  {getFileIcon(file.type, file.name)}
+          {/* PASTED IMAGE PREVIEW */}
+          {pastedImage && pastePreview && (
+            <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl border border-blue-200 dark:border-blue-700 relative">
+              <button
+                className="absolute top-2 right-2 p-1 rounded-full bg-gray-200 hover:bg-red-500 hover:text-white transition-colors"
+                title="Remove pasted image"
+                onClick={clearPastedImage}
+              >
+                <IconX size={16} />
+              </button>
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0">
+                  <img src={pastePreview} alt="Pasted" className="w-16 h-16 rounded-lg object-cover border-2 border-blue-300 dark:border-blue-600" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <IconFileText size={16} className="text-green-600 dark:text-green-400" />
-                    <span className="text-sm font-medium text-green-800 dark:text-green-200">
-                      Document Ready for Processing
+                    <IconClipboard size={16} className="text-blue-600 dark:text-blue-400" />
+                    <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                      Pasted Image Ready
                     </span>
                   </div>
-                  <p className="text-xs text-green-600 dark:text-green-400">
-                    {file.name} • {(file.size / 1024 / 1024).toFixed(1)} MB
+                  <p className="text-xs text-blue-600 dark:text-blue-400">
+                    {pastedImage.name} • {(pastedImage.size / 1024).toFixed(1)} KB
                   </p>
-                  <p className="text-xs text-green-500 dark:text-green-500 mt-1">
-                    Text will be extracted and processed by Llama3
+                  <p className="text-xs text-blue-500 dark:text-blue-500 mt-1">
+                    Will be analyzed by BLIP model
                   </p>
                 </div>
               </div>
             </div>
           )}
-          
-          {/* ✅ UPLOAD PROGRESS */}
-          {isUploading && uploadProgress > 0 && (
-            <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-blue-600 dark:text-blue-400">Uploading...</span>
-                <span className="text-sm text-blue-600 dark:text-blue-400">{uploadProgress}%</span>
-              </div>
-              <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-2">
-                <div 
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${uploadProgress}%` }}
-                ></div>
+
+          {/* IMAGE FILE PREVIEW */}
+          {file && !pastedImage && detectFileType && detectFileType(null, file.name, file.type) === 'image' && (
+            <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl border border-blue-200 dark:border-blue-700 relative">
+              <button
+                className="absolute top-2 right-2 p-1 rounded-full bg-gray-200 hover:bg-red-500 hover:text-white transition-colors"
+                title="Remove uploaded image"
+                onClick={() => setFile(null)}
+              >
+                <IconX size={16} />
+              </button>
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0">
+                  <img src={URL.createObjectURL(file)} alt="Uploaded" className="w-16 h-16 rounded-lg object-cover border-2 border-blue-300 dark:border-blue-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <IconClipboard size={16} className="text-blue-600 dark:text-blue-400" />
+                    <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                      Uploaded Image Ready
+                    </span>
+                  </div>
+                  <p className="text-xs text-blue-600 dark:text-blue-400">
+                    {file.name} • {(file.size / 1024).toFixed(1)} KB
+                  </p>
+                  <p className="text-xs text-blue-500 dark:text-blue-500 mt-1">
+                    Will be analyzed by BLIP model
+                  </p>
+                </div>
               </div>
             </div>
           )}
-              {/* ✅ IMAGE FILE PREVIEW (for normal uploads) */}
-    {file && !pastedImage && detectFileType(null, file.name, file.type) === 'image' && (
-      <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl border border-blue-200 dark:border-blue-700 relative">
-        <button
-          className="absolute top-2 right-2 p-1 rounded-full bg-gray-200 hover:bg-red-500 hover:text-white transition-colors"
-          title="Remove uploaded image"
-          onClick={() => setFile(null)}
-        >
-          <IconX size={16} />
-        </button>
-        <div className="flex items-start gap-3">
-          <div className="flex-shrink-0">
-            <img src={URL.createObjectURL(file)} alt="Uploaded" className="w-16 h-16 rounded-lg object-cover border-2 border-blue-300 dark:border-blue-600" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <IconClipboard size={16} className="text-blue-600 dark:text-blue-400" />
-              <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                Uploaded Image Ready
-              </span>
-            </div>
-            <p className="text-xs text-blue-600 dark:text-blue-400">
-              {file.name} • {(file.size / 1024).toFixed(1)} KB
-            </p>
-            <p className="text-xs text-blue-500 dark:text-blue-500 mt-1">
-              Will be analyzed by BLIP model
-            </p>
-          </div>
-        </div>
-      </div>
-    )}
           
           <form onSubmit={handleSubmit} className="relative">
             <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-2xl shadow-sm border border-gray-200/50 dark:border-gray-600/50 px-3 py-2">
@@ -1299,53 +1175,7 @@ if (response.data && response.data.extractedText) {
             </div>
           </form>
 
-          {/* ✅ ENHANCED FILE/VOICE STATUS INDICATORS WITH TEXT EXTRACTION */}
-          {((file && !pastedImage) || listening) && (
-            <div className="flex items-center gap-4 mt-2 px-2 text-xs">
-              {file && !pastedImage && (
-                <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                  {getFileIcon(file.type, file.name)}
-                  <span>{file.name}</span>
-                  <span className="text-gray-400">•</span>
-                  <span>{(file.size / 1024 / 1024).toFixed(1)} MB</span>
-                  {detectFileType && (
-                    <>
-                      <span className="text-gray-400">•</span>
-                      <span className="capitalize">{detectFileType(null, file.name, file.type)}</span>
-                      {/* ✅ TEXT EXTRACTION INDICATOR */}
-                      {detectFileType(null, file.name, file.type) === 'document' && (
-                        <span className="text-green-600 dark:text-green-400 ml-1">
-                          📄 Text extractable
-                        </span>
-                      )}
-                    </>
-                  )}
-                  {/* ✅ DUPLICATE INDICATOR WITH TEXT REUSE */}
-                  {duplicateCheck?.isDuplicate && (
-                    <>
-                      <span className="text-gray-400">•</span>
-                      <span className="text-amber-600 dark:text-amber-400">
-                        ♻️ Duplicate (will reuse existing + extracted text)
-                      </span>
-                    </>
-                  )}
-                </div>
-              )}
-              
-              {listening && (
-                <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
-                  <div className="typing-indicator">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                  </div>
-                  <span>Listening...</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ✅ AI STREAMING INDICATOR WITH PROCESSING TYPE */}
+          {/* AI STREAMING INDICATOR */}
           {isAIStreaming && (
             <div className="text-xs text-blue-500 dark:text-blue-400 mt-2 px-2 flex items-center gap-2">
               <div className="typing-indicator">
@@ -1354,14 +1184,6 @@ if (response.data && response.data.extractedText) {
                 <span></span>
               </div>
               AI is responding...
-            </div>
-          )}
-
-          {/* ✅ SUPPORTED FILE TYPES INFO */}
-          {supportedFileTypes && (
-            <div className="text-xs text-gray-400 dark:text-gray-500 mt-2 px-2 text-center">
-              Supports: Images ({supportedFileTypes.images?.extensions?.join(', ')}) • 
-              Documents ({supportedFileTypes.documents?.extensions?.join(', ')})
             </div>
           )}
         </div>
