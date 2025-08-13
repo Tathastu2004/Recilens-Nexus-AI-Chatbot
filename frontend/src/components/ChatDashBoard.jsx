@@ -690,150 +690,185 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   };
 
   // ✅ ENHANCED HANDLE SUBMIT WITH IMAGE CONTEXT
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setInput("");
-    let finalInput = input.trim();
+// ✅ CORRECTED HANDLE SUBMIT WITH PROPER TYPE DETECTION
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  setInput("");
+  let finalInput = input.trim();
 
-    // Handle pasted image upload
-    let pastedImageUploadResult = null;
-    if (pastedImage) {
-      const formData = new FormData();
-      formData.append('file', pastedImage);
-      try {
-        const response = await axios.post(`${backendUrl}/api/chat/upload`, formData, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data',
-          }
-        });
-        pastedImageUploadResult = response.data;
-        setUploadResult(response.data);
-        setPastedImage(null);
-        setPastePreview(null);
-        setFile(null);
-      } catch (error) {
-        setFileValidationError('Failed to upload pasted image. Please try again.');
-        return;
-      }
-    }
-
-    // If no text input but a file is uploaded, set a default message
-    if (!finalInput && uploadResult) {
-      if (uploadResult.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i)) {
-        finalInput = `Uploaded document: ${uploadResult.fileName}`;
-      } else if (uploadResult.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i)) {
-        finalInput = `Uploaded image: ${uploadResult.fileName}`;
-      } else {
-        finalInput = "Uploaded a file.";
-      }
-    }
-
-    if (!finalInput && !uploadResult && !activeFileContext) return;
-    if (isAIStreaming) return;
-
-    if (!activeSessionId) {
-      setFileValidationError("No session selected. Please start or select a chat session.");
+  // Handle pasted image upload
+  let pastedImageUploadResult = null;
+  if (pastedImage) {
+    const formData = new FormData();
+    formData.append('file', pastedImage);
+    try {
+      const response = await axios.post(`${backendUrl}/api/chat/upload`, formData, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data',
+        }
+      });
+      pastedImageUploadResult = response.data;
+      setUploadResult(response.data);
+      setPastedImage(null);
+      setPastePreview(null);
+      setFile(null);
+    } catch (error) {
+      setFileValidationError('Failed to upload pasted image. Please try again.');
       return;
     }
+  }
 
-    // Image/Document context handling
-    let fileContext = null;
-    let messageType = 'text';
-    if (uploadResult && uploadResult.fileUrl) {
-      const isImage = uploadResult.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
-      const isDocument = uploadResult.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i);
-      if (isImage) {
-        fileContext = {
-          fileUrl: uploadResult.fileUrl,
-          fileName: uploadResult.fileName,
-          fileType: uploadResult.fileType || 'image',
-        };
-        messageType = 'image';
-      } else if (isDocument && uploadResult.extractedText) {
-        fileContext = {
-          extractedText: uploadResult.extractedText,
-          fileUrl: uploadResult.fileUrl,
-          fileName: uploadResult.fileName,
-        };
-        messageType = 'document';
-        setActiveFileContext(fileContext);
-      }
-    } else if (activeFileContext) {
-      fileContext = activeFileContext;
+  // If no text input but a file is uploaded, set a default message
+  if (!finalInput && uploadResult) {
+    if (uploadResult.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i)) {
+      finalInput = `Uploaded document: ${uploadResult.fileName}`;
+    } else if (uploadResult.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i)) {
+      finalInput = `Uploaded image: ${uploadResult.fileName}`;
+    } else {
+      finalInput = "Uploaded a file.";
+    }
+  }
+
+  if (!finalInput && !uploadResult && !activeFileContext) return;
+  if (isAIStreaming) return;
+
+  if (!activeSessionId) {
+    setFileValidationError("No session selected. Please start or select a chat session.");
+    return;
+  }
+
+  // ✅ ENHANCED FILE TYPE DETECTION AND CONTEXT HANDLING
+  let fileContext = null;
+  let messageType = 'text';
+  
+  if (uploadResult && uploadResult.fileUrl) {
+    // ✅ PROPER FILE TYPE DETECTION
+    const isImage = uploadResult.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
+    const isDocument = uploadResult.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i);
+    
+    if (isImage) {
+      fileContext = {
+        fileUrl: uploadResult.fileUrl,
+        fileName: uploadResult.fileName,
+        fileType: 'image', // ✅ EXPLICIT FILE TYPE
+      };
+      messageType = 'image'; // ✅ SEND 'image' TO FASTAPI
+      
+      // ✅ ESTABLISH IMAGE CONTEXT
+      setActiveFileContext({
+        fileUrl: uploadResult.fileUrl,
+        fileName: uploadResult.fileName,
+        fileType: 'image',
+        imageAnalysis: null // Will be filled by BLIP response
+      });
+      
+    } else if (isDocument && uploadResult.extractedText) {
+      fileContext = {
+        extractedText: uploadResult.extractedText,
+        fileUrl: uploadResult.fileUrl,
+        fileName: uploadResult.fileName,
+        fileType: 'document', // ✅ EXPLICIT FILE TYPE
+      };
+      messageType = 'document'; // ✅ SEND 'document' TO FASTAPI
+      setActiveFileContext(fileContext);
+    }
+  } else if (activeFileContext) {
+    // ✅ HANDLE EXISTING CONTEXT (for follow-up messages)
+    fileContext = activeFileContext;
+    
+    // ✅ DETERMINE TYPE FROM CONTEXT
+    const isImage = activeFileContext.fileType === 'image' || 
+                   activeFileContext.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
+    const isDocument = activeFileContext.extractedText || 
+                      activeFileContext.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i);
+    
+    if (isImage) {
+      messageType = 'image';
+    } else if (isDocument) {
       messageType = 'document';
     }
+  }
 
-    // Optimistically add user message
-    const optimisticUserMsg = {
-      _id: `user-${Date.now()}`,
-      sender: userId,
-      message: finalInput,
-      timestamp: new Date().toISOString(),
-      fileUrl: fileContext?.fileUrl || null,
-      fileName: fileContext?.fileName || null,
-      type: messageType,
-      hasTextExtraction: !!fileContext?.extractedText,
-      extractedTextLength: fileContext?.extractedText?.length || 0,
-      status: 'sending'
-    };
-    if (addMessageToSession) addMessageToSession(activeSessionId, optimisticUserMsg);
+  // Optimistically add user message
+  const optimisticUserMsg = {
+    _id: `user-${Date.now()}`,
+    sender: userId,
+    message: finalInput,
+    timestamp: new Date().toISOString(),
+    fileUrl: fileContext?.fileUrl || null,
+    fileName: fileContext?.fileName || null,
+    type: messageType,
+    hasTextExtraction: !!fileContext?.extractedText,
+    extractedTextLength: fileContext?.extractedText?.length || 0,
+    status: 'sending'
+  };
+  if (addMessageToSession) addMessageToSession(activeSessionId, optimisticUserMsg);
 
-    // ✅ INJECT IMAGE CONTEXT INTO MESSAGE
-    const contextText = getImageContextText();
-    const messageWithContext = finalInput + contextText;
+  // ✅ INJECT CONTEXT INTO MESSAGE
+  const contextText = getImageContextText();
+  const messageWithContext = finalInput + contextText;
 
-    // Prepare messageData for backend
-    const messageData = {
-      sessionId: activeSessionId,
-      message: messageWithContext, // ✅ Include image context
-      type: messageType,
-      fileUrl: fileContext?.fileUrl || null,
-      fileName: fileContext?.fileName || null,
-      fileType: fileContext?.fileType || null,
-      extractedText: fileContext?.extractedText || null,
-    };
+  // ✅ PREPARE CORRECT MESSAGE DATA FOR BACKEND
+  const messageData = {
+    sessionId: activeSessionId,
+    message: messageWithContext,
+    type: messageType, // ✅ 'image', 'document', or 'text'
+    fileUrl: fileContext?.fileUrl || null,
+    fileName: fileContext?.fileName || null,
+    fileType: messageType, // ✅ MATCH TYPE FOR FASTAPI ROUTING
+    extractedText: messageType === 'document' ? fileContext?.extractedText : null, // ✅ ONLY FOR DOCUMENTS
+  };
 
-    setIsAIStreaming(true);
+  console.log('🔍 [FRONTEND] Sending to backend:', {
+    type: messageData.type,
+    hasFile: !!messageData.fileUrl,
+    hasExtractedText: !!messageData.extractedText,
+    fileName: messageData.fileName
+  });
 
-    try {
-      let response;
-      if (sendMessage) {
-        response = await sendMessage(messageData);
-      } else {
-        response = await axios.post(`${backendUrl}/api/chat/send`, messageData, {
-          headers: { 'Authorization': `Bearer ${token}` }
+  setIsAIStreaming(true);
+
+  try {
+    let response;
+    if (sendMessage) {
+      response = await sendMessage(messageData);
+    } else {
+      response = await axios.post(`${backendUrl}/api/chat/send`, messageData, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+    }
+
+    let aiMsg = response?.data?.aiMessage || response?.aiMessage;
+    if (aiMsg) {
+      const aiTimestamp = aiMsg.createdAt || aiMsg.timestamp || new Date().toISOString();
+      if (addMessageToSession) {
+        addMessageToSession(activeSessionId, {
+          _id: aiMsg._id,
+          sender: aiMsg.sender || 'AI',
+          message: aiMsg.message,
+          timestamp: aiTimestamp,
+          fileUrl: aiMsg.fileUrl,
+          fileName: aiMsg.fileName,
+          type: aiMsg.type,
+          completedBy: aiMsg.completedBy,
+          hasTextExtraction: aiMsg.hasTextExtraction,
+          extractedTextLength: aiMsg.textLength,
+          metadata: aiMsg.metadata,
+          status: 'sent'
         });
       }
-
-      let aiMsg = response?.data?.aiMessage || response?.aiMessage;
-      if (aiMsg) {
-        const aiTimestamp = aiMsg.createdAt || aiMsg.timestamp || new Date().toISOString();
-        if (addMessageToSession) {
-          addMessageToSession(activeSessionId, {
-            _id: aiMsg._id,
-            sender: aiMsg.sender || 'AI',
-            message: aiMsg.message,
-            timestamp: aiTimestamp,
-            fileUrl: aiMsg.fileUrl,
-            fileName: aiMsg.fileName,
-            type: aiMsg.type,
-            completedBy: aiMsg.completedBy,
-            hasTextExtraction: aiMsg.hasTextExtraction,
-            extractedTextLength: aiMsg.textLength,
-            metadata: aiMsg.metadata,
-            status: 'sent'
-          });
-        }
-      }
-    } catch (error) {
-      setFileValidationError('Failed to send message. Please try again.');
-    } finally {
-      setFile(null);
-      setUploadResult(null);
-      setIsAIStreaming(false);
     }
-  };
+  } catch (error) {
+    console.error('❌ [FRONTEND] Send message error:', error);
+    setFileValidationError('Failed to send message. Please try again.');
+  } finally {
+    setFile(null);
+    setUploadResult(null);
+    setIsAIStreaming(false);
+  }
+};
+
 
   // AUTO-SCROLL
   useEffect(() => {

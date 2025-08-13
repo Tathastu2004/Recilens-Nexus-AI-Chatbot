@@ -158,18 +158,22 @@ export const uploadFileHandler = async (req, res) => {
     let uploadResult;
     let extractedText = null;
 
+    // ✅ ADD: Enhanced file type detection
+    const fileExtension = path.extname(req.file.originalname).toLowerCase();
+    const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'].includes(fileExtension);
+    const isDocument = ['.pdf', '.txt', '.docx', '.doc'].includes(fileExtension);
+
     // --- Cloudinary Upload ---
     uploadResult = await cloudinary.uploader.upload(req.file.path, {
       folder: 'nexus_chat_files',
-      resource_type: 'raw',
+      resource_type: isImage ? 'image' : 'raw', // ✅ FIX: Correct resource type
       use_filename: true,
       unique_filename: true,
       access_mode: 'public',
     });
 
-    // --- Text Extraction ---
-    const fileExtension = path.extname(req.file.originalname).toLowerCase();
-    if (fileExtension === '.pdf' || fileExtension === '.txt') {
+    // --- Text Extraction ONLY for documents ---
+    if (isDocument) { // ✅ FIX: Only extract text from documents
       const fileBuffer = fs.readFileSync(req.file.path);
       if (fileExtension === '.pdf') {
         try {
@@ -178,23 +182,29 @@ export const uploadFileHandler = async (req, res) => {
         } catch (pdfError) {
           extractedText = `❌ PDF text extraction failed: ${pdfError.message}`;
         }
-      } else {
+      } else if (fileExtension === '.txt') {
         extractedText = fileBuffer.toString('utf8').trim();
       }
+      
       if (extractedText && !extractedText.startsWith('❌')) {
         console.log(`✅ [EXTRACTION] Text successfully extracted from ${req.file.originalname}. Length: ${extractedText.length} characters.`);
       }
     }
 
     const hasValidText = extractedText && !extractedText.startsWith('❌');
+    
+    // ✅ FIX: Enhanced response with explicit file type
     res.status(200).json({
       success: true,
-      message: 'File processed successfully. Ready for user prompt.',
+      message: isImage ? 
+        'Image uploaded successfully. Ready for BLIP analysis.' : 
+        'Document processed successfully. Ready for user prompt.',
       fileUrl: uploadResult.secure_url,
       fileName: req.file.originalname,
-      extractedText: extractedText,
-      hasText: hasValidText,
-      textLength: hasValidText ? extractedText.length : 0,
+      fileType: isImage ? 'image' : 'document', // ✅ ADD: Explicit file type
+      extractedText: isDocument ? extractedText : undefined, // ✅ FIX: Only for documents
+      hasText: isDocument ? hasValidText : false,
+      textLength: isDocument && hasValidText ? extractedText.length : 0,
     });
 
   } catch (error) {
@@ -206,6 +216,7 @@ export const uploadFileHandler = async (req, res) => {
     }
   }
 };
+
 
 // 🔹 Stream AI response over HTTP with full context support - ENHANCED WITH TEXT EXTRACTION
 export const sendMessage = async (req, res) => {
