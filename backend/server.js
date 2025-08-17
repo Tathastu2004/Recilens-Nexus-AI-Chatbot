@@ -10,9 +10,10 @@ import http from 'http';
 import './config/cloudinary.js';
 import connectDB from './config/mongodb.js';
 import authRoutes from './routes/authRoutes.js';
-import adminRoutes from './admin/adminRoutes.js';
+
 import userRoutes from './routes/userRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
+import adminRoutes from './admin/routes/adminRoutes.js';
 
 dotenv.config();
 
@@ -86,6 +87,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/chat', chatRoutes);
+app.use("/api/admin", adminRoutes);
 
 // ✅ Launch server (HTTP only — no Socket.IO)
 server.listen(PORT, () => {

@@ -11,7 +11,7 @@ export default function Dashboard() {
         <StatCard
           title="Active Users"
           value="120"
-          className="bg-gradient-to-r from-green-400 to-blue-400 text-white shadow-lg"
+          className="bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-lg"
         />
         <StatCard
           title="Conversations Today"
@@ -21,12 +21,12 @@ export default function Dashboard() {
         <StatCard
           title="Avg Response Time"
           value="1.2s"
-          className="bg-gradient-to-r from-yellow-400 to-orange-400 text-white shadow-lg"
+          className="bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-lg"
         />
         <StatCard
           title="Accuracy"
           value="92%"
-          className="bg-gradient-to-r from-teal-400 to-cyan-400 text-white shadow-lg"
+          className="bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-lg"
         />
       </div>
 

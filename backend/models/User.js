@@ -4,7 +4,7 @@ const userSchema = new mongoose.Schema({
   name: { type: String, required: false },
   email: { type: String, required: true, unique: true },
   password: String,
-  role: { type: String, enum: ['admin', 'client'], default: 'client' },
+  role: { type: String, enum: ['admin', 'client' , 'super-admin'], default: 'client' },
   // Email verification fields
   otp: String,
   otpExpires: Date,

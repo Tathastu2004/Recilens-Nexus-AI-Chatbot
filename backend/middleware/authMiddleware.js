@@ -34,7 +34,7 @@ export const verifyToken = async (req, res, next) => {
 
 // Middleware for role: admin only
 export const requireAdmin = (req, res, next) => {
-  if (!req.user || req.user.role !== 'admin') {
+  if (!req.user || req.user.role !== 'admin' && req.user.role !== 'super-admin') {
     return res.status(403).json({ message: 'Access denied: Admins only' });
   }
   next();
