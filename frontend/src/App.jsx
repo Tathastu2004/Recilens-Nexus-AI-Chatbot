@@ -12,6 +12,9 @@ import VerifyEmailPage from './pages/VerifyEmailPage.jsx';
 import ChatInterface from './pages/chatInterface';
 import Profile from './pages/Profile';
 
+//admin imports
+import AdminRoutes from './routes/AdminRoutes';
+
 // ✅ Keep your existing ErrorBoundary
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -96,6 +99,8 @@ function App() {
                       </ProtectedRoute>
                     }
                   />
+
+                  <Route path="/*" element={<AdminRoutes />} />
 
                   {/* Fallback route */}
                   <Route path="*" element={<Navigate to="/signup" replace />} />
