@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { UserProvider } from './context/UserContext';
 import { ChatProvider } from './context/ChatContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { AdminProvider } from './context/AdminContext';
 import ProtectedRoute from './components/ProtectedRoute';
 
 // Pages & Components
@@ -100,8 +101,17 @@ function App() {
                     }
                   />
 
-                  <Route path="/*" element={<AdminRoutes />} />
-
+                  {/* ✅ Wrap AdminRoutes inside AdminProvider */}
+                  <Route
+                    path="/*"
+                    element={
+                      <ProtectedRoute adminOnly={true}>
+                        <AdminProvider>
+                          <AdminRoutes />
+                        </AdminProvider>
+                      </ProtectedRoute>
+                    }
+                  />
                   {/* Fallback route */}
                   <Route path="*" element={<Navigate to="/signup" replace />} />
                 </Routes>
