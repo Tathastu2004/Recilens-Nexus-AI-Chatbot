@@ -7,7 +7,12 @@ import {
   generateAnalytics,
   startModelTraining,
   getTrainingJobs,
-  updateTrainingStatus
+  updateTrainingStatus,
+  getAllUsers,
+  getAllAdmins,
+  promoteUserToAdmin,
+  demoteAdminToClient,
+  deleteUser
 } from "../controllers/adminController.js";
 
 import { verifyToken, requireAdmin } from "../../middleware/authMiddleware.js";
@@ -57,6 +62,29 @@ router.get("/model/training", verifyToken, requireAdmin, getTrainingJobs);
 
 // ✅ Update training job status (running/completed/failed)
 router.put("/model/training/:id", verifyToken, requireAdmin, updateTrainingStatus);
+
+/**
+ * ===============================
+ *  USER & ADMIN MANAGEMENT
+ * ===============================
+ */
+
+// ✅ Get all users
+router.get("/users", verifyToken, requireAdmin, getAllUsers);
+
+// ✅ Get all admins
+router.get("/admins", verifyToken, requireAdmin, getAllAdmins);
+
+// ✅ Promote user to admin
+router.put("/users/:userId/promote", verifyToken, requireAdmin, promoteUserToAdmin);
+
+// ✅ Demote admin to client
+router.put("/users/:userId/demote", verifyToken, requireAdmin, demoteAdminToClient);
+
+// ✅ Delete a user (cascade delete sessions & messages)
+router.delete("/users/:userId", verifyToken, requireAdmin, deleteUser);
+
+
 
 
 export default router;

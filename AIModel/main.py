@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
@@ -91,7 +92,7 @@ async def health_check():
             "ollama": {"connected": llama_ok},
             "blip": {"connected": blip_ok}
         },
-        "supported_types": ["text", "image", "document"]
+        "supported_types": ["text", "image", "document", "training"]
     }
 
 # ✅ MAIN CHAT ROUTE - HANDLES ALL TYPES
@@ -348,6 +349,79 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
             yield f"❌ Server Error: {str(error)}"
         
         return StreamingResponse(error_generator(), media_type="text/plain")
+    
+# ✅ TRAINING REQUEST MODEL
+class TrainingRequest(BaseModel):
+    jobId: str
+    modelName: str
+    dataset: str
+    parameters: Optional[Dict[str, Any]] = None
+
+@app.post("/train")
+async def train_model(req: TrainingRequest):
+    """
+    This is called from Node.js when training is started.
+    - jobId is always generated in Node (Mongo _id)
+    - FastAPI just runs the job and sends updates back to Node
+    """
+    job_id = req.jobId
+    model_name = req.modelName
+    dataset = req.dataset
+    params = req.parameters or {}
+
+    print(f"🚀 [TRAINING] Job started")
+    print(f"   jobId: {job_id}")
+    print(f"   model: {model_name}")
+    print(f"   dataset: {dataset}")
+    print(f"   params: {params}")
+
+    async def training_process():
+        try:
+            # 🔄 Step 1: Notify Node that training started
+            requests.post("http://localhost:3000/api/training/update", json={
+                "jobId": job_id,
+                "status": "running",
+                "log": f"Training started for model {model_name}"
+            })
+
+            # 🔄 Step 2: Fake long-running training (replace with real ML loop)
+            for epoch in range(1, 6):
+                await asyncio.sleep(2)  # simulate training work
+                log_msg = f"Epoch {epoch}/5 completed"
+                print(f"📝 [TRAINING] {log_msg}")
+
+                requests.post("http://localhost:3000/api/training/update", json={
+                    "jobId": job_id,
+                    "status": "running",
+                    "log": log_msg,
+                    "progress": epoch * 20
+                })
+
+            # 🔄 Step 3: Final result
+            accuracy = 0.92
+            final_log = f"Training completed with accuracy {accuracy:.2f}"
+            print(f"✅ [TRAINING] {final_log}")
+
+            requests.post("http://localhost:3000/api/training/update", json={
+                "jobId": job_id,
+                "status": "completed",
+                "log": final_log,
+                "accuracy": accuracy
+            })
+
+        except Exception as e:
+            err_msg = f"Training failed: {str(e)}"
+            print(f"❌ [TRAINING] {err_msg}")
+            requests.post("http://localhost:3000/api/training/update", json={
+                "jobId": job_id,
+                "status": "failed",
+                "log": err_msg
+            })
+
+    asyncio.create_task(training_process())
+
+    return {"ok": True, "jobId": job_id, "message": "Training started"}    
+
 
 # ✅ MAIN SERVER STARTUP
 if __name__ == "__main__":

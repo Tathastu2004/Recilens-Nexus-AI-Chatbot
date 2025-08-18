@@ -46,14 +46,14 @@ const ProtectedRoute = ({ children, requiredRole, adminOnly = false, clientOnly 
 
     // Client-only routes
     if (clientOnly && user.role !== 'client') {
-      return <Navigate to="/admin-dashboard" replace />;
+      return <Navigate to="/admin" replace />;
     }
 
     // Specific role requirement
     if (requiredRole && user.role !== requiredRole) {
       // Redirect based on actual role
       if (user.role === 'admin') {
-        return <Navigate to="/admin-dashboard" replace />;
+        return <Navigate to="/admin" replace />;
       } else {
         return <Navigate to="/chat" replace />;
       }
