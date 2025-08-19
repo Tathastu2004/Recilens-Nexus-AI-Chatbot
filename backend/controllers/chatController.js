@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import crypto from 'crypto';
 import { cacheService } from '../services/cacheService.js';
+import axios from 'axios';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -19,6 +20,7 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
+const FASTAPI_BASE_URL = process.env.FASTAPI_BASE_URL || "http://127.0.0.1:8000";
 
 const generateFileHash = (fileBuffer) => {
   try {
@@ -220,37 +222,66 @@ export const uploadFileHandler = async (req, res) => {
 
 // 🔹 Stream AI response over HTTP with full context support - ENHANCED WITH TEXT EXTRACTION
 export const sendMessage = async (req, res) => {
-  console.log('📨 [SEND MESSAGE] Request received...');
+  console.log("📨 [SEND MESSAGE] Request received...");
   try {
-    const { sessionId, message, type = 'text', fileUrl, fileType, fileName, extractedText } = req.body;
+    const {
+      sessionId,
+      message,
+      type = "text",
+      fileUrl,
+      fileType,
+      fileName,
+      extractedText,
+    } = req.body;
     const userId = req.user._id;
 
     if (!sessionId || !message) {
-      return res.status(400).json({ success: false, error: 'Session ID and message are required' });
+      return res
+        .status(400)
+        .json({ success: false, error: "Session ID and message are required" });
     }
     const session = await ChatSession.findById(sessionId);
     if (!session || session.user.toString() !== userId.toString()) {
-      return res.status(403).json({ success: false, error: 'Access denied or session not found' });
+      return res
+        .status(403)
+        .json({ success: false, error: "Access denied or session not found" });
     }
 
-    // --- Save User's Message ---
+    // Call FastAPI intent recognition API
+    let recognizedIntent = "unknown";
+    try {
+      const intentRes = await axios.post(
+        `${FASTAPI_BASE_URL}/intent`,
+        { message },
+        { headers: { "Content-Type": "application/json" } }
+      );
+      if (intentRes.status === 200 && intentRes.data.intent) {
+        recognizedIntent = intentRes.data.intent;
+        console.log("🎯 Recognized intent:", recognizedIntent);
+      }
+    } catch (err) {
+      console.error("❌ Intent recognition failed:", err.message);
+    }
+
+    // Save User's Message with recognized intent
     const userMessage = new Message({
       session: sessionId,
       message,
       sender: userId,
+      intent: recognizedIntent,  // <-- intent logic implemented here
       type,
       fileUrl: fileUrl || null,
       fileType: fileType || null,
       fileName: fileName || null,
       extractedText: extractedText || null,
-      hasTextExtraction: !!(extractedText && !extractedText.startsWith('❌')),
+      hasTextExtraction: !!(extractedText && !extractedText.startsWith("❌")),
       textLength: extractedText ? extractedText.length : 0,
     });
     await userMessage.save();
-    console.log('✅ User message saved.');
+    console.log("✅ User message saved with intent.");
 
     // --- Get AI Response ---
-    console.log('🤖 Calling AI service with user prompt and extracted text...');
+    console.log("🤖 Calling AI service with user prompt and extracted text...");
     // ✅ Always pass all relevant fields to AI service
     const aiResponse = await getAIResponse({
       message,
@@ -261,26 +292,26 @@ export const sendMessage = async (req, res) => {
       fileName,
       sessionId,
     });
-    console.log('✅ AI response received.');
+    console.log("✅ AI response received.");
 
     // --- Save AI's Message ---
     const aiMessage = new Message({
       session: sessionId,
-      message: typeof aiResponse === 'string' ? aiResponse : aiResponse.message,
-      sender: 'AI',
-      type: type || 'text',
+      message: typeof aiResponse === "string" ? aiResponse : aiResponse.message,
+      sender: "AI",
+      type: type || "text",
       fileUrl: fileUrl || null,
       fileType: fileType || null,
       fileName: fileName || null,
       extractedText: extractedText || null,
-      hasTextExtraction: !!(extractedText && !extractedText.startsWith('❌')),
+      hasTextExtraction: !!(extractedText && !extractedText.startsWith("❌")),
       textLength: extractedText ? extractedText.length : 0,
       metadata: {
-        usedExtractedText: !!(extractedText && !extractedText.startsWith('❌')),
-      }
+        usedExtractedText: !!(extractedText && !extractedText.startsWith("❌")),
+      },
     });
     await aiMessage.save();
-    console.log('✅ AI message saved.');
+    console.log("✅ AI message saved.");
 
     // --- Update Session and Send Response ---
     session.lastActivity = new Date();
@@ -288,12 +319,13 @@ export const sendMessage = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      aiMessage: aiMessage,
+      aiMessage,
     });
-
   } catch (error) {
-    console.error('❌ [SEND MESSAGE] Error:', error);
-    res.status(500).json({ success: false, error: 'Failed to send message', details: error.message });
+    console.error("❌ [SEND MESSAGE] Error:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to send message", details: error.message });
   }
 };
 

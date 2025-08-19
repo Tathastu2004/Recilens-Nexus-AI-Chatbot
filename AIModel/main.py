@@ -10,6 +10,9 @@ import uuid
 from datetime import datetime
 import requests
 
+# Import intent recognition from ollama_client
+from ollama_client import recognize_intent
+
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv()
@@ -422,6 +425,21 @@ async def train_model(req: TrainingRequest):
 
     return {"ok": True, "jobId": job_id, "message": "Training started"}    
 
+
+# ✅ INTENT RECOGNITION ENDPOINT
+class IntentRequest(BaseModel):
+    message: str
+
+class IntentResponse(BaseModel):
+    intent: str
+
+@app.post("/intent", response_model=IntentResponse)
+async def intent_endpoint(request: IntentRequest):
+    try:
+        intent = await recognize_intent(request.message)
+        return IntentResponse(intent=intent)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Intent recognition failed: {str(e)}")
 
 # ✅ MAIN SERVER STARTUP
 if __name__ == "__main__":
