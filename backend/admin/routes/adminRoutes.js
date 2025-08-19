@@ -12,7 +12,8 @@ import {
   getAllAdmins,
   promoteUserToAdmin,
   demoteAdminToClient,
-  deleteUser
+  deleteUser,
+  generateRealAnalytics
 } from "../controllers/adminController.js";
 
 import { verifyToken, requireAdmin } from "../../middleware/authMiddleware.js";
@@ -47,6 +48,7 @@ router.get("/analytics", verifyToken, requireAdmin, getAnalytics);
 // ✅ Generate new analytics report
 router.post("/analytics/generate", verifyToken, requireAdmin, generateAnalytics);
 
+router.post("/analytics/generate-real", verifyToken, requireAdmin, generateRealAnalytics);
 
 /**
  * ===============================

@@ -39,8 +39,8 @@ const ProtectedRoute = ({ children, requiredRole, adminOnly = false, clientOnly 
 
   // Check role-based access only if we have user data
   if (user) {
-    // Admin-only routes
-    if (adminOnly && user.role !== 'admin') {
+    // Admin-only routes: allow admin and super-admin
+    if (adminOnly && !(user.role === 'admin' || user.role === 'super-admin')) {
       return <Navigate to="/chat" replace />;
     }
 
@@ -52,7 +52,7 @@ const ProtectedRoute = ({ children, requiredRole, adminOnly = false, clientOnly 
     // Specific role requirement
     if (requiredRole && user.role !== requiredRole) {
       // Redirect based on actual role
-      if (user.role === 'admin') {
+      if (user.role === 'admin' || user.role === 'super-admin') {
         return <Navigate to="/admin" replace />;
       } else {
         return <Navigate to="/chat" replace />;

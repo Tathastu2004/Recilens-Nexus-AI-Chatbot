@@ -50,7 +50,13 @@ const messageSchema = new mongoose.Schema({
   metadata: {
     type: Object,
     default: {}
-  }
+  },
+
+  // --- ADDED FIELDS FOR ANALYTICS ---
+  intent: { type: String, required: false },          // The intent recognized in user message
+  isCorrect: { type: Boolean, default: null },        // Whether AI response was accurate (requires labeling)
+  responseTimeMs: { type: Number, default: 0 },       // Response time in milliseconds (AI reply time - user message time)
+
 }, {
   timestamps: true
 });

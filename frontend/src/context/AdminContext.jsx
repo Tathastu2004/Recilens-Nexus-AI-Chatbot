@@ -53,6 +53,10 @@ export const AdminProvider = ({ children }) => {
    *  DASHBOARD & ANALYTICS
    * ===============================
    */
+
+
+
+
   const getDashboardStats = async (token) => {
     setLoading(true);
     try {
@@ -67,34 +71,62 @@ export const AdminProvider = ({ children }) => {
     }
   };
 
-  const getAnalytics = async (token) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${BASE_URL}/analytics`, {
-        headers: authHeader(token),
-      });
-      return await res.json();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+const [analyticsError, setAnalyticsError] = useState(null);
+
+const getAnalytics = async (token) => {
+  setAnalyticsLoading(true);
+  setAnalyticsError(null);
+  try {
+    const res = await fetch(`${BASE_URL}/analytics`, {
+      headers: authHeader(token),
+      cache: "no-store",  // ensure fresh fetch from network
+    });
+    const data = await res.json();
+    return data;
+  } catch (err) {
+    setAnalyticsError(err.message);
+    throw err;
+  } finally {
+    setAnalyticsLoading(false);
+  }
+};
+
+
+  
 
   const generateAnalytics = async (token) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${BASE_URL}/analytics/generate`, {
-        method: "POST",
-        headers: authHeader(token),
-      });
-      return await res.json();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  setLoading(true);
+  try {
+    const res = await fetch(`${BASE_URL}/analytics/generate`, {
+      method: "POST",
+      headers: authHeader(token),
+    });
+    return await res.json();
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
+  }
+};
+
+const generateRealAnalytics = async (token) => {
+  setLoading(true);
+  try {
+    const res = await fetch(`${BASE_URL}/analytics/generate-real`, {
+      method: "POST",
+      headers: authHeader(token)
+    });
+    return await res.json();
+  } catch (err) {
+    setError(err.message);
+    throw err;
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   /**
    * ===============================
@@ -234,6 +266,8 @@ export const AdminProvider = ({ children }) => {
         updateSystemConfig,
         getDashboardStats,
         getAnalytics,
+      analyticsLoading,
+      analyticsError,
         generateAnalytics,
         startModelTraining,
         getTrainingJobs,
@@ -243,6 +277,7 @@ export const AdminProvider = ({ children }) => {
         promoteUserToAdmin,
         demoteAdminToClient,
         deleteUser,
+        generateRealAnalytics
       }}
     >
       {children}

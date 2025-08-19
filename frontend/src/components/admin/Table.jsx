@@ -1,18 +1,31 @@
 export default function Table({ headers, rows }) {
   return (
-    <table className="w-full border-collapse border border-purple-200 shadow-lg rounded-xl overflow-hidden">
-      <thead className="bg-gradient-to-r from-purple-100 to-blue-100">
+    <table className="w-full border border-green-300 rounded-md">
+      <thead className="bg-green-200">
         <tr>
           {headers.map((h, idx) => (
-            <th key={idx} className="border border-purple-200 px-4 py-3 text-left text-purple-700 font-bold">{h}</th>
+            <th
+              key={idx}
+              className="border border-green-300 px-4 py-2 text-left text-green-900 font-semibold"
+            >
+              {h}
+            </th>
           ))}
         </tr>
       </thead>
       <tbody>
         {rows.map((row, idx) => (
-          <tr key={idx} className="hover:bg-purple-50">
+          <tr
+            key={idx}
+            className={idx % 2 === 0 ? "bg-green-50" : "bg-green-100"}
+          >
             {row.map((cell, i) => (
-              <td key={i} className="border border-purple-100 px-4 py-2 text-gray-700">{cell}</td>
+              <td
+                key={i}
+                className="border border-green-300 px-4 py-2 text-green-900"
+              >
+                {cell}
+              </td>
             ))}
           </tr>
         ))}

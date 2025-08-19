@@ -1,53 +1,43 @@
-import StatCard from "@/components/admin/Statscard";
-import ChartCard from "@/components/admin/Chartcard";
+import { useEffect, useState } from "react";
+import { useAdmin } from '../../context/AdminContext';
+import StatCard from "../../components/admin/Statscard";
+import ChartCard from "../../components/admin/chartcard";
 
 export default function Dashboard() {
-  return (
-    <div className="bg-gradient-to-br from-indigo-50 via-blue-100 to-purple-50 min-h-screen p-8">
-      <h2 className="text-2xl font-extrabold mb-6 text-indigo-700 drop-shadow">
-        Dashboard Overview
-      </h2>
-      <div className="grid grid-cols-4 gap-6 mb-8">
-        <StatCard
-          title="Active Users"
-          value="120"
-          className="bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-lg"
-        />
-        <StatCard
-          title="Conversations Today"
-          value="450"
-          className="bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-lg"
-        />
-        <StatCard
-          title="Avg Response Time"
-          value="1.2s"
-          className="bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-lg"
-        />
-        <StatCard
-          title="Accuracy"
-          value="92%"
-          className="bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-lg"
-        />
-      </div>
+  const { getDashboardStats, loading, error } = useAdmin();
+  const [stats, setStats] = useState(null);
 
-      <div className="grid grid-cols-2 gap-6">
-        <ChartCard
-          title="Conversations Over Time"
-          className="bg-gradient-to-br from-blue-100 to-indigo-200 shadow-md"
-        >
-          <div className="flex items-center justify-center h-full text-indigo-400 font-bold text-lg">
-            [LineChart Placeholder]
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    getDashboardStats(token).then(setStats);
+  }, []);
+
+  return (
+    <div className="p-8 bg-green-50 min-h-screen">
+      <h2 className="text-green-900 font-bold text-2xl mb-6">Dashboard Overview</h2>
+
+      {loading && <div>Loading…</div>}
+      {error && <div className="text-red-600">{error}</div>}
+
+      {stats && (
+        <>
+          <div className="grid grid-cols-4 gap-6 mb-8">
+            <StatCard title="Users" value={stats.totalUsers} />
+            <StatCard title="Chat Sessions" value={stats.totalSessions} />
+            <StatCard title="Messages" value={stats.totalMessages} />
+            <StatCard title="AI Messages" value={stats.aiMessages} />
           </div>
-        </ChartCard>
-        <ChartCard
-          title="Top Intents"
-          className="bg-gradient-to-br from-pink-100 to-purple-200 shadow-md"
-        >
-          <div className="flex items-center justify-center h-full text-purple-400 font-bold text-lg">
-            [PieChart Placeholder]
+
+          <div className="grid grid-cols-2 gap-6">
+            <ChartCard title="Conversations Over Time">
+              <div className="text-green-400 font-semibold">[Chart Placeholder]</div>
+            </ChartCard>
+            <ChartCard title="Top Intents">
+              <div className="text-green-400 font-semibold">[Chart Placeholder]</div>
+            </ChartCard>
           </div>
-        </ChartCard>
-      </div>
+        </>
+      )}
     </div>
   );
 }

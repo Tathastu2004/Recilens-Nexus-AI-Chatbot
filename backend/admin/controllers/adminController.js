@@ -123,6 +123,51 @@ export const generateAnalytics = async (req, res) => {
   }
 };
 
+export const generateRealAnalytics = async (req, res) => {
+  try {
+    const aggregation = await Message.aggregate([
+      { $match: { intent: { $exists: true } } },
+      {
+        $group: {
+          _id: "$intent",
+          totalQueries: { $sum: 1 },
+          correctResponses: { $sum: { $cond: ["$isCorrect", 1, 0] } },
+          avgResponseTime: { $avg: "$responseTimeMs" }
+        }
+      },
+      {
+        $project: {
+          intent: "$_id",
+          totalQueries: 1,
+          accuracy: { 
+            $cond: [
+              { $eq: ["$totalQueries", 0] },
+              0,
+              { $multiply: [{ $divide: ["$correctResponses", "$totalQueries"] }, 100] }
+            ]
+          },
+          avgResponseTime: { $ifNull: ["$avgResponseTime", 0] },
+          _id: 0
+        }
+      }
+    ]);
+
+    const now = new Date();
+    await Promise.all(aggregation.map(async (item) => {
+      const doc = new Analytics({
+        ...item,
+        generatedAt: now,
+      });
+      await doc.save();
+    }));
+
+    res.json({ message: "Real analytics generated", analytics: aggregation });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+
 /**
  * ===============================
  *  MODEL MANAGEMENT
