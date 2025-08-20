@@ -4,6 +4,7 @@ import { UserProvider } from './context/UserContext';
 import { ChatProvider } from './context/ChatContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { AdminProvider } from './context/AdminContext';
+import { FeedbackProvider } from './context/feedbackContext'; // <-- Import FeedbackProvider
 import ProtectedRoute from './components/ProtectedRoute';
 
 // Pages & Components
@@ -12,9 +13,12 @@ import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
 import VerifyEmailPage from './pages/VerifyEmailPage.jsx';
 import ChatInterface from './pages/chatInterface';
 import Profile from './pages/Profile';
+import FeedBack from './pages/FeedBack';
+
 
 //admin imports
 import AdminRoutes from './routes/AdminRoutes';
+
 
 // ✅ Keep your existing ErrorBoundary
 class ErrorBoundary extends React.Component {
@@ -62,61 +66,71 @@ function App() {
       <ThemeProvider>
         <UserProvider>
           <ChatProvider>
-            <Router>
-              <div className="App min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300">
-                <Routes>
-                  {/* Public Routes */}
-                  <Route path="/" element={<Navigate to="/signup" replace />} />
-                  <Route path="/signup" element={<SignUpPage />} />
-                  <Route path="/reset-password" element={<ResetPasswordPage />} />
-                  <Route path="/verify-email" element={<VerifyEmailPage />} />
+            <FeedbackProvider> {/* <-- Wrap your app with FeedbackProvider */}
+              <Router>
+                <div className="App min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300">
+                  <Routes>
+                    {/* Public Routes */}
+                    <Route path="/" element={<Navigate to="/signup" replace />} />
+                    <Route path="/signup" element={<SignUpPage />} />
+                    <Route path="/reset-password" element={<ResetPasswordPage />} />
+                    <Route path="/verify-email" element={<VerifyEmailPage />} />
 
-                  {/* ✅ Chat Route with ChatProvider */}
-                  <Route
-                    path="/chat"
-                    element={
-                      <ProtectedRoute clientOnly={true}>
-                        <ChatInterface />
-                      </ProtectedRoute>
-                    }
-                  />
+                    {/* ✅ Chat Route with ChatProvider */}
+                    <Route
+                      path="/chat"
+                      element={
+                        <ProtectedRoute clientOnly={true}>
+                          <ChatInterface />
+                        </ProtectedRoute>
+                      }
+                    />
 
-                  {/* ✅ Optional: Dashboard route */}
-                  <Route
-                    path="/dashboard"
-                    element={
-                      <ProtectedRoute clientOnly={true}>
-                        <ChatInterface />
-                      </ProtectedRoute>
-                    }
-                  />
+                    {/* ✅ Optional: Dashboard route */}
+                    <Route
+                      path="/dashboard"
+                      element={
+                        <ProtectedRoute clientOnly={true}>
+                          <ChatInterface />
+                        </ProtectedRoute>
+                      }
+                    />
 
-                  {/* Profile Page */}
-                  <Route
-                    path="/profile"
-                    element={
-                      <ProtectedRoute>
-                        <Profile />
-                      </ProtectedRoute>
-                    }
-                  />
+                    {/* Profile Page */}
+                    <Route
+                      path="/profile"
+                      element={
+                        <ProtectedRoute>
+                          <Profile />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/feedback"
+                      element={
+                        <ProtectedRoute>
+                          <FeedBack />
+                        </ProtectedRoute>
+                      }
+                    />
 
-                  {/* ✅ Wrap AdminRoutes inside AdminProvider */}
-                  <Route
-                    path="/*"
-                    element={
-                      <ProtectedRoute adminOnly={true}>
-                        <AdminProvider>
-                          <AdminRoutes />
-                        </AdminProvider>
-                      </ProtectedRoute>
-                    }
-                  />
-                  {/* Fallback route */}
-                  <Route path="*" element={<Navigate to="/signup" replace />} />
-                </Routes>
-              </div>
-            </Router>
+                    {/* ✅ Wrap AdminRoutes inside AdminProvider */}
+                    <Route
+                      path="/*"
+                      element={
+                        <ProtectedRoute adminOnly={true}>
+                          <AdminProvider>
+                            <AdminRoutes />
+                          </AdminProvider>
+                        </ProtectedRoute>
+                      }
+                    />
+                    {/* Fallback route */}
+                    <Route path="*" element={<Navigate to="/signup" replace />} />
+                  </Routes>
+                </div>
+              </Router>
+            </FeedbackProvider>
           </ChatProvider>
         </UserProvider>
       </ThemeProvider>

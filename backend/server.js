@@ -14,8 +14,7 @@ import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
 import adminRoutes from './admin/routes/adminRoutes.js';
-
-dotenv.config();
+import feedbackRoutes from './routes/feedbackRoute.js';
 
 console.log('🚀 [SERVER] Starting server initialization...');
 console.log('🔑 [ENV CHECK] Environment variables status:', {
@@ -88,6 +87,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/chat', chatRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/feedback", feedbackRoutes);
 
 // ✅ Launch server (HTTP only — no Socket.IO)
 server.listen(PORT, () => {

@@ -14,10 +14,10 @@ export default function Sidebar() {
           Dashboard
         </Link>
         <Link
-          to="/admin/system-setup"
+          to="/admin/feedback-reply"
           className="block py-2 px-3 rounded hover:bg-green-600 transition"
         >
-          System Setup
+          Feedback
         </Link>
         <Link
           to="/admin/analytics"

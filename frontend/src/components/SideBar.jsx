@@ -5,7 +5,7 @@ import { Sidebar, SidebarBody, SidebarLink } from "./ui/sidebar.jsx";
 import {Link} from "react-router-dom";
 import {
   IconArrowLeft,
-  IconSettings,
+  IconMessageCircle,
   IconUserBolt,
   IconMessagePlus,
   IconTrash,
@@ -407,13 +407,13 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
         isDark ? 'text-gray-300' : 'text-gray-700'
       }`} />,
     },
-    {
-      label: "Settings",
-      href: "#",
-      icon: <IconSettings className={`h-5 w-5 shrink-0 ${
-        isDark ? 'text-gray-300' : 'text-gray-700'
-      }`} />,
-    },
+     {
+    label: "Feedback", // <-- Changed from Settings to Feedback
+    href: "/feedback", // <-- Route to /feedback
+    icon: <IconMessageCircle className={`h-5 w-5 shrink-0 ${
+      isDark ? 'text-gray-300' : 'text-gray-700'
+    }`} />, // <-- Feedback icon
+  },
     {
       label: "Logout",
       href: "#",
