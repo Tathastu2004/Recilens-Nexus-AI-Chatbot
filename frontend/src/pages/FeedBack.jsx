@@ -365,8 +365,8 @@ const FeedBack = () => {
           </div>
         )}
 
-        {/* ✅ Enhanced Stats Cards with Real Data (Only Total, Pending, Replied) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {/* ✅ Enhanced Stats Cards with Real Data (Total, Pending, Replied, Completed) */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-xl p-5 border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200">
             <div className="flex items-center justify-between">
               <div>
@@ -408,6 +408,21 @@ const FeedBack = () => {
               </div>
               <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center">
                 <IconMail size={20} className="text-blue-600 dark:text-blue-400" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-xl p-5 border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Completed</p>
+                <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                  {stats.completed}
+                </p>
+                <p className="text-xs text-gray-500">{stats.percentages?.completed || 0}% of total</p>
+              </div>
+              <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-xl flex items-center justify-center">
+                <IconCheck size={20} className="text-green-600 dark:text-green-400" />
               </div>
             </div>
           </div>
