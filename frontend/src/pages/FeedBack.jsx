@@ -1,26 +1,43 @@
 import React, { useState, useEffect } from 'react';
 import { 
   IconSend, IconMessageCircle, IconCheck, IconClock, IconMail, 
-  IconUser,  IconX, IconPlus, IconRefresh, IconAlertCircle,
-   IconTrash, IconEye, IconFilter, IconChevronDown
+  IconUser, IconX, IconPlus, IconRefresh, IconAlertCircle,
+  IconFilter, IconChevronDown, IconEdit
 } from '@tabler/icons-react';
-import { useFeedback } from '../context/FeedbackContext';
+import { useFeedback } from '../context/FeedbackContext'; // ✅ Fixed path (contexts not context)
 import { useTheme } from '../context/ThemeContext';
+import { useUser } from '../context/UserContext';
 
 const FeedBack = () => {
-  const { isDark, theme } = useTheme();
+  const { isDark } = useTheme();
+  const { user, isAuthenticated } = useUser();
   const { 
     feedbacks, 
     loading, 
     error, 
     createFeedback, 
     getUserFeedbacks,
+    getUserFeedbackStats, // ✅ Make sure this exists in your FeedbackContext
     clearError 
   } = useFeedback();
 
-  // Get current user
-  const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
-  const userId = currentUser._id;
+  const userId = user?._id;
+
+  // Stats state
+  const [stats, setStats] = useState({
+    total: 0,
+    pending: 0,
+    processed: 0,
+    completed: 0,
+    replied: 0,
+    unreplied: 0,
+    percentages: {
+      pending: 0,
+      processed: 0,
+      completed: 0,
+      replied: 0
+    }
+  });
 
   // Form state
   const [showNewFeedbackForm, setShowNewFeedbackForm] = useState(false);
@@ -36,12 +53,55 @@ const FeedBack = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [expandedFeedback, setExpandedFeedback] = useState(null);
 
-  // Load user feedbacks on mount
-  useEffect(() => {
-    if (userId) {
-      getUserFeedbacks(userId);
+  // ✅ Enhanced load function with better error handling
+  const loadUserData = async () => {
+    if (!userId) return;
+
+    try {
+      console.log('🔍 [FEEDBACK] Loading data for user:', userId);
+      
+      // Load feedbacks
+      await getUserFeedbacks(userId);
+      
+      // Load stats if function exists
+      if (getUserFeedbackStats) {
+        const statsResult = await getUserFeedbackStats(userId);
+        if (statsResult?.success && statsResult?.stats) {
+          setStats(statsResult.stats);
+          console.log('📊 [FEEDBACK] Stats loaded:', statsResult.stats);
+        }
+      } else {
+        // Fallback: Calculate stats from feedbacks array
+        const statusCounts = feedbacks.reduce((acc, feedback) => {
+          acc[feedback.status] = (acc[feedback.status] || 0) + 1;
+          return acc;
+        }, { pending: 0, processed: 0, completed: 0 });
+        
+        const repliedCount = feedbacks.filter(f => f.reply && f.reply.trim()).length;
+        const total = feedbacks.length;
+        
+        setStats({
+          total,
+          ...statusCounts,
+          replied: repliedCount,
+          unreplied: total - repliedCount,
+          percentages: {
+            pending: total > 0 ? Math.round((statusCounts.pending / total) * 100) : 0,
+            processed: total > 0 ? Math.round((statusCounts.processed / total) * 100) : 0,
+            completed: total > 0 ? Math.round((statusCounts.completed / total) * 100) : 0,
+            replied: total > 0 ? Math.round((repliedCount / total) * 100) : 0
+          }
+        });
+      }
+    } catch (error) {
+      console.error('❌ [FEEDBACK] Error loading data:', error);
     }
-  }, [userId, getUserFeedbacks]);
+  };
+
+  // Load user feedbacks and stats when user is available
+  useEffect(() => {
+    loadUserData();
+  }, [userId, feedbacks.length]); // ✅ Added feedbacks.length as dependency
 
   // Clear success message after 3 seconds
   useEffect(() => {
@@ -60,17 +120,19 @@ const FeedBack = () => {
     }));
   };
 
-  // Handle form submission
+  // ✅ Enhanced form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!formData.subject.trim() || !formData.message.trim()) {
-      return;
-    }
+    if (!formData.subject.trim() || !formData.message.trim()) return;
+    if (!userId) return;
 
     setIsSubmitting(true);
-    
     try {
+      console.log('📤 [FEEDBACK] Submitting feedback:', {
+        subject: formData.subject,
+        messageLength: formData.message.length
+      });
+
       const result = await createFeedback({
         subject: formData.subject.trim(),
         message: formData.message.trim()
@@ -80,55 +142,75 @@ const FeedBack = () => {
         setFormData({ subject: '', message: '' });
         setShowNewFeedbackForm(false);
         setSubmitSuccess(true);
-        // Refresh feedbacks list
-        getUserFeedbacks(userId);
+        
+        // Reload data
+        await loadUserData();
+        
+        console.log('✅ [FEEDBACK] Feedback submitted successfully');
       }
-    } catch (err) {
-      console.error('Failed to submit feedback:', err);
+    } catch (error) {
+      console.error('❌ [FEEDBACK] Submit error:', error);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Get status display info
+  // ✅ Enhanced status info with better styling
   const getStatusInfo = (status) => {
-    switch (status) {
-      case 'pending':
-        return {
-          color: 'text-yellow-600 dark:text-yellow-400',
-          bg: 'bg-yellow-50 dark:bg-yellow-900/20',
-          border: 'border-yellow-200 dark:border-yellow-700',
-          icon: <IconClock size={14} />,
-          text: 'Pending',
-          dot: 'bg-yellow-500'
-        };
-      case 'processed':
-        return {
-          color: 'text-blue-600 dark:text-blue-400',
-          bg: 'bg-blue-50 dark:bg-blue-900/20',
-          border: 'border-blue-200 dark:border-blue-700',
-          icon: <IconMail size={14} />,
-          text: 'Replied',
-          dot: 'bg-blue-500'
-        };
-      case 'completed':
-        return {
-          color: 'text-green-600 dark:text-green-400',
-          bg: 'bg-green-50 dark:bg-green-900/20',
-          border: 'border-green-200 dark:border-green-700',
-          icon: <IconCheck size={14} />,
-          text: 'Completed',
-          dot: 'bg-green-500'
-        };
-      default:
-        return {
-          color: 'text-gray-600 dark:text-gray-400',
-          bg: 'bg-gray-50 dark:bg-gray-900/20',
-          border: 'border-gray-200 dark:border-gray-700',
-          icon: <IconClock size={14} />,
-          text: status,
-          dot: 'bg-gray-500'
-        };
+    const statusMap = {
+      'pending': {
+        color: 'text-yellow-600 dark:text-yellow-400',
+        bg: 'bg-yellow-50 dark:bg-yellow-900/20',
+        border: 'border-yellow-200 dark:border-yellow-700',
+        icon: <IconClock size={14} />,
+        text: 'Pending Review',
+        dot: 'bg-yellow-500'
+      },
+      'processed': {
+        color: 'text-blue-600 dark:text-blue-400',
+        bg: 'bg-blue-50 dark:bg-blue-900/20',
+        border: 'border-blue-200 dark:border-blue-700',
+        icon: <IconMail size={14} />,
+        text: 'Replied',
+        dot: 'bg-blue-500'
+      },
+      'completed': {
+        color: 'text-green-600 dark:text-green-400',
+        bg: 'bg-green-50 dark:bg-green-900/20',
+        border: 'border-green-200 dark:border-green-700',
+        icon: <IconCheck size={14} />,
+        text: 'Completed',
+        dot: 'bg-green-500'
+      }
+    };
+
+    return statusMap[status] || {
+      color: 'text-gray-600 dark:text-gray-400',
+      bg: 'bg-gray-50 dark:bg-gray-900/20',
+      border: 'border-gray-200 dark:border-gray-700',
+      icon: <IconClock size={14} />,
+      text: status || 'Unknown',
+      dot: 'bg-gray-500'
+    };
+  };
+
+  // ✅ Enhanced time formatting
+  const formatTimeAgo = (dateString) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInMs = now - date;
+    const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+    const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+    const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
+
+    if (diffInDays > 0) {
+      return `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`;
+    } else if (diffInHours > 0) {
+      return `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`;
+    } else if (diffInMinutes > 0) {
+      return `${diffInMinutes} minute${diffInMinutes > 1 ? 's' : ''} ago`;
+    } else {
+      return 'Just now';
     }
   };
 
@@ -137,11 +219,27 @@ const FeedBack = () => {
     statusFilter === 'all' || feedback.status === statusFilter
   );
 
-  // Get status counts
-  const statusCounts = feedbacks.reduce((acc, feedback) => {
-    acc[feedback.status] = (acc[feedback.status] || 0) + 1;
-    return acc;
-  }, {});
+  if (!isAuthenticated || !user) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center transition-all duration-300 ${
+        isDark 
+          ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900' 
+          : 'bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50'
+      }`}>
+        <div className="text-center space-y-4 p-8">
+          <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto shadow-xl">
+            <IconUser size={32} className="text-white" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200">
+            Authentication Required
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400 max-w-md">
+            Please log in to access the feedback system and view your submitted feedback.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`min-h-screen transition-all duration-300 ${
@@ -149,8 +247,7 @@ const FeedBack = () => {
         ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900' 
         : 'bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50'
     }`}>
-      
-      {/* Header */}
+      {/* Header with User Info */}
       <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-b border-gray-200/50 dark:border-gray-700/50 sticky top-0 z-40">
         <div className="max-w-6xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
@@ -163,7 +260,7 @@ const FeedBack = () => {
                   Feedback & Support
                 </h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Share your thoughts and get help from our team
+                  Welcome <span className="font-medium text-blue-600 dark:text-blue-400">{user.name}</span> - Share your thoughts and get help from our team
                 </p>
               </div>
             </div>
@@ -182,7 +279,7 @@ const FeedBack = () => {
               </button>
               
               <button
-                onClick={() => getUserFeedbacks(userId)}
+                onClick={loadUserData}
                 disabled={loading}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 title="Refresh feedbacks"
@@ -204,7 +301,7 @@ const FeedBack = () => {
           {showFilters && (
             <div className="mt-4 pt-4 border-t border-gray-200/50 dark:border-gray-700/50">
               <div className="flex flex-wrap gap-2">
-                {['all', 'pending', 'processed', 'completed'].map((status) => (
+                {['all', 'pending', 'processed'].map((status) => (
                   <button
                     key={status}
                     onClick={() => setStatusFilter(status)}
@@ -215,9 +312,9 @@ const FeedBack = () => {
                     }`}
                   >
                     {status === 'all' ? 'All Feedback' : status.charAt(0).toUpperCase() + status.slice(1)}
-                    {status !== 'all' && statusCounts[status] && (
+                    {status !== 'all' && stats[status] > 0 && (
                       <span className="ml-2 px-2 py-0.5 bg-white/20 rounded-full text-xs">
-                        {statusCounts[status]}
+                        {stats[status]}
                       </span>
                     )}
                   </button>
@@ -241,7 +338,7 @@ const FeedBack = () => {
                 Feedback submitted successfully!
               </p>
               <p className="text-green-600 dark:text-green-400 text-sm">
-                We'll review your feedback and get back to you soon.
+                We'll review your feedback and get back to you at {user.email} soon.
               </p>
             </div>
           </div>
@@ -268,6 +365,54 @@ const FeedBack = () => {
           </div>
         )}
 
+        {/* ✅ Enhanced Stats Cards with Real Data (Only Total, Pending, Replied) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-xl p-5 border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Total</p>
+                <p className="text-2xl font-bold text-gray-800 dark:text-gray-200">
+                  {stats.total}
+                </p>
+                <p className="text-xs text-gray-500">All feedback</p>
+              </div>
+              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center shadow-md">
+                <IconMessageCircle size={20} className="text-white" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-xl p-5 border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Pending</p>
+                <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                  {stats.pending}
+                </p>
+                <p className="text-xs text-gray-500">{stats.percentages?.pending || 0}% of total</p>
+              </div>
+              <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-900/30 rounded-xl flex items-center justify-center">
+                <IconClock size={20} className="text-yellow-600 dark:text-yellow-400" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-xl p-5 border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Replied</p>
+                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                  {stats.processed}
+                </p>
+                <p className="text-xs text-gray-500">{stats.percentages?.processed || 0}% of total</p>
+              </div>
+              <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center">
+                <IconMail size={20} className="text-blue-600 dark:text-blue-400" />
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* New Feedback Form Modal */}
         {showNewFeedbackForm && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
@@ -277,7 +422,7 @@ const FeedBack = () => {
               <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20">
                 <div className="flex items-center gap-3">
                   <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-                    {/* <IconEdit size={14} className="text-white" /> */}
+                    <IconEdit size={14} className="text-white" />
                   </div>
                   <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">
                     Submit New Feedback
@@ -300,14 +445,14 @@ const FeedBack = () => {
                     Subject <span className="text-red-500">*</span>
                   </label>
                   <div className="relative">
-                    {/* <IconSubject size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" /> */}
+                    <IconEdit size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                     <input
                       type="text"
                       name="subject"
                       value={formData.subject}
                       onChange={handleInputChange}
                       placeholder="Brief description of your feedback"
-                      className="w-full pl-10 pr-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-800 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-400 transition-all"
+                      className="w-full pl-10 pr-16 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-800 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-400 transition-all"
                       required
                       maxLength={100}
                     />
@@ -371,66 +516,7 @@ const FeedBack = () => {
           </div>
         )}
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-xl p-5 border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Total</p>
-                <p className="text-2xl font-bold text-gray-800 dark:text-gray-200">
-                  {feedbacks.length}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center shadow-md">
-                <IconMessageCircle size={20} className="text-white" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-xl p-5 border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Pending</p>
-                <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-                  {statusCounts.pending || 0}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-900/30 rounded-xl flex items-center justify-center">
-                <IconClock size={20} className="text-yellow-600 dark:text-yellow-400" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-xl p-5 border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Replied</p>
-                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                  {statusCounts.processed || 0}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center">
-                <IconMail size={20} className="text-blue-600 dark:text-blue-400" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-xl p-5 border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Completed</p>
-                <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                  {statusCounts.completed || 0}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-xl flex items-center justify-center">
-                <IconCheck size={20} className="text-green-600 dark:text-green-400" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Feedbacks List */}
+        {/* ✅ Enhanced Feedbacks List with Better Formatting */}
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="text-center space-y-3">
@@ -492,17 +578,27 @@ const FeedBack = () => {
                             {statusInfo.text}
                           </div>
                         </div>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
-                          Submitted on {new Date(feedback.createdAt).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'long',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </p>
+                        <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400 mb-2">
+                          <span>
+                            {new Date(feedback.createdAt).toLocaleDateString('en-US', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
+                          <span>•</span>
+                          <span>{formatTimeAgo(feedback.createdAt)}</span>
+                          {feedback.reply && (
+                            <>
+                              <span>•</span>
+                              <span className="text-blue-600 dark:text-blue-400 font-medium">Replied</span>
+                            </>
+                          )}
+                        </div>
                         {!isExpanded && (
-                          <p className="text-sm text-gray-600 dark:text-gray-300 mt-2 line-clamp-2">
+                          <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">
                             {feedback.message}
                           </p>
                         )}

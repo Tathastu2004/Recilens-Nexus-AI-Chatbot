@@ -6,6 +6,7 @@ import {
   getAllFeedbacks,
   replyToFeedback,
   markFeedbackCompleted,
+  getUserFeedbackStats,
 } from "../controllers/feedbackController.js";
 import { verifyToken, requireAdmin, requireClient } from "../middleware/authMiddleware.js";
 
@@ -22,6 +23,7 @@ router.post("/user", verifyToken, requireClient, createFeedback);
 
 // Get all feedbacks for the logged-in user (client only)
 router.get("/user/:userId", verifyToken, requireClient, getUserFeedbacks);
+router.get("/stats/user/:userId", verifyToken, requireClient, getUserFeedbackStats);
 
 /**
  * ===============================
@@ -37,5 +39,7 @@ router.post("/:feedbackId/reply", verifyToken, requireAdmin, replyToFeedback);
 
 // Mark feedback as completed (admin only)
 router.put("/:id/complete", verifyToken, requireAdmin, markFeedbackCompleted);
+
+
 
 export default router;
