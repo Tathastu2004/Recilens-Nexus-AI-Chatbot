@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   IconSend, IconMessageCircle, IconCheck, IconClock, IconMail, 
   IconUser, IconX, IconPlus, IconRefresh, IconAlertCircle,
-  IconFilter, IconChevronDown, IconEdit
+  IconFilter, IconChevronDown, IconEdit , IconArrowLeft
 } from '@tabler/icons-react';
 import { useFeedback } from '../context/FeedbackContext'; // ✅ Fixed path (contexts not context)
 import { useTheme } from '../context/ThemeContext';
 import { useUser } from '../context/UserContext';
 
 const FeedBack = () => {
+  const navigate = useNavigate();
   const { isDark } = useTheme();
   const { user, isAuthenticated } = useUser();
   const { 
@@ -248,82 +250,92 @@ const FeedBack = () => {
         : 'bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50'
     }`}>
       {/* Header with User Info */}
-      <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-b border-gray-200/50 dark:border-gray-700/50 sticky top-0 z-40">
-        <div className="max-w-6xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center shadow-md">
-                <IconMessageCircle size={18} className="text-white" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
-                  Feedback & Support
-                </h1>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Welcome <span className="font-medium text-blue-600 dark:text-blue-400">{user.name}</span> - Share your thoughts and get help from our team
-                </p>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setShowFilters(!showFilters)}
-                className={`p-2 rounded-lg transition-colors ${
-                  showFilters 
-                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' 
-                    : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400'
-                }`}
-                title="Toggle filters"
-              >
-                <IconFilter size={18} />
-              </button>
-              
-              <button
-                onClick={loadUserData}
-                disabled={loading}
-                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                title="Refresh feedbacks"
-              >
-                <IconRefresh size={18} className={`${loading ? 'animate-spin' : ''} text-gray-500 dark:text-gray-400`} />
-              </button>
-              
-              <button
-                onClick={() => setShowNewFeedbackForm(true)}
-                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2 transform hover:scale-105"
-              >
-                <IconPlus size={16} />
-                New Feedback
-              </button>
-            </div>
-          </div>
-
-          {/* Filters Bar */}
-          {showFilters && (
-            <div className="mt-4 pt-4 border-t border-gray-200/50 dark:border-gray-700/50">
-              <div className="flex flex-wrap gap-2">
-                {['all', 'pending', 'processed'].map((status) => (
-                  <button
-                    key={status}
-                    onClick={() => setStatusFilter(status)}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      statusFilter === status
-                        ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md'
-                        : 'bg-white/70 dark:bg-gray-800/70 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200/50 dark:border-gray-700/50'
-                    }`}
-                  >
-                    {status === 'all' ? 'All Feedback' : status.charAt(0).toUpperCase() + status.slice(1)}
-                    {status !== 'all' && stats[status] > 0 && (
-                      <span className="ml-2 px-2 py-0.5 bg-white/20 rounded-full text-xs">
-                        {stats[status]}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+     <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-b border-gray-200/50 dark:border-gray-700/50 sticky top-0 z-40">
+  <div className="max-w-6xl mx-auto px-6 py-4">
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-3">
+        {/* ✅ Red Back Arrow Button */}
+        <button
+          onClick={() => navigate('/chat')}
+          className="p-2 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 rounded-lg transition-all shadow-sm hover:shadow-md transform hover:scale-105"
+          title="Back to Chat"
+        >
+          <IconArrowLeft size={18} />
+        </button>
+        
+        <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center shadow-md">
+          <IconMessageCircle size={18} className="text-white" />
+        </div>
+        <div>
+          <h1 className="text-xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
+            Feedback & Support
+          </h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Welcome <span className="font-medium text-blue-600 dark:text-blue-400">{user.name}</span> - Share your thoughts and get help from our team
+          </p>
         </div>
       </div>
+      
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className={`p-2 rounded-lg transition-colors ${
+            showFilters 
+              ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' 
+              : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400'
+          }`}
+          title="Toggle filters"
+        >
+          <IconFilter size={18} />
+        </button>
+        
+        <button
+          onClick={loadUserData}
+          disabled={loading}
+          className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          title="Refresh feedbacks"
+        >
+          <IconRefresh size={18} className={`${loading ? 'animate-spin' : ''} text-gray-500 dark:text-gray-400`} />
+        </button>
+        
+        <button
+          onClick={() => setShowNewFeedbackForm(true)}
+          className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2 transform hover:scale-105"
+        >
+          <IconPlus size={16} />
+          New Feedback
+        </button>
+      </div>
+    </div>
+
+    {/* Filters Bar */}
+    {showFilters && (
+      <div className="mt-4 pt-4 border-t border-gray-200/50 dark:border-gray-700/50">
+        <div className="flex flex-wrap gap-2">
+          {['all', 'pending', 'processed'].map((status) => (
+            <button
+              key={status}
+              onClick={() => setStatusFilter(status)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                statusFilter === status
+                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md'
+                  : 'bg-white/70 dark:bg-gray-800/70 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200/50 dark:border-gray-700/50'
+              }`}
+            >
+              {status === 'all' ? 'All Feedback' : status.charAt(0).toUpperCase() + status.slice(1)}
+              {status !== 'all' && stats[status] > 0 && (
+                <span className="ml-2 px-2 py-0.5 bg-white/20 rounded-full text-xs">
+                  {stats[status]}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+    )}
+  </div>
+</div>
+
 
       <div className="max-w-6xl mx-auto px-6 py-6">
         

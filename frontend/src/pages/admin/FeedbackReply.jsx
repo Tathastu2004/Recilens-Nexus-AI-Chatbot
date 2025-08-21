@@ -278,7 +278,7 @@ const AdminFeedback = () => {
                       {/* Reply Form */}
                       {feedback.status === 'pending' && (
                         <div>
-                          <h5 className="font-medium text-green-800 mb-2">
+                          <h5 className="font-medium text-black mb-2">
                             Send Reply (User will be notified via email):
                           </h5>
                           <div className="space-y-3">
@@ -287,7 +287,7 @@ const AdminFeedback = () => {
                               onChange={(e) => handleReplyChange(feedback._id, e.target.value)}
                               placeholder="Write your reply to the user..."
                               rows={4}
-                              className="w-full px-4 py-3 border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
+                              className="w-full px-4 py-3 text-black  border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
                               maxLength={1000}
                             />
                             <div className="flex items-center justify-between">
