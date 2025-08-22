@@ -6,17 +6,12 @@ import ChatSession from "../../models/ChatSession.js";
 import User from "../../models/User.js";
 import axios from "axios";
 
-
-const FASTAPI_BASE_URL = process.env.FASTAPI_BASE_URL || "http://127.0.0.1:8000";
+const FASTAPI_BASE_URL = process.env.FASTAPI_URL || "http://localhost:8000";
 
 /**
  * ===============================
  *  SYSTEM SETUP (AdminConfig)
  * ===============================
- */
-
-/**
- * Get current system configuration (active model, intents, templates)
  */
 export const getSystemConfig = async (req, res) => {
   try {
@@ -27,29 +22,25 @@ export const getSystemConfig = async (req, res) => {
   }
 };
 
-/**
- * Update system configuration (change active model, update intents/templates)
- */
 export const updateSystemConfig = async (req, res) => {
   try {
     const { activeModel, intents, responseTemplates } = req.body;
-
+    
     const newConfig = new AdminConfig({
       activeModel,
       intents,
       responseTemplates,
       updatedBy: req.user._id
     });
-
+    
     await newConfig.save();
-
-    // 🔗 Optionally inform FastAPI about new active model
+    
     try {
       await axios.post(`${FASTAPI_BASE_URL}/config/update`, { activeModel });
     } catch (err) {
       console.warn("FastAPI not reachable, continuing with Mongo only.");
     }
-
+    
     res.json({ message: "System configuration updated", config: newConfig });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -60,14 +51,6 @@ export const updateSystemConfig = async (req, res) => {
  * ===============================
  *  DASHBOARD & ANALYTICS
  * ===============================
- */
-
-/**
- * Get dashboard stats:
- * - total users
- * - total chat sessions
- * - total messages
- * - total AI messages
  */
 export const getDashboardStats = async (req, res) => {
   try {
@@ -87,9 +70,6 @@ export const getDashboardStats = async (req, res) => {
   }
 };
 
-/**
- * Get analytics report (query patterns, accuracy, response time)
- */
 export const getAnalytics = async (req, res) => {
   try {
     const analytics = await Analytics.find().sort({ generatedAt: -1 }).limit(20);
@@ -99,20 +79,16 @@ export const getAnalytics = async (req, res) => {
   }
 };
 
-/**
- * Generate new analytics report from Messages collection
- */
 export const generateAnalytics = async (req, res) => {
   try {
-    // Example: total messages + random accuracy
     const totalMessages = await Message.countDocuments();
-    const randomAccuracy = Math.floor(Math.random() * 20) + 80; // 80-99%
+    const randomAccuracy = Math.floor(Math.random() * 20) + 80;
 
     const analytics = new Analytics({
       intent: "general",
       totalQueries: totalMessages,
       accuracy: randomAccuracy,
-      avgResponseTime: Math.floor(Math.random() * 1000) + 300, // mock in ms
+      avgResponseTime: Math.floor(Math.random() * 1000) + 300,
       generatedAt: new Date()
     });
 
@@ -167,38 +143,46 @@ export const generateRealAnalytics = async (req, res) => {
   }
 };
 
-
 /**
  * ===============================
  *  MODEL MANAGEMENT
  * ===============================
  */
-
-/**
- * Start new model training
- */
 export const startModelTraining = async (req, res) => {
   try {
-    const { modelName, dataset } = req.body;
+    const { modelName, dataset, parameters } = req.body;
 
-    // 1. Save training job in Mongo first
+    const supportedModels = ["llama3", "blip", "llama-custom"];
+    if (!supportedModels.some(model => modelName.toLowerCase().includes(model))) {
+      return res.status(400).json({ error: "Unsupported model type" });
+    }
+
     const training = new ModelTraining({
       modelName,
       dataset,
+      parameters: parameters || {},
       status: "pending",
       trainedBy: req.user._id
     });
     await training.save();
 
-    // 2. Call FastAPI to actually run training
     try {
-      await axios.post(`${FASTAPI_BASE_URL}/train`, {
-        job_id: training._id.toString(),
+      const response = await axios.post(`${FASTAPI_BASE_URL}/train`, {
+        jobId: training._id.toString(),
         modelName,
-        dataset
-      });
+        dataset,
+        parameters
+      }, { timeout: 10000 });
+
+      console.log("FastAPI training started:", response.data);
     } catch (err) {
       console.error("FastAPI training error:", err.message);
+      
+      await ModelTraining.findByIdAndUpdate(training._id, {
+        status: "failed",
+        $push: { logs: `Failed to start training: ${err.message}` }
+      });
+      
       return res.status(500).json({ error: "Failed to start training on FastAPI" });
     }
 
@@ -208,45 +192,191 @@ export const startModelTraining = async (req, res) => {
   }
 };
 
-/**
- * Get all model training jobs
- */
 export const getTrainingJobs = async (req, res) => {
   try {
-    const jobs = await ModelTraining.find().sort({ createdAt: -1 });
+    const { status, modelName, limit = 20 } = req.query;
+    
+    let filter = {};
+    if (status) filter.status = status;
+    if (modelName) filter.modelName = new RegExp(modelName, 'i');
+
+    const jobs = await ModelTraining.find(filter)
+      .populate('trainedBy', 'username email')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+      
     res.json(jobs);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-/**
- * Update training status (admin manually marks as running/completed/failed)
- */
-export const updateTrainingStatus = async (req, res) => {
+export const getTrainingDetails = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, logs, accuracy } = req.body;
-
-    const training = await ModelTraining.findByIdAndUpdate(
-      id,
-      { status, $push: { logs: logs }, accuracy },
-      { new: true }
-    );
-
-    res.json({ message: "Training updated", training });
+    const training = await ModelTraining.findById(id)
+      .populate('trainedBy', 'username email');
+      
+    if (!training) {
+      return res.status(404).json({ error: "Training job not found" });
+    }
+    
+    res.json(training);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
+export const updateTrainingStatus = async (req, res) => {
+  try {
+    const { id, jobId } = req.params;
+    const { status, log, logs, accuracy, progress } = req.body;
+    
+    const trainingId = id || jobId;
+    
+    const updateData = {};
+    if (status) updateData.status = status;
+    if (accuracy !== undefined) updateData.accuracy = accuracy;
+    if (status === "completed") updateData.completedAt = new Date();
+    
+    if (log || logs) {
+      updateData.$push = { logs: log || logs };
+    }
 
-// ===============================
-//  USER & ADMIN MANAGEMENT
-// ===============================
+    const training = await ModelTraining.findByIdAndUpdate(
+      trainingId,
+      updateData,
+      { new: true }
+    );
+
+    if (!training) {
+      return res.status(404).json({ error: "Training job not found" });
+    }
+
+    console.log(`Training ${trainingId} updated:`, { status, progress, log });
+    res.json({ message: "Training updated", training });
+  } catch (error) {
+    console.error("Update training error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const cancelTraining = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const training = await ModelTraining.findByIdAndUpdate(
+      id,
+      { 
+        status: "failed",
+        completedAt: new Date(),
+        $push: { logs: "Training cancelled by admin" }
+      },
+      { new: true }
+    );
+
+    if (!training) {
+      return res.status(404).json({ error: "Training job not found" });
+    }
+
+    try {
+      await axios.post(`${FASTAPI_BASE_URL}/training/cancel`, {
+        jobId: id
+      });
+    } catch (err) {
+      console.error("Failed to notify FastAPI about cancellation:", err.message);
+    }
+
+    res.json({ message: "Training cancelled", training });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const loadModel = async (req, res) => {
+  try {
+    const { modelId } = req.params;
+    const { modelPath, modelType, parameters } = req.body;
+
+    const response = await axios.post(`${FASTAPI_BASE_URL}/model/load`, {
+      modelId,
+      modelPath: modelPath || `./models/${modelId}`,
+      modelType: modelType || "llama",
+      parameters: parameters || {}
+    });
+
+    res.json({
+      message: "Model load request sent",
+      modelId,
+      fastApiResponse: response.data
+    });
+  } catch (error) {
+    console.error("Model load error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const unloadModel = async (req, res) => {
+  try {
+    const { modelId } = req.params;
+
+    const response = await axios.post(`${FASTAPI_BASE_URL}/model/unload`, {
+      modelId
+    });
+
+    res.json({
+      message: "Model unload request sent",
+      modelId,
+      fastApiResponse: response.data
+    });
+  } catch (error) {
+    console.error("Model unload error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const getModelStatus = async (req, res) => {
+  try {
+    const { modelId } = req.params;
+
+    const response = await axios.get(`${FASTAPI_BASE_URL}/model/${modelId}/status`);
+
+    res.json({
+      modelId,
+      status: response.data
+    });
+  } catch (error) {
+    console.error("Model status error:", error.message);
+    res.status(500).json({ 
+      error: error.message,
+      modelId: req.params.modelId,
+      status: "unknown"
+    });
+  }
+};
+
+export const getLoadedModels = async (req, res) => {
+  try {
+    const response = await axios.get(`${FASTAPI_BASE_URL}/model/loaded`);
+
+    res.json({
+      loadedModels: response.data,
+      count: response.data.length || 0
+    });
+  } catch (error) {
+    console.error("Get loaded models error:", error.message);
+    res.status(500).json({ 
+      error: error.message,
+      loadedModels: [],
+      count: 0
+    });
+  }
+};
 
 /**
- * 📌 Fetch all users (admin + clients + super-admin)
+ * ===============================
+ *  USER & ADMIN MANAGEMENT
+ * ===============================
  */
 export const getAllUsers = async (req, res) => {
   try {
@@ -257,9 +387,6 @@ export const getAllUsers = async (req, res) => {
   }
 };
 
-/**
- * 📌 Fetch all admins (role: "admin" or "super-admin")
- */
 export const getAllAdmins = async (req, res) => {
   try {
     const admins = await User.find({ role: { $in: ["admin", "super-admin"] } })
@@ -271,9 +398,6 @@ export const getAllAdmins = async (req, res) => {
   }
 };
 
-/**
- * 📌 Promote a client to admin
- */
 export const promoteUserToAdmin = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -291,9 +415,6 @@ export const promoteUserToAdmin = async (req, res) => {
   }
 };
 
-/**
- * 📌 Demote an admin to client
- */
 export const demoteAdminToClient = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -312,9 +433,6 @@ export const demoteAdminToClient = async (req, res) => {
   }
 };
 
-/**
- * 📌 Delete a user (and cascade: delete their sessions + messages)
- */
 export const deleteUser = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -322,7 +440,6 @@ export const deleteUser = async (req, res) => {
     const deletedUser = await User.findByIdAndDelete(userId);
     if (!deletedUser) return res.status(404).json({ success: false, message: "User not found" });
 
-    // Delete user’s sessions & messages
     const sessions = await ChatSession.find({ user: userId });
     const sessionIds = sessions.map(s => s._id);
 
@@ -332,6 +449,122 @@ export const deleteUser = async (req, res) => {
     res.json({ success: true, message: "User and related data deleted" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Helper functions for advanced routes
+export const getFilteredTrainingJobs = async (filter, options) => {
+  try {
+    const { limit = 50, offset = 0, sort = { createdAt: -1 } } = options;
+    
+    const jobs = await ModelTraining.find(filter)
+      .populate('trainedBy', 'username email')
+      .sort(sort)
+      .skip(parseInt(offset))
+      .limit(parseInt(limit));
+    
+    const total = await ModelTraining.countDocuments(filter);
+    
+    return {
+      jobs,
+      total,
+      offset: parseInt(offset),
+      limit: parseInt(limit)
+    };
+  } catch (error) {
+    throw error;
+  }
+};
+
+export const searchUsers = async (searchCriteria, options) => {
+  try {
+    const { username, email, role, isActive } = searchCriteria;
+    const { limit = 50, offset = 0 } = options;
+    
+    const filter = {};
+    if (username) filter.username = new RegExp(username, 'i');
+    if (email) filter.email = new RegExp(email, 'i');
+    if (role) filter.role = role;
+    if (isActive !== undefined) filter.isActive = isActive;
+    
+    const users = await User.find(filter)
+      .select("-password -otp -passwordResetOtp")
+      .skip(parseInt(offset))
+      .limit(parseInt(limit));
+    
+    const total = await User.countDocuments(filter);
+    
+    return {
+      users,
+      total,
+      offset: parseInt(offset),
+      limit: parseInt(limit)
+    };
+  } catch (error) {
+    throw error;
+  }
+};
+
+export const exportTrainingLogs = async (jobId, format) => {
+  try {
+    const training = await ModelTraining.findById(jobId)
+      .populate('trainedBy', 'username email');
+    
+    if (!training) {
+      throw new Error('Training job not found');
+    }
+    
+    switch (format) {
+      case 'json':
+        return JSON.stringify(training, null, 2);
+      case 'csv':
+        // Simple CSV export
+        const logs = training.logs || [];
+        const csvData = ['Timestamp,Log Entry'].concat(
+          logs.map((log, index) => `${index + 1},"${log}"`)
+        ).join('\n');
+        return csvData;
+      case 'txt':
+        return logs.join('\n');
+      default:
+        return JSON.stringify(training, null, 2);
+    }
+  } catch (error) {
+    throw error;
+  }
+};
+
+export const exportAnalytics = async (dateFilter, format) => {
+  try {
+    const { dateFrom, dateTo } = dateFilter;
+    const filter = {};
+    
+    if (dateFrom || dateTo) {
+      filter.generatedAt = {};
+      if (dateFrom) filter.generatedAt.$gte = new Date(dateFrom);
+      if (dateTo) filter.generatedAt.$lte = new Date(dateTo);
+    }
+    
+    const analytics = await Analytics.find(filter).sort({ generatedAt: -1 });
+    
+    switch (format) {
+      case 'json':
+        return JSON.stringify(analytics, null, 2);
+      case 'csv':
+        const headers = 'Intent,Total Queries,Accuracy,Avg Response Time,Generated At';
+        const rows = analytics.map(item => 
+          `"${item.intent}",${item.totalQueries},${item.accuracy},${item.avgResponseTime},"${item.generatedAt}"`
+        );
+        return [headers, ...rows].join('\n');
+      case 'txt':
+        return analytics.map(item => 
+          `Intent: ${item.intent}\nQueries: ${item.totalQueries}\nAccuracy: ${item.accuracy}%\nResponse Time: ${item.avgResponseTime}ms\nGenerated: ${item.generatedAt}\n---\n`
+        ).join('');
+      default:
+        return JSON.stringify(analytics, null, 2);
+    }
+  } catch (error) {
+    throw error;
   }
 };
 

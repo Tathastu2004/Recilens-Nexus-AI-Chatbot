@@ -9,6 +9,14 @@ from typing import Optional, Dict, Any, List
 import uuid
 from datetime import datetime
 import requests
+from models.training_models import (
+    TrainingRequest, CancelRequest, ModelLoadRequest, 
+    ModelUnloadRequest, ModelStatusResponse
+)
+from services.training_service import TrainingService
+from services.model_manager import ModelManager
+from config.training_config import TrainingConfig
+import logging
 
 # Import intent recognition from ollama_client
 from ollama_client import recognize_intent
@@ -16,6 +24,10 @@ from ollama_client import recognize_intent
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv()
+
+# Add logging configuration
+logging.basicConfig(level=TrainingConfig.LOG_LEVEL)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -56,6 +68,13 @@ class ConversationMemory:
 
 # Initialize memory
 memory = ConversationMemory()
+
+# Initialize services (add after your memory initialization)
+training_service = TrainingService(TrainingConfig.NODE_BACKEND_URL)
+model_manager = ModelManager()
+
+# Ensure model directories exist
+TrainingConfig.ensure_model_directories()
 
 # ✅ SIMPLIFIED CHAT REQUEST MODEL
 class ChatRequest(BaseModel):
@@ -354,77 +373,154 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
         return StreamingResponse(error_generator(), media_type="text/plain")
     
 # ✅ TRAINING REQUEST MODEL
-class TrainingRequest(BaseModel):
-    jobId: str
-    modelName: str
-    dataset: str
-    parameters: Optional[Dict[str, Any]] = None
+# class TrainingRequest(BaseModel):
+#     jobId: str
+#     modelName: str
+#     dataset: str
+#     parameters: Optional[Dict[str, Any]] = None
 
 @app.post("/train")
 async def train_model(req: TrainingRequest):
-    """
-    This is called from Node.js when training is started.
-    - jobId is always generated in Node (Mongo _id)
-    - FastAPI just runs the job and sends updates back to Node
-    """
-    job_id = req.jobId
-    model_name = req.modelName
-    dataset = req.dataset
-    params = req.parameters or {}
+    """Enhanced training endpoint with proper service integration"""
+    try:
+        logger.info(f"Training job started: {req.jobId}")
+        
+        # Start training in background
+        asyncio.create_task(
+            training_service.start_training(
+                req.jobId, 
+                req.modelName, 
+                req.dataset, 
+                req.parameters
+            )
+        )
+        
+        return {
+            "ok": True, 
+            "jobId": req.jobId, 
+            "message": "Training started successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Training start failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to start training: {str(e)}")
 
-    print(f"🚀 [TRAINING] Job started")
-    print(f"   jobId: {job_id}")
-    print(f"   model: {model_name}")
-    print(f"   dataset: {dataset}")
-    print(f"   params: {params}")
+# Add new model management endpoints
+@app.post("/training/cancel")
+async def cancel_training(req: CancelRequest):
+    """Cancel a training job"""
+    success = training_service.cancel_job(req.jobId)
+    if success:
+        return {"message": "Training job cancelled", "jobId": req.jobId}
+    else:
+        raise HTTPException(status_code=404, detail="Training job not found")
 
-    async def training_process():
-        try:
-            # 🔄 Step 1: Notify Node that training started
-            requests.post("http://localhost:3000/api/training/update", json={
-                "jobId": job_id,
-                "status": "running",
-                "log": f"Training started for model {model_name}"
-            })
+@app.get("/training/status/{job_id}")
+async def get_training_status(job_id: str):
+    """Get training job status"""
+    status = training_service.get_job_status(job_id)
+    return status
 
-            # 🔄 Step 2: Fake long-running training (replace with real ML loop)
-            for epoch in range(1, 6):
-                await asyncio.sleep(2)  # simulate training work
-                log_msg = f"Epoch {epoch}/5 completed"
-                print(f"📝 [TRAINING] {log_msg}")
+@app.post("/model/load")
+async def load_model_endpoint(request: ModelLoadRequest):
+    """Load a model endpoint"""
+    try:
+        logger.info(f"Loading model request: {request.modelId}")
+        
+        # Basic validation
+        if not request.modelId:
+            raise HTTPException(status_code=400, detail="Model ID is required")
+        
+        if not request.modelPath:
+            raise HTTPException(status_code=400, detail="Model path is required")
+        
+        # For now, just simulate loading (replace with actual logic later)
+        if request.modelType.lower() == "llama":
+            # Simulate Llama loading
+            result = {
+                "status": "success",
+                "message": f"Llama model {request.modelId} loaded successfully",
+                "modelId": request.modelId,
+                "type": "llama",
+                "loadTime": datetime.now().isoformat()
+            }
+        elif request.modelType.lower() == "blip":
+            # Simulate BLIP loading
+            result = {
+                "status": "success", 
+                "message": f"BLIP model {request.modelId} loaded successfully",
+                "modelId": request.modelId,
+                "type": "blip",
+                "loadTime": datetime.now().isoformat()
+            }
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported model type: {request.modelType}")
+        
+        logger.info(f"Model {request.modelId} loaded successfully")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Failed to load model {request.modelId}")
+        raise HTTPException(status_code=500, detail=f"Failed to load model: {str(e)}")
 
-                requests.post("http://localhost:3000/api/training/update", json={
-                    "jobId": job_id,
-                    "status": "running",
-                    "log": log_msg,
-                    "progress": epoch * 20
-                })
+@app.post("/model/unload")
+async def unload_model_endpoint(request: ModelUnloadRequest):
+    """Unload a model endpoint"""
+    try:
+        logger.info(f"Unloading model: {request.modelId}")
+        
+        # Simulate unloading
+        result = {
+            "status": "success",
+            "message": f"Model {request.modelId} unloaded successfully",
+            "modelId": request.modelId
+        }
+        
+        return result
+        
+    except Exception as e:
+        logger.exception(f"Failed to unload model {request.modelId}")
+        raise HTTPException(status_code=500, detail=f"Failed to unload model: {str(e)}")
 
-            # 🔄 Step 3: Final result
-            accuracy = 0.92
-            final_log = f"Training completed with accuracy {accuracy:.2f}"
-            print(f"✅ [TRAINING] {final_log}")
+@app.get("/model/{model_id}/status")
+async def get_model_status_endpoint(model_id: str):
+    """Get model status endpoint"""
+    try:
+        # Simulate status check
+        result = {
+            "modelId": model_id,
+            "status": "loaded",  # or "not_loaded", "loading", "error"
+            "type": "llama",     # or "blip"
+            "loadTime": datetime.now().isoformat()
+        }
+        
+        return result
+        
+    except Exception as e:
+        logger.exception(f"Failed to get status for model {model_id}")
+        raise HTTPException(status_code=500, detail=f"Failed to get model status: {str(e)}")
 
-            requests.post("http://localhost:3000/api/training/update", json={
-                "jobId": job_id,
-                "status": "completed",
-                "log": final_log,
-                "accuracy": accuracy
-            })
-
-        except Exception as e:
-            err_msg = f"Training failed: {str(e)}"
-            print(f"❌ [TRAINING] {err_msg}")
-            requests.post("http://localhost:3000/api/training/update", json={
-                "jobId": job_id,
-                "status": "failed",
-                "log": err_msg
-            })
-
-    asyncio.create_task(training_process())
-
-    return {"ok": True, "jobId": job_id, "message": "Training started"}    
-
+@app.get("/model/loaded")
+async def get_loaded_models_endpoint():
+    """Get all loaded models endpoint"""
+    try:
+        # Simulate loaded models list
+        loaded_models = [
+            {
+                "modelId": "llama3",
+                "type": "llama",
+                "status": "loaded",
+                "loadTime": datetime.now().isoformat()
+            }
+        ]
+        
+        return {"loaded_models": loaded_models, "count": len(loaded_models)}
+        
+    except Exception as e:
+        logger.exception("Failed to get loaded models")
+        raise HTTPException(status_code=500, detail=f"Failed to get loaded models: {str(e)}")
 
 # ✅ INTENT RECOGNITION ENDPOINT
 class IntentRequest(BaseModel):
