@@ -10,7 +10,7 @@ export default function AdminLayout() {
 
       {/* Main Content */}
       <div className="flex flex-col flex-1">
-        <Topbar />
+       
         <main className="p-6 overflow-y-auto">
           <Outlet />
         </main>
