@@ -31,6 +31,11 @@ import { uploadDataset } from "../../middleware/uploadMiddleware.js";
 
 import { verifyToken, requireAdmin } from "../../middleware/authMiddleware.js";
 import path from "path";
+import mongoose from "mongoose";
+import dotenv from "dotenv";
+dotenv.config();
+
+const FASTAPI_BASE_URL = process.env.FASTAPI_BASE_URL || "http://localhost:8000";
 
 const router = express.Router();
 
@@ -116,30 +121,90 @@ router.delete("/users/:userId", verifyToken, requireAdmin, deleteUser);
  */
 router.get("/health", verifyToken, requireAdmin, async (req, res) => {
   try {
-    const axios = (await import('axios')).default;
-    
-    let fastApiHealth = false;
+    const healthStatus = {
+      timestamp: new Date().toISOString(),
+      services: {},
+      overall: {}
+    };
+
+    // Check FastAPI Health
     try {
-      const response = await axios.get('http://localhost:8000/health', { timeout: 5000 });
-      fastApiHealth = response.status === 200;
+      const axios = (await import('axios')).default;
+      const startTime = Date.now();
+      
+      const fastApiResponse = await axios.get(`${FASTAPI_BASE_URL}/health`, { 
+        timeout: 8000 
+      });
+      
+      const responseTime = Date.now() - startTime;
+      
+      if (fastApiResponse.status === 200) {
+        const data = fastApiResponse.data;
+        
+        healthStatus.services = {
+          database: data.services?.database || { status: "unknown" },
+          fastapi: {
+            status: "online",
+            response_time_ms: responseTime,
+            last_checked: new Date().toISOString()
+          },
+          llama: data.services?.llama || { status: "unknown" },
+          blip: data.services?.blip || { status: "unknown" }
+        };
+        
+        healthStatus.system = data.system || {};
+        healthStatus.overall = data.overall || "unknown";
+        healthStatus.summary = data.summary || {};
+      }
     } catch (error) {
-      fastApiHealth = false;
+      console.error('FastAPI health check failed:', error.message);
+      
+      // Fallback - check individual services
+      healthStatus.services = {
+        database: { status: "unknown", error: "Cannot reach FastAPI" },
+        fastapi: { status: "offline", error: error.message },
+        llama: { status: "unknown", error: "Cannot reach FastAPI" },
+        blip: { status: "unknown", error: "Cannot reach FastAPI" }
+      };
+      
+      healthStatus.overall = "unhealthy";
+      healthStatus.summary = {
+        online_services: 0,
+        total_services: 4,
+        uptime_percentage: 0
+      };
     }
 
-    res.json({
-      status: "healthy",
-      timestamp: new Date().toISOString(),
-      services: {
-        admin_api: true,
-        database: true,
-        fastapi: fastApiHealth
+    // Check Database directly from Node.js
+    try {
+      if (mongoose.connection.readyState === 1) {
+        await mongoose.connection.db.admin().ping();
+        healthStatus.services.database = {
+          status: "online",
+          type: "mongodb",
+          connected: true,
+          last_checked: new Date().toISOString()
+        };
+      } else {
+        throw new Error("Database not connected");
       }
-    });
+    } catch (dbError) {
+      healthStatus.services.database = {
+        status: "offline",
+        error: dbError.message,
+        connected: false,
+        last_checked: new Date().toISOString()
+      };
+    }
+
+    res.json(healthStatus);
+
   } catch (error) {
+    console.error('Health check error:', error);
     res.status(500).json({
-      status: "unhealthy", 
       error: error.message,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      overall: { status: "unhealthy" }
     });
   }
 });

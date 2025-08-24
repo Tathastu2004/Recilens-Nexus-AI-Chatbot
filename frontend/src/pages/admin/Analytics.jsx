@@ -16,7 +16,7 @@ export default function Analytics() {
 
   const fetchAnalytics = () => {
     const token = localStorage.getItem("token");
-    getAnalytics(token).then(setAnalytics);
+    getAnalytics(token).then(data => setAnalytics(Array.isArray(data) ? data : []));
   };
 
   useEffect(() => {
