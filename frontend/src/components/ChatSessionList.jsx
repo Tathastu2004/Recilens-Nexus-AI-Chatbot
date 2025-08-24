@@ -171,7 +171,8 @@ const ChatSessionList = ({ onSelect }) => {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          title: 'New Chat'
+          title: 'New Chat',
+          autoUpdateTitle: true // <-- Added this line
         })
       });
 

@@ -859,33 +859,6 @@ const handleSubmit = async (e) => {
         });
       }
     }
-
-    // ✅ UPDATE SESSION TITLE WITH FIRST MESSAGE
-    const sessionMessages = getCurrentSessionMessages ? getCurrentSessionMessages() : [];
-    const userMessages = sessionMessages.filter(msg => msg.sender !== 'AI' && msg.sender !== 'ai');
-
-    if (userMessages.length <= 1) { // This is the first user message
-      const titleText = finalInput.length > 50 
-        ? finalInput.substring(0, 50) + '...' 
-        : finalInput;
-      
-      try {
-        await axios.patch(`${backendUrl}/api/chat/session/${activeSessionId}`, {
-          title: titleText
-        }, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        
-        // Dispatch event to update UI
-        window.dispatchEvent(new CustomEvent('sessionTitleUpdated', {
-          detail: { sessionId: activeSessionId, title: titleText }
-        }));
-        
-        console.log('✅ [TITLE UPDATE] Session title updated to:', titleText);
-      } catch (titleError) {
-        console.warn('⚠️ [TITLE UPDATE] Failed to update session title:', titleError);
-      }
-    }
   } catch (error) {
     console.error('❌ [FRONTEND] Send message error:', error);
     setFileValidationError('Failed to send message. Please try again.');
