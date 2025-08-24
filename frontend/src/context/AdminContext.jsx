@@ -1,244 +1,283 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, useMemo, useCallback } from "react";
 import axios from "axios";
 
-const BASE_URL = import.meta.env.VITE_BACKEND_URL + "/api/admin" ;
+const BASE_URL = import.meta.env.VITE_BACKEND_URL + "/api/admin";
 
 const AdminContext = createContext();
 
 export const AdminProvider = ({ children }) => {
-  const [loading, setLoading] = useState(false);
+  // ✅ FIX: Separate loading states to prevent unnecessary re-renders
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [healthLoading, setHealthLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const authHeader = (token) => ({
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-  });
+  // ✅ FIX: Create axios instance with timeout
+  const apiClient = useMemo(() => axios.create({
+    baseURL: BASE_URL,
+    timeout: 10000,
+    headers: { "Content-Type": "application/json" }
+  }), []);
+
+  // ✅ FIX: Optimize token retrieval
+  const getAuthToken = useCallback(() => {
+    return localStorage.getItem('token') || 
+           localStorage.getItem('adminToken') || 
+           localStorage.getItem('authToken');
+  }, []);
+
+  const authHeader = useCallback(() => {
+    const token = getAuthToken();
+    return token ? {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    } : { "Content-Type": "application/json" };
+  }, [getAuthToken]);
 
   // SYSTEM CONFIG
-  const getSystemConfig = async (token) => {
-    setLoading(true);
+  const getSystemConfig = useCallback(async () => {
+    setDashboardLoading(true);
     try {
-      const res = await axios.get(`${BASE_URL}/system`, {
-        headers: authHeader(token),
+      const res = await apiClient.get("/system", {
+        headers: authHeader(),
       });
       return res.data;
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.message || err.message);
+      throw err;
     } finally {
-      setLoading(false);
+      setDashboardLoading(false);
     }
-  };
+  }, [apiClient, authHeader]);
 
-  const updateSystemConfig = async (token, config) => {
-    setLoading(true);
+  const updateSystemConfig = useCallback(async (config) => {
+    setDashboardLoading(true);
     try {
-      const res = await axios.post(`${BASE_URL}/system`, config, {
-        headers: authHeader(token),
+      const res = await apiClient.post("/system", config, {
+        headers: authHeader(),
       });
       return res.data;
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.message || err.message);
+      throw err;
     } finally {
-      setLoading(false);
+      setDashboardLoading(false);
     }
-  };
+  }, [apiClient, authHeader]);
 
-  // DASHBOARD & ANALYTICS
-  const getDashboardStats = async (token) => {
-    setLoading(true);
+  // ✅ FIX: DASHBOARD & ANALYTICS with proper error handling
+  const getDashboardStats = useCallback(async () => {
+    setDashboardLoading(true);
+    setError(null);
     try {
-      const res = await axios.get(`${BASE_URL}/dashboard`, {
-        headers: authHeader(token),
+      console.log('📊 Fetching dashboard stats...');
+      const res = await apiClient.get("/dashboard", {
+        headers: authHeader(),
       });
+      console.log('✅ Dashboard stats received:', res.data);
       return res.data;
     } catch (err) {
-      setError(err.message);
+      const errorMsg = err.response?.data?.message || err.message;
+      console.error('❌ Dashboard stats error:', errorMsg);
+      setError(errorMsg);
+      throw err;
     } finally {
-      setLoading(false);
+      setDashboardLoading(false);
     }
-  };
+  }, [apiClient, authHeader]);
 
-  const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [analyticsError, setAnalyticsError] = useState(null);
-
-  const getAnalytics = async (token) => {
+  const getAnalytics = useCallback(async () => {
     setAnalyticsLoading(true);
-    setAnalyticsError(null);
+    setError(null);
     try {
-      const res = await axios.get(`${BASE_URL}/analytics`, {
-        headers: authHeader(token),
+      console.log('📊 Fetching analytics...');
+      const res = await apiClient.get("/analytics", {
+        headers: authHeader(),
+      });
+      console.log('✅ Analytics received:', res.data);
+      return Array.isArray(res.data) ? res.data : res.data.analytics || [];
+    } catch (err) {
+      const errorMsg = err.response?.data?.message || err.message;
+      console.error('❌ Analytics error:', errorMsg);
+      setError(errorMsg);
+      return []; // Return empty array instead of throwing
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, [apiClient, authHeader]);
+
+  const generateAnalytics = useCallback(async () => {
+    setAnalyticsLoading(true);
+    try {
+      const res = await apiClient.post("/analytics/generate", {}, {
+        headers: authHeader(),
       });
       return res.data;
     } catch (err) {
-      setAnalyticsError(err.message);
+      setError(err.response?.data?.message || err.message);
       throw err;
     } finally {
       setAnalyticsLoading(false);
     }
-  };
+  }, [apiClient, authHeader]);
 
-  const generateAnalytics = async (token) => {
-    setLoading(true);
+  const generateRealAnalytics = useCallback(async () => {
+    setAnalyticsLoading(true);
     try {
-      const res = await axios.post(`${BASE_URL}/analytics/generate`, {}, {
-        headers: authHeader(token),
+      const res = await apiClient.post("/analytics/generate-real", {}, {
+        headers: authHeader(),
       });
       return res.data;
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const generateRealAnalytics = async (token) => {
-    setLoading(true);
-    try {
-      const res = await axios.post(`${BASE_URL}/analytics/generate-real`, {}, {
-        headers: authHeader(token),
-      });
-      return res.data;
-    } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.message || err.message);
       throw err;
     } finally {
-      setLoading(false);
+      setAnalyticsLoading(false);
     }
-  };
+  }, [apiClient, authHeader]);
 
   // MODEL MANAGEMENT
-  const startModelTraining = async (token, payload) => {
-    setLoading(true);
+  const startModelTraining = useCallback(async (payload) => {
+    setDashboardLoading(true);
     try {
-      const res = await axios.post(`${BASE_URL}/model/training`, payload, {
-        headers: authHeader(token),
+      const res = await apiClient.post("/model/training", payload, {
+        headers: authHeader(),
       });
       return res.data;
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.message || err.message);
+      throw err;
     } finally {
-      setLoading(false);
+      setDashboardLoading(false);
     }
-  };
+  }, [apiClient, authHeader]);
 
-  const getTrainingJobs = async (token) => {
-    setLoading(true);
+  const getTrainingJobs = useCallback(async () => {
+    setDashboardLoading(true);
     try {
-      const res = await axios.get(`${BASE_URL}/model/training`, {
-        headers: authHeader(token),
+      const res = await apiClient.get("/model/training", {
+        headers: authHeader(),
       });
       return res.data;
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.message || err.message);
+      throw err;
     } finally {
-      setLoading(false);
+      setDashboardLoading(false);
     }
-  };
+  }, [apiClient, authHeader]);
 
-  const updateTrainingStatus = async (token, id, status) => {
-    setLoading(true);
+  const updateTrainingStatus = useCallback(async (id, status) => {
+    setDashboardLoading(true);
     try {
-      const res = await axios.put(`${BASE_URL}/model/training/${id}`, { status }, {
-        headers: authHeader(token),
+      const res = await apiClient.put(`/model/training/${id}`, { status }, {
+        headers: authHeader(),
       });
       return res.data;
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.message || err.message);
+      throw err;
     } finally {
-      setLoading(false);
+      setDashboardLoading(false);
     }
-  };
+  }, [apiClient, authHeader]);
 
-  // USER & ADMIN MANAGEMENT
-  const getAllUsers = async (token) => {
-    setLoading(true);
+  // ✅ FIX: USER & ADMIN MANAGEMENT with proper error handling
+  const getAllUsers = useCallback(async () => {
+    setUsersLoading(true);
+    setError(null);
     try {
-      const res = await axios.get(`${BASE_URL}/users`, {
-        headers: authHeader(token),
+      console.log('👥 Fetching all users...');
+      const res = await apiClient.get("/users", {
+        headers: authHeader(),
+      });
+      console.log('✅ Users received:', res.data);
+      return res.data;
+    } catch (err) {
+      const errorMsg = err.response?.data?.message || err.message;
+      console.error('❌ Users fetch error:', errorMsg);
+      setError(errorMsg);
+      return { users: [] }; // Return empty users instead of throwing
+    } finally {
+      setUsersLoading(false);
+    }
+  }, [apiClient, authHeader]);
+
+  const getAllAdmins = useCallback(async () => {
+    setUsersLoading(true);
+    try {
+      const res = await apiClient.get("/admins", {
+        headers: authHeader(),
       });
       return res.data;
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.message || err.message);
+      throw err;
     } finally {
-      setLoading(false);
+      setUsersLoading(false);
     }
-  };
+  }, [apiClient, authHeader]);
 
-  const getAllAdmins = async (token) => {
-    setLoading(true);
+  const promoteUserToAdmin = useCallback(async (userId) => {
+    setUsersLoading(true);
     try {
-      const res = await axios.get(`${BASE_URL}/admins`, {
-        headers: authHeader(token),
+      const res = await apiClient.put(`/users/${userId}/promote`, {}, {
+        headers: authHeader(),
       });
       return res.data;
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.message || err.message);
+      throw err;
     } finally {
-      setLoading(false);
+      setUsersLoading(false);
     }
-  };
+  }, [apiClient, authHeader]);
 
-  const promoteUserToAdmin = async (token, userId) => {
-    setLoading(true);
+  const demoteAdminToClient = useCallback(async (userId) => {
+    setUsersLoading(true);
     try {
-      const res = await axios.put(`${BASE_URL}/users/${userId}/promote`, {}, {
-        headers: authHeader(token),
+      const res = await apiClient.put(`/users/${userId}/demote`, {}, {
+        headers: authHeader(),
       });
       return res.data;
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.message || err.message);
+      throw err;
     } finally {
-      setLoading(false);
+      setUsersLoading(false);
     }
-  };
+  }, [apiClient, authHeader]);
 
-  const demoteAdminToClient = async (token, userId) => {
-    setLoading(true);
+  const deleteUser = useCallback(async (userId) => {
+    setUsersLoading(true);
     try {
-      const res = await axios.put(`${BASE_URL}/users/${userId}/demote`, {}, {
-        headers: authHeader(token),
+      const res = await apiClient.delete(`/users/${userId}`, {
+        headers: authHeader(),
       });
       return res.data;
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.message || err.message);
+      throw err;
     } finally {
-      setLoading(false);
+      setUsersLoading(false);
     }
-  };
+  }, [apiClient, authHeader]);
 
-  const deleteUser = async (token, userId) => {
-    setLoading(true);
+  // ✅ FIX: SYSTEM HEALTH with better error handling
+  const getSystemHealth = useCallback(async () => {
+    setHealthLoading(true);
     try {
-      const res = await axios.delete(`${BASE_URL}/users/${userId}`, {
-        headers: authHeader(token),
-      });
-      return res.data;
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // SYSTEM HEALTH
-  const getSystemHealth = async () => {
-    setLoading(true);
-    try {
-      const token = localStorage.getItem('token') || 
-                    localStorage.getItem('adminToken') || 
-                    localStorage.getItem('authToken') || '';
-      const res = await axios.get(`${BASE_URL}/health`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+      console.log('🩺 Fetching system health...');
+      const res = await apiClient.get("/health", {
+        headers: authHeader(),
       });
       console.log('✅ System health data received:', res.data);
       return res.data;
     } catch (error) {
       const errorMessage = `System health check failed: ${error.message}`;
-      setError(errorMessage);
       console.error('❌ System health error:', error);
+      
       return {
         error: true,
         message: errorMessage,
@@ -252,34 +291,61 @@ export const AdminProvider = ({ children }) => {
         timestamp: new Date().toISOString()
       };
     } finally {
-      setLoading(false);
+      setHealthLoading(false);
     }
-  };
+  }, [apiClient, authHeader]);
+
+  // ✅ FIX: Memoize context value to prevent unnecessary re-renders
+  const contextValue = useMemo(() => ({
+    // Loading states
+    loading: dashboardLoading || usersLoading || healthLoading,
+    dashboardLoading,
+    analyticsLoading,
+    usersLoading,
+    healthLoading,
+    error,
+    
+    // Functions
+    getSystemConfig,
+    updateSystemConfig,
+    getDashboardStats,
+    getAnalytics,
+    generateAnalytics,
+    startModelTraining,
+    getTrainingJobs,
+    updateTrainingStatus,
+    getAllUsers,
+    getAllAdmins,
+    promoteUserToAdmin,
+    demoteAdminToClient,
+    deleteUser,
+    generateRealAnalytics,
+    getSystemHealth,
+  }), [
+    dashboardLoading,
+    analyticsLoading,
+    usersLoading,
+    healthLoading,
+    error,
+    getSystemConfig,
+    updateSystemConfig,
+    getDashboardStats,
+    getAnalytics,
+    generateAnalytics,
+    startModelTraining,
+    getTrainingJobs,
+    updateTrainingStatus,
+    getAllUsers,
+    getAllAdmins,
+    promoteUserToAdmin,
+    demoteAdminToClient,
+    deleteUser,
+    generateRealAnalytics,
+    getSystemHealth,
+  ]);
 
   return (
-    <AdminContext.Provider
-      value={{
-        loading,
-        error,
-        getSystemConfig,
-        updateSystemConfig,
-        getDashboardStats,
-        getAnalytics,
-        analyticsLoading,
-        analyticsError,
-        generateAnalytics,
-        startModelTraining,
-        getTrainingJobs,
-        updateTrainingStatus,
-        getAllUsers,
-        getAllAdmins,
-        promoteUserToAdmin,
-        demoteAdminToClient,
-        deleteUser,
-        generateRealAnalytics,
-        getSystemHealth,
-      }}
-    >
+    <AdminContext.Provider value={contextValue}>
       {children}
     </AdminContext.Provider>
   );
