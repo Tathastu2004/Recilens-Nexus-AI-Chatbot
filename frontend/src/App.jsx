@@ -5,6 +5,8 @@ import { ChatProvider } from './context/ChatContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { AdminProvider } from './context/AdminContext';
 import { FeedbackProvider } from './context/feedbackContext'; // <-- Import FeedbackProvider
+import { ModelManagementProvider } from './context/ModelContext';
+
 import ProtectedRoute from './components/ProtectedRoute';
 
 // Pages & Components
@@ -120,7 +122,9 @@ function App() {
                       element={
                         <ProtectedRoute adminOnly={true}>
                           <AdminProvider>
+                            <ModelManagementProvider>
                             <AdminRoutes />
+                            </ModelManagementProvider>
                           </AdminProvider>
                         </ProtectedRoute>
                       }

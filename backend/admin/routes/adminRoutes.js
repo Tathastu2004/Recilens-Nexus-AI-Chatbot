@@ -25,8 +25,12 @@ import {
   exportTrainingLogs,
   exportAnalytics
 } from "../controllers/adminController.js";
+import { uploadChatFile } from "../../middleware/uploadMiddleware.js";
+import { uploadDataset } from "../../middleware/uploadMiddleware.js";
+
 
 import { verifyToken, requireAdmin } from "../../middleware/authMiddleware.js";
+import path from "path";
 
 const router = express.Router();
 
@@ -50,7 +54,7 @@ router.post("/analytics/generate-real", verifyToken, requireAdmin, generateRealA
 
 /**
  * ===============================
- *  MODEL MANAGEMENT - ENHANCED
+ *  MODEL MANAGEMENT
  * ===============================
  */
 // Model Training Operations
@@ -67,9 +71,32 @@ router.get("/model/:modelId/status", verifyToken, requireAdmin, getModelStatus);
 router.post("/model/:modelId/load", verifyToken, requireAdmin, loadModel);
 router.post("/model/:modelId/unload", verifyToken, requireAdmin, unloadModel);
 
-// FastAPI Integration Callbacks (No authentication)
-router.post("/training/update", updateTrainingStatus);
-router.post("/training/:id/update", updateTrainingStatus);
+// Dataset upload route
+router.post(
+  "/datasets/upload",
+  verifyToken,
+  requireAdmin,
+  uploadDataset.single('dataset'),
+  (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: "No dataset file uploaded" });
+    }
+    const allowed = [".csv", ".json", ".txt", ".jsonl"];
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    if (!allowed.includes(ext)) {
+      return res.status(400).json({
+        error: "Invalid file type. Only CSV, JSON, TXT, JSONL allowed.",
+      });
+    }
+    res.json({
+      message: "Dataset uploaded successfully",
+      filePath: req.file.path,
+      fileName: req.file.originalname,
+      fileSize: req.file.size,
+      uploadedAt: new Date(),
+    });
+  }
+);
 
 /**
  * ===============================

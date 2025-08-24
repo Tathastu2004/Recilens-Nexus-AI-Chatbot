@@ -17,7 +17,8 @@ const ensureUploadDirs = () => {
     './uploads/profile', 
     './uploads/chat', 
     './uploads/documents', 
-    './uploads/images'
+    './uploads/images',
+    './uploads/datasets'  // ← ADDED
   ];
   
   dirs.forEach(dir => {
@@ -90,6 +91,7 @@ const createFileFilter = (allowedTypes) => {
 const getFileCategory = (mimeType, extension) => {
   const imageTypes = ['image/', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
   const documentTypes = ['application/pdf', 'application/msword', 'application/vnd.openxml', 'text/', '.pdf', '.doc', '.docx', '.txt'];
+  const datasetTypes = ['.csv', '.json', '.txt', '.jsonl']; // ← ADDED
   
   const isImage = imageTypes.some(type => 
     type.startsWith('.') ? extension === type : mimeType.includes(type)
@@ -98,16 +100,20 @@ const getFileCategory = (mimeType, extension) => {
   const isDocument = documentTypes.some(type => 
     type.startsWith('.') ? extension === type : mimeType.includes(type)
   );
+
+  const isDataset = datasetTypes.some(type => extension === type); // ← ADDED
   
   if (isImage) return 'image';
   if (isDocument) return 'document';
+  if (isDataset) return 'dataset'; // ← ADDED
   return 'unknown';
 };
 
 // ✅ SUPPORTED FILE TYPES
 const supportedTypes = {
   images: ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', 'image/'],
-  documents: ['.pdf', '.doc', '.docx', '.txt', 'application/pdf', 'application/msword', 'text/']
+  documents: ['.pdf', '.doc', '.docx', '.txt', 'application/pdf', 'application/msword', 'text/'],
+  datasets: ['.csv', '.json', '.txt', '.jsonl'] // ← ADDED
 };
 
 // ✅ CREATE MULTER INSTANCES
@@ -119,6 +125,16 @@ export const uploadChatFile = multer({
   ]),
   limits: {
     fileSize: 50 * 1024 * 1024, // 50MB
+    files: 1
+  }
+});
+
+// ✅ ADD DATASET UPLOAD MIDDLEWARE
+export const uploadDataset = multer({
+  storage: createStorage('datasets'),
+  fileFilter: createFileFilter(supportedTypes.datasets),
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB for datasets
     files: 1
   }
 });
@@ -423,6 +439,57 @@ export const uploadProfilePicHandler = async (req, res) => {
   }
 };
 
+// ✅ ADD DATASET UPLOAD HANDLER
+export const uploadDatasetHandler = async (req, res) => {
+  console.log('📊 [DATASET] Starting dataset upload...');
+  
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No dataset file uploaded',
+        code: 'NO_FILE'
+      });
+    }
+
+    console.log('📋 [DATASET] File received:', {
+      originalName: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: `${(req.file.size / 1024 / 1024).toFixed(2)}MB`,
+      path: req.file.path
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Dataset uploaded successfully',
+      filePath: req.file.path,
+      fileName: req.file.originalname,
+      fileSize: req.file.size,
+      fileType: path.extname(req.file.originalname).toLowerCase(),
+      uploadedAt: new Date()
+    });
+
+  } catch (error) {
+    console.error('❌ [DATASET] Unexpected error:', error);
+    
+    // Clean up temp file on error
+    try {
+      if (req.file?.path && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+    } catch (cleanupError) {
+      console.warn('⚠️ [DATASET] Cleanup error:', cleanupError.message);
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during dataset upload',
+      error: error.message,
+      code: 'INTERNAL_ERROR'
+    });
+  }
+};
+
 // ✅ ERROR HANDLER MIDDLEWARE
 export const handleUploadError = (error, req, res, next) => {
   console.error('❌ [UPLOAD ERROR]:', error.message);
@@ -465,7 +532,8 @@ export const getSupportedFileTypes = () => supportedTypes;
 export const getFileSizeLimits = () => ({
   chat: '50MB',
   image: '10MB', 
-  document: '50MB'
+  document: '50MB',
+  dataset: '100MB' // ← ADDED
 });
 
 console.log('✅ [UPLOAD MIDDLEWARE] Initialization complete');

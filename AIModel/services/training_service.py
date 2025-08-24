@@ -11,7 +11,9 @@ import os
 logger = logging.getLogger(__name__)
 
 class TrainingService:
-    def __init__(self, node_backend_url: str = "http://localhost:3000"):
+    def __init__(self, node_backend_url: str = None):
+        if node_backend_url is None:
+            node_backend_url = os.environ.get("NODE_BACKEND_URL", "http://localhost:3000")
         self.node_backend_url = node_backend_url
         self.active_jobs: Dict[str, Dict] = {}
         self.loaded_models: Dict[str, Any] = {}
@@ -122,31 +124,21 @@ class TrainingService:
     async def _update_status(self, job_id: str, status: str, log: str, 
                            progress: Optional[float] = None, accuracy: Optional[float] = None):
         """Send status update to Node.js backend"""
+        payload = {"status": status, "log": log}
+        if progress is not None:
+            payload["progress"] = progress
+        if accuracy is not None:
+            payload["accuracy"] = accuracy
+
         try:
-            payload = {
-                "jobId": job_id,
-                "status": status,
-                "log": log
-            }
-            
-            if progress is not None:
-                payload["progress"] = progress
-            if accuracy is not None:
-                payload["accuracy"] = accuracy
-            
-            response = requests.post(
-                f"{self.node_backend_url}/api/training/update",
+            response = requests.put(
+                f"{self.node_backend_url}/api/admin/model/training/{job_id}/status",
                 json=payload,
                 timeout=10
             )
-            
-            if response.status_code == 200:
-                logger.info(f"Status updated for job {job_id}: {status}")
-            else:
-                logger.error(f"Failed to update status: {response.text}")
-                
+            response.raise_for_status()
         except Exception as e:
-            logger.error(f"Failed to update job status: {str(e)}")
+            logger.error(f"Failed to update status for {job_id}: {e}")
     
     def cancel_job(self, job_id: str) -> bool:
         """Cancel a training job"""
