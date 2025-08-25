@@ -267,8 +267,10 @@ export const ChatProvider = ({ children }) => {
 const sendMessage = useCallback(async (messageData) => {
   const { sessionId, message, file, extractedText } = messageData;
 
-  if (!sessionId || (!message?.trim() && !file && !extractedText)) {
-    console.error('❌ [STREAMING] Missing required fields');
+  // ✅ CORRECTED VALIDATION:
+  // Check for a session ID, and then check if there's EITHER a text message OR a file to process.
+  if (!sessionId || (!message.trim() && !file && !extractedText)) {
+    console.error('❌ [STREAMING] Missing required fields: A message or a file is required.');
     return { success: false, error: 'A message or a file is required to start.' };
   }
 
@@ -277,96 +279,60 @@ const sendMessage = useCallback(async (messageData) => {
   setActiveStreams(prev => ({ ...prev, [sessionId]: abortController }));
 
   try {
-    const aiMessageId = `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    // Add placeholder message
+    const aiMessageId = `ai-${Date.now()}`;
+    // Optimistically add a placeholder for the AI response
     setMessages(prev => ({
       ...prev,
-      [sessionId]: [...(prev[sessionId] || []), { 
-        _id: aiMessageId, 
-        message: '', 
-        sender: 'AI', 
-        isStreaming: true,
-        timestamp: new Date().toISOString(),
-        type: messageData.type || 'text',
-        renderKey: 0 // ✅ Force render tracking
-      }]
+      [sessionId]: [...(prev[sessionId] || []), { _id: aiMessageId, message: '', sender: 'AI', isStreaming: true }]
     }));
 
-    const response = await fetch(`${backendUrl}/api/chat/send`, {
+    let response;
+    const finalUrl = `${backendUrl}/api/chat/send`;
+
+    // The backend now handles the logic, so we just pass the data
+    response = await fetch(finalUrl, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`
       },
-      body: JSON.stringify(messageData),
+      body: JSON.stringify(messageData), // Pass the whole messageData object
       signal: abortController.signal
     });
 
-    if (!response.ok) {
+    if (!response.ok || !response.body) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-
+    
+    // Handle the streaming response
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let accumulatedText = '';
-    let chunkCount = 0;
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) {
-        console.log('✅ [FRONTEND] Stream completed');
-        break;
-      }
+      if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true });
-      accumulatedText += chunk;
-      chunkCount++;
-
-      console.log(`📦 [CHUNK ${chunkCount}]:`, chunk);
-
-      // ✅ FORCE REACT TO RENDER EACH CHUNK
+      accumulatedText += decoder.decode(value, { stream: true });
       setMessages(prev => ({
         ...prev,
         [sessionId]: (prev[sessionId] || []).map(msg => 
-          msg._id === aiMessageId ? { 
-            ...msg,
-            message: accumulatedText,
-            isStreaming: true,
-            renderKey: chunkCount, // ✅ Unique key forces re-render
-            lastChunk: chunk
-          } : msg
+          msg._id === aiMessageId ? { ...msg, message: accumulatedText } : msg
         )
       }));
-
-      // ✅ CRITICAL: Force React to process this update before continuing
-      await new Promise(resolve => {
-        setTimeout(() => {
-          requestAnimationFrame(resolve);
-        }, 30); // 30ms delay allows React to render
-      });
     }
 
-    // Finalize message
+    // Finalize the message
     setMessages(prev => ({
       ...prev,
       [sessionId]: (prev[sessionId] || []).map(msg => 
-        msg._id === aiMessageId ? { 
-          ...msg, 
-          message: accumulatedText,
-          isStreaming: false, 
-          timestamp: new Date().toISOString(),
-          renderKey: chunkCount + 1
-        } : msg
+        msg._id === aiMessageId ? { ...msg, isStreaming: false, timestamp: new Date().toISOString() } : msg
       )
     }));
 
-    return { success: true, message: accumulatedText };
-
   } catch (error) {
-    console.error('❌ [STREAMING] Error:', error);
-    // Error handling...
-    return { success: false, error: error.message };
+    console.error('❌ [STREAMING] Error occurred:', error);
+    // Handle error state in UI
   } finally {
     setStreamingStates(prev => ({ ...prev, [sessionId]: false }));
     setActiveStreams(prev => {

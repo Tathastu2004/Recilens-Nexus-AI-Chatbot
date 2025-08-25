@@ -78,7 +78,7 @@ function App() {
                     <Route path="/reset-password" element={<ResetPasswordPage />} />
                     <Route path="/verify-email" element={<VerifyEmailPage />} />
 
-                    {/* ✅ Chat Route */}
+                    {/* ✅ Chat Route with ChatProvider */}
                     <Route
                       path="/chat"
                       element={
@@ -88,7 +88,7 @@ function App() {
                       }
                     />
 
-                    {/* ✅ Dashboard route */}
+                    {/* ✅ Optional: Dashboard route */}
                     <Route
                       path="/dashboard"
                       element={
@@ -98,7 +98,7 @@ function App() {
                       }
                     />
 
-                    {/* Profile & Feedback */}
+                    {/* Profile Page */}
                     <Route
                       path="/profile"
                       element={
@@ -116,21 +116,20 @@ function App() {
                       }
                     />
 
-                    {/* ✅ FIXED: Specific admin routes instead of catch-all */}
+                    {/* ✅ Wrap AdminRoutes inside AdminProvider */}
                     <Route
-                      path="/admin/*"
+                      path="/*"
                       element={
                         <ProtectedRoute adminOnly={true}>
                           <AdminProvider>
                             <ModelManagementProvider>
-                              <AdminRoutes />
+                            <AdminRoutes />
                             </ModelManagementProvider>
                           </AdminProvider>
                         </ProtectedRoute>
                       }
                     />
-                    
-                    {/* Fallback route - MUST be last */}
+                    {/* Fallback route */}
                     <Route path="*" element={<Navigate to="/signup" replace />} />
                   </Routes>
                 </div>

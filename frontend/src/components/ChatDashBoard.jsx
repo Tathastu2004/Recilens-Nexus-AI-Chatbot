@@ -444,165 +444,97 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   };
 
   // ✅ AI MESSAGE COMPONENT WITH IMAGE CONTEXT INTEGRATION
-  const AiMessage = ({ message, timestamp, fileUrl, fileType, isStreaming = false, type, processingInfo, completedBy, metadata }) => {
-    // ✅ DEFINE isImageResponse HERE
-    const isImageResponse = type === 'image' || 
-                            completedBy === 'BLIP' || 
-                            (typeof message === 'string' && 
-                             (message.includes('🖼️') || message.includes('Image')));
-    
-    const isDocumentResponse = type === 'document' || 
-                               (completedBy && completedBy.includes('Document')) ||
-                               (typeof message === 'string' && 
-                                (message.includes('document') || message.includes('Document')));
+// Replace the AiMessage component with this working version:
 
-    // ✅ ENHANCED MESSAGE CLEANING
-    const cleanMessage = useCallback((rawMessage) => {
-      if (!rawMessage) return '';
+const AiMessage = ({ message, timestamp, fileUrl, fileType, isStreaming = false, type, processingInfo, completedBy, metadata }) => {
+  const isImageResponse = type === 'image' || completedBy === 'BLIP';
+  const isDocumentResponse = type === 'document';
 
-      // If it's an object with a .message property, use it
-      if (typeof rawMessage === 'object' && rawMessage.message) {
-        return rawMessage.message;
+  // Clean message
+  const displayMessage = useMemo(() => {
+    if (!message) return '';
+    if (typeof message === 'object' && message.message) return message.message;
+    if (typeof message === 'string' && message.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(message);
+        return parsed.message || parsed.aiMessage?.message || message;
+      } catch (e) {
+        return message;
       }
+    }
+    return message;
+  }, [message]);
 
-      // If it's a JSON string, parse and extract .message or .aiMessage.message
-      if (typeof rawMessage === 'string' && rawMessage.trim().startsWith('{')) {
-        try {
-          const parsed = JSON.parse(rawMessage);
-          if (parsed && typeof parsed.message === 'string') {
-            return parsed.message;
-          }
-          if (parsed && parsed.aiMessage && typeof parsed.aiMessage.message === 'string') {
-            return parsed.aiMessage.message;
-          }
-        } catch (e) {}
-      }
-
-      // Otherwise, return as is
-      return rawMessage;
-    }, []);
-
-    const displayMessage = cleanMessage(message);
-
-    // ✅ STORE IMAGE ANALYSIS IN CONTEXT
-    useEffect(() => {
-      if (
-        isImageResponse &&
-        completedBy === "BLIP" &&
-        activeFileContext?.fileType?.startsWith("image") &&
-        !activeFileContext.imageAnalysis &&
-        displayMessage &&
-        !isStreaming
-      ) {
-        setActiveFileContext((prev) => ({
-          ...prev,
-          imageAnalysis: displayMessage
-        }));
-      }
-    }, [
-      isImageResponse,
-      completedBy,
-      displayMessage,
-      activeFileContext,
-      isStreaming
-    ]);
-
-    return (
-      <div className="flex items-start gap-2 mb-4 animate-fade-in px-4">
-        <div className="flex-shrink-0 w-7 h-7 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-full flex items-center justify-center shadow-md">
-          <IconRobot size={14} className="text-white" />
-        </div>
-        
-        <div className="flex-1 max-w-[85%]">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl px-4 py-3 shadow-sm border border-gray-200 dark:border-gray-700">
-            {isStreaming && (!displayMessage || displayMessage.length === 0) ? (
-              <div className="flex items-center gap-3">
-                <div className="typing-indicator">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-                <span className="text-sm text-gray-500 dark:text-gray-400">
-                  {isImageResponse
-                    ? "Analyzing image with BLIP..."
-                    : isDocumentResponse
-                    ? "Processing document..."
-                    : "AI is thinking..."}
-                </span>
+  return (
+    <div className="flex items-start gap-2 mb-4 animate-fade-in px-4">
+      <div className="flex-shrink-0 w-7 h-7 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-full flex items-center justify-center shadow-md">
+        <IconRobot size={14} className="text-white" />
+      </div>
+      
+      <div className="flex-1 max-w-[85%]">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl px-4 py-3 shadow-sm border border-gray-200 dark:border-gray-700">
+          {isStreaming && (!displayMessage || displayMessage.length === 0) ? (
+            <div className="flex items-center gap-3">
+              <div className="typing-indicator">
+                <span />
+                <span />
+                <span />
               </div>
-            ) : (
-              <div className="space-y-2">
-                {(isImageResponse || isDocumentResponse) && (
-                  <div className={`inline-flex items-center gap-2 px-2 py-1 rounded-md text-xs mb-2 ${
-                    isImageResponse 
-                      ? 'bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 text-purple-600 dark:text-purple-400'
-                      : 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400'
-                  }`}>
-                    <div className={`w-1.5 h-1.5 rounded-full ${
-                      isImageResponse ? 'bg-purple-500' : 'bg-blue-500'
-                    }`}></div>
-                    {isImageResponse ? 'Image Analysis' : 'Document Analysis'}
-                    {metadata?.textExtracted && (
-                      <span className="text-xs opacity-70">
-                        • Text: {metadata.extractedTextLength} chars
-                      </span>
-                    )}
-                    {completedBy && (
-                      <span className="text-xs opacity-70">
-                        • {completedBy}
-                      </span>
-                    )}
-                  </div>
+              <span className="text-sm text-gray-500 dark:text-gray-400">
+                {isImageResponse ? "Analyzing image..." : isDocumentResponse ? "Processing document..." : "AI is thinking..."}
+              </span>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {(isImageResponse || isDocumentResponse) && (
+                <div className={`inline-flex items-center gap-2 px-2 py-1 rounded-md text-xs mb-2 ${
+                  isImageResponse 
+                    ? 'bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 text-purple-600 dark:text-purple-400'
+                    : 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400'
+                }`}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${isImageResponse ? 'bg-purple-500' : 'bg-blue-500'}`}></div>
+                  {isImageResponse ? 'Image Analysis' : 'Document Analysis'}
+                </div>
+              )}
+              
+              <div className="prose prose-sm max-w-none text-gray-800 dark:text-gray-200">
+                <ReactMarkdown
+                  components={{
+                    p: ({children}) => <p className="mb-1 leading-relaxed">{children}</p>,
+                    code: ({node, inline, className, children, ...props}) => {
+                      const match = /language-(\w+)/.exec(className || '');
+                      return !inline && match ? (
+                        <SyntaxHighlighter style={oneDark} language={match[1]} PreTag="div" {...props}>
+                          {String(children).replace(/\n$/, '')}
+                        </SyntaxHighlighter>
+                      ) : (
+                        <code className={className} {...props}>{children}</code>
+                      );
+                    }
+                  }}
+                >
+                  {displayMessage}
+                </ReactMarkdown>
+
+                {/* Streaming cursor */}
+                {isStreaming && displayMessage && displayMessage.length > 0 && (
+                  <span className="animate-pulse ml-0.5 text-gray-400">▍</span>
                 )}
-                
-                <div className="prose prose-sm max-w-none text-gray-800 dark:text-gray-200">
-                  <ReactMarkdown
-                    components={{
-                      p: ({children}) => <p className="mb-1 leading-relaxed">{children}</p>,
-                      code: ({node, inline, className, children, ...props}) => {
-                        const match = /language-(\w+)/.exec(className || '');
-                        return !inline && match ? (
-                          <SyntaxHighlighter
-                            style={oneDark}
-                            language={match[1]}
-                            PreTag="div"
-                            {...props}
-                          >
-                            {String(children).replace(/\n$/, '')}
-                          </SyntaxHighlighter>
-                        ) : (
-                          <code className={className} {...props}>
-                            {children}
-                          </code>
-                        );
-                      }
-                    }}
-                  >
-                    {displayMessage}
-                  </ReactMarkdown>
-
-                  {isStreaming && displayMessage && displayMessage.length > 0 && (
-                    <span className="animate-pulse ml-0.5 text-gray-400">▍</span>
-                  )}
-                </div>
               </div>
-            )}
-          </div>
-          
-          {!isStreaming && (
-            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 px-1">
-              {timestamp &&
-                !isNaN(new Date(timestamp)) &&
-                new Date(timestamp).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit"
-                })}
             </div>
           )}
         </div>
+        
+        {!isStreaming && timestamp && (
+          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 px-1">
+            {new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </div>
+        )}
       </div>
-    );
-  };
+    </div>
+  );
+};
+
 
   // ✅ VOICE INPUT HANDLERS
   const handleVoiceInput = useCallback(() => {
@@ -1011,33 +943,22 @@ const handleSubmit = async (e) => {
         ) : (
           <div className="max-w-4xl mx-auto">
             {actualMessages.map((msg, index) => (
-              <div key={msg._id || index}>
-                {msg.sender === 'AI' ? (
-                  <AiMessage
-                    message={msg.message}
-                    timestamp={msg.timestamp}
-                    fileUrl={msg.fileUrl}
-                    fileType={msg.fileType}
-                    type={msg.type}
-                    isStreaming={msg.isStreaming}
-                    processingInfo={msg.processingInfo}
-                    completedBy={msg.completedBy}
-                    metadata={msg.metadata}
-                  />
-                ) : (
-                  <UserMessage
-                    message={msg.message}
-                    timestamp={msg.timestamp}
-                    status={msg.status}
-                    fileUrl={msg.fileUrl}
-                    type={msg.type}
-                    fileType={msg.fileType}
-                    fileName={msg.fileName}
-                    hasTextExtraction={msg.hasTextExtraction}
-                    extractedTextLength={msg.extractedTextLength}
-                  />
-                )}
-              </div>
+              msg.sender === 'AI' ? (
+                <AiMessage
+                  key={`${msg._id}-${msg.renderKey || 0}`} // ✅ Force re-render on key change
+                  message={msg.message}
+                  timestamp={msg.timestamp}
+                  fileUrl={msg.fileUrl}
+                  fileType={msg.fileType}
+                  type={msg.type}
+                  isStreaming={msg.isStreaming}
+                  processingInfo={msg.processingInfo}
+                  completedBy={msg.completedBy}
+                  metadata={msg.metadata}
+                />
+              ) : (
+                <UserMessage key={msg._id || index} {...msg} />
+              )
             ))}
             <div ref={messagesEndRef} />
           </div>

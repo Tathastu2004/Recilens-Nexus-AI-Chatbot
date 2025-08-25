@@ -74,7 +74,7 @@ class ConversationMemory:
 # Initialize memory
 memory = ConversationMemory()
 
-# Initialize services
+# Initialize services (add after your memory initialization)
 training_service = TrainingService(TrainingConfig.NODE_BACKEND_URL)
 model_manager = ModelManager()
 
@@ -88,7 +88,7 @@ class ChatRequest(BaseModel):
     fileUrl: Optional[str] = None
     fileType: Optional[str] = None
     fileName: Optional[str] = None
-    extractedText: Optional[str] = None
+    extractedText: Optional[str] = None  # ✅ TEXT FROM NODE.JS BACKEND
     conversationContext: Optional[List[Dict[str, Any]]] = []
     sessionId: Optional[str] = None
 
@@ -302,9 +302,9 @@ async def chat_endpoint(request: ChatRequest):
         file_url = request.fileUrl
         file_type = request.fileType
         file_name = request.fileName
-        extracted_text = request.extractedText
+        extracted_text = request.extractedText  # ✅ TEXT FROM NODE.JS BACKEND
         request_type = request.type or "text"
-
+        
         print(f"🔍 [FASTAPI] Processing parameters:")
         print(f"   Request Type: {request_type}")
         print(f"   Will use extracted text: {bool(extracted_text and len(extracted_text.strip()) > 10)}")
@@ -323,6 +323,7 @@ async def chat_endpoint(request: ChatRequest):
                         print(f"🦙 [LLAMA3] Connecting to Ollama...")
                         client = AsyncClient(host=LLAMA_URL)
                         
+                        # ✅ ENHANCED PROMPT WITH EXTRACTED TEXT
                         enhanced_prompt = f"""DOCUMENT CONTENT:
 {extracted_text}
 
@@ -335,7 +336,8 @@ USER REQUEST: {user_message}
 
 INSTRUCTIONS: Analyze the document content above and respond to the user's request."""
 
-                        print(f"📝 [LLAMA3] Processing with enhanced prompt...")
+                        print(f"📝 [LLAMA3] Processing with enhanced prompt (length: {len(enhanced_prompt)} chars)...")
+                        print(f"📝 [LLAMA3] Prompt preview: {enhanced_prompt[:200]}...")
                         
                         stream = await client.chat(
                             model='llama3',
@@ -346,32 +348,24 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
                             stream=True
                         )
                         
-                        print(f"🌊 [LLAMA3] Starting word-by-word document response stream...")
+                        print(f"🌊 [LLAMA3] Starting to stream response...")
                         response_content = ""
                         chunk_count = 0
-                        word_buffer = ""
                         
                         async for chunk in stream:
                             content = chunk.get('message', {}).get('content', '')
                             if content:
                                 response_content += content
                                 chunk_count += 1
-                                word_buffer += content
+                                yield content
                                 
-                                # Split by spaces to get words
-                                words = word_buffer.split(' ')
-                                
-                                if len(words) > 1:
-                                    for word in words[:-1]:
-                                        yield word + ' '
-                                        await asyncio.sleep(0.05)
-                                    word_buffer = words[-1]
+                                # Debug every 10 chunks
+                                if chunk_count % 10 == 0:
+                                    print(f"🌊 [LLAMA3] Streaming progress: {chunk_count} chunks, {len(response_content)} characters")
                         
-                        if word_buffer.strip():
-                            yield word_buffer
+                        print(f"✅ [LLAMA3] Streaming completed: {chunk_count} chunks, {len(response_content)} characters")
                         
-                        print(f"✅ [LLAMA3] Document streaming completed: {chunk_count} chunks, {len(response_content)} characters")
-                        
+                        # ✅ STORE RESPONSE IN MEMORY
                         memory.add_message(session_id, "assistant", response_content, "document", {
                             "model": "Llama3",
                             "used_extracted_text": True,
@@ -380,11 +374,16 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
                             "chunks_streamed": chunk_count
                         })
                         
+                        print(f"✅ [FASTAPI] Document processing completed successfully")
+                        
                     except Exception as e:
                         error_msg = f"❌ Document Processing Error: {str(e)}"
                         print(f"❌ [LLAMA3] Document processing failed: {error_msg}")
+                        print(f"❌ [LLAMA3] Error type: {type(e).__name__}")
+                        print(f"❌ [LLAMA3] Error details: {str(e)}")
                         yield error_msg
                 
+                # ✅ STORE USER MESSAGE
                 memory.add_message(session_id, "user", user_message, "document", {
                     "file_url": file_url,
                     "file_type": file_type,
@@ -403,113 +402,96 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
                 
                 return StreamingResponse(error_response(), media_type="text/plain")
         
-        # ✅ IMAGE PROCESSING
+        # ✅ IMAGE PROCESSING - FIXED
         elif request_type == "image":
             print(f"🖼️ [FASTAPI] Image analysis request...")
             print(f"🖼️ [FASTAPI] Image URL: {file_url}")
-
+            
             async def blip_response():
                 try:
                     print(f"📡 [BLIP] Sending request to BLIP server...")
-
+                    
+                    # ✅ FIX: Use correct request payload format
+                    # Don't send filename as question - let BLIP generate a caption
                     payload = {
                         "image_url": file_url,
                         "question": user_message if user_message and not user_message.startswith("Uploaded image:") else None
                     }
-
+                    
+                    # ✅ FIX: Add proper headers
                     headers = {
                         "Content-Type": "application/json",
                         "Accept": "application/json"
                     }
-
+                    
                     print(f"📡 [BLIP] Request payload: {payload}")
+                    print(f"📡 [BLIP] Request headers: {headers}")
+                    print(f"📡 [BLIP] Target URL: {BLIP_URL}/analyze")
 
-                    # Check BLIP server health
+                    # ✅ FIX: Check if BLIP server is running first
                     try:
                         health_check = requests.get(f"{BLIP_URL}/health", timeout=5)
+                        print(f"📡 [BLIP] Health check: {health_check.status_code}")
                         if health_check.status_code != 200:
                             yield "❌ BLIP server is not healthy. Please restart the BLIP service."
                             return
                     except requests.exceptions.ConnectionError:
                         yield "❌ Cannot connect to BLIP server. Please make sure it's running on port 5001."
                         return
-
+                    
                     blip_response = requests.post(
-                        f"{BLIP_URL}/analyze",
+                        f"{BLIP_URL}/analyze", 
                         json=payload,
                         headers=headers,
                         timeout=60
                     )
-
+                    
                     print(f"📥 [BLIP] BLIP response: {blip_response.status_code}")
-
+                    
                     if blip_response.status_code == 200:
                         result = blip_response.json()
                         content = result.get('result', 'Image analysis completed')
-
+                        
                         print(f"✅ [BLIP] Analysis successful: {content[:100]}...")
-
-                        # ✅ WORD-BY-WORD STREAMING FOR BLIP RESPONSE
-                        print(f"🌊 [BLIP] Starting word-by-word streaming...")
-                        words = content.split(' ')
-                        print(f"📊 [BLIP] Will stream {len(words)} words")
-
-                        for i, word in enumerate(words):
-                            word_to_send = word if i == len(words) - 1 else word + ' '
-                            print(f"📝 [BLIP WORD {i+1}/{len(words)}] Sending: '{word_to_send}'")
-                            yield word_to_send
-                            await asyncio.sleep(0.08)  # 80ms delay for images
-
+                        
                         memory.add_message(session_id, "user", user_message, "image", {"file_url": file_url})
                         memory.add_message(session_id, "assistant", content, "image", {"model": "BLIP"})
-
-                        print(f"✅ [BLIP] Word-by-word image analysis completed")
+                        
+                        yield content
+                        print(f"✅ [BLIP] Image analysis completed")
                     else:
                         error_msg = f"❌ BLIP Error: HTTP {blip_response.status_code}"
                         if blip_response.text:
                             error_msg += f" - {blip_response.text}"
                         print(f"❌ [BLIP] Error: {error_msg}")
-
-                        words = error_msg.split(' ')
-                        for i, word in enumerate(words):
-                            yield word + (' ' if i < len(words) - 1 else '')
-                            await asyncio.sleep(0.05)
-
+                        yield error_msg
+                        
                 except requests.exceptions.ConnectionError:
-                    error_msg = "❌ Cannot connect to BLIP server. Make sure it's running on port 5001."
+                    error_msg = "❌ Cannot connect to BLIP server. Make sure it's running on port 5000."
                     print(f"❌ [BLIP] Connection Error: {error_msg}")
-                    words = error_msg.split(' ')
-                    for i, word in enumerate(words):
-                        yield word + (' ' if i < len(words) - 1 else '')
-                        await asyncio.sleep(0.05)
+                    yield error_msg
                 except requests.exceptions.Timeout:
                     error_msg = "❌ BLIP server timeout. Image analysis took too long."
                     print(f"❌ [BLIP] Timeout Error: {error_msg}")
-                    words = error_msg.split(' ')
-                    for i, word in enumerate(words):
-                        yield word + (' ' if i < len(words) - 1 else '')
-                        await asyncio.sleep(0.05)
+                    yield error_msg
                 except Exception as e:
                     error_msg = f"❌ Image Analysis Error: {str(e)}"
                     print(f"❌ [BLIP] Exception: {error_msg}")
-                    words = error_msg.split(' ')
-                    for i, word in enumerate(words):
-                        yield word + (' ' if i < len(words) - 1 else '')
-                        await asyncio.sleep(0.05)
-
+                    yield error_msg
+            
             return StreamingResponse(blip_response(), media_type="text/plain")
-
-        # ✅ TEXT CHAT - CORRECTED
-        else:
+        
+        # ✅ TEXT CHAT
+        else:  # text
             print(f"🦙 [FASTAPI] Text chat request...")
-
+            
             async def llama_response():
                 try:
                     print(f"🦙 [LLAMA3] Connecting to Ollama for text chat...")
                     client = AsyncClient(host=LLAMA_URL)
 
                     print(f"🦙 [LLAMA3] Starting chat with message: {user_message[:100]}...")
-
+                    
                     stream = await client.chat(
                         model='llama3',
                         messages=[
@@ -518,76 +500,47 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
                         ],
                         stream=True
                     )
-
-                    print(f"🌊 [LLAMA3] Starting ENHANCED word-by-word streaming with detailed logging...")
+                    
+                    print(f"🌊 [LLAMA3] Starting text response stream...")
                     response_content = ""
                     chunk_count = 0
-                    word_count = 0
-                    word_buffer = ""
-
+                    
                     async for chunk in stream:
                         content = chunk.get('message', {}).get('content', '')
                         if content:
                             response_content += content
                             chunk_count += 1
-                            word_buffer += content
-
-                            # ✅ LOG RAW CHUNK DATA
-                            print(f"📦 [CHUNK {chunk_count}] Raw: '{content}' (len: {len(content)})")
-
-                            # Split by spaces to get words
-                            words = word_buffer.split(' ')
-
-                            # Send complete words (keep last incomplete word in buffer)
-                            if len(words) > 1:
-                                for word in words[:-1]:
-                                    word_count += 1
-                                    word_with_space = word + ' '
-
-                                    # ✅ DETAILED WORD LOGGING
-                                    print(f"📝 [WORD {word_count}] Sending: '{word_with_space}' (len: {len(word_with_space)})")
-
-                                    yield word_with_space
-                                    await asyncio.sleep(0.05)  # 50ms delay between words
-
-                                # Keep the last word in buffer
-                                word_buffer = words[-1]
-                                print(f"🔄 [BUFFER] Remaining: '{word_buffer}'")
+                            yield content
                     
-                    # Send any remaining content in buffer
-                    if word_buffer.strip():
-                        word_count += 1
-                        print(f"📝 [FINAL WORD] Sending: '{word_buffer}' (len: {len(word_buffer)})")
-                        yield word_buffer
-
-                    print(f"✅ [LLAMA3] STREAMING SUMMARY:")
-                    print(f"   Total chunks: {chunk_count}")
-                    print(f"   Total words sent: {word_count}")
-                    print(f"   Total characters: {len(response_content)}")
-                    print(f"   Full response: {response_content[:200]}...")
-
+                    print(f"✅ [LLAMA3] Text response completed: {chunk_count} chunks, {len(response_content)} chars")
+                    
                     memory.add_message(session_id, "user", user_message, "text")
                     memory.add_message(session_id, "assistant", response_content, "text", {"model": "Llama3"})
-
+                    
                 except Exception as e:
                     error_msg = f"❌ Llama3 Error: {str(e)}"
                     print(f"❌ [LLAMA3] Error: {error_msg}")
                     yield error_msg
-
+            
             return StreamingResponse(llama_response(), media_type="text/plain")
-
+    
     except Exception as error:
         print(f"❌ [FASTAPI] ==================== FATAL ERROR ====================")
         print(f"❌ [FASTAPI] Error name: {type(error).__name__}")
         print(f"❌ [FASTAPI] Error message: {str(error)}")
         print(f"❌ [FASTAPI] Error details: {repr(error)}")
-
+        
         async def error_generator():
             yield f"❌ Server Error: {str(error)}"
-
+        
         return StreamingResponse(error_generator(), media_type="text/plain")
-
-# ... rest of your endpoints remain the same ...
+    
+# ✅ TRAINING REQUEST MODEL
+# class TrainingRequest(BaseModel):
+#     jobId: str
+#     modelName: str
+#     dataset: str
+#     parameters: Optional[Dict[str, Any]] = None
 
 @app.post("/train")
 async def train_model(req: TrainingRequest):
@@ -595,6 +548,7 @@ async def train_model(req: TrainingRequest):
     try:
         logger.info(f"Training job started: {req.jobId}")
         
+        # Start training in background
         asyncio.create_task(
             training_service.start_training(
                 req.jobId, 
@@ -614,7 +568,124 @@ async def train_model(req: TrainingRequest):
         logger.error(f"Training start failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to start training: {str(e)}")
 
-# Intent recognition endpoint
+# Add new model management endpoints
+@app.post("/training/cancel")
+async def cancel_training(req: CancelRequest):
+    """Cancel a training job"""
+    success = training_service.cancel_job(req.jobId)
+    if success:
+        return {"message": "Training job cancelled", "jobId": req.jobId}
+    else:
+        raise HTTPException(status_code=404, detail="Training job not found")
+
+@app.get("/training/status/{job_id}")
+async def get_training_status(job_id: str):
+    """Get training job status"""
+    status = training_service.get_job_status(job_id)
+    return status
+
+@app.post("/model/load")
+async def load_model_endpoint(request: ModelLoadRequest):
+    """Load a model endpoint"""
+    try:
+        logger.info(f"Loading model request: {request.modelId}")
+        
+        # Basic validation
+        if not request.modelId:
+            raise HTTPException(status_code=400, detail="Model ID is required")
+        
+        if not request.modelPath:
+            raise HTTPException(status_code=400, detail="Model path is required")
+        
+        # For now, just simulate loading (replace with actual logic later)
+        if request.modelType.lower() == "llama":
+            # Simulate Llama loading
+            result = {
+                "status": "success",
+                "message": f"Llama model {request.modelId} loaded successfully",
+                "modelId": request.modelId,
+                "type": "llama",
+                "loadTime": datetime.now().isoformat()
+            }
+        elif request.modelType.lower() == "blip":
+            # Simulate BLIP loading
+            result = {
+                "status": "success", 
+                "message": f"BLIP model {request.modelId} loaded successfully",
+                "modelId": request.modelId,
+                "type": "blip",
+                "loadTime": datetime.now().isoformat()
+            }
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported model type: {request.modelType}")
+        
+        logger.info(f"Model {request.modelId} loaded successfully")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Failed to load model {request.modelId}")
+        raise HTTPException(status_code=500, detail=f"Failed to load model: {str(e)}")
+
+@app.post("/model/unload")
+async def unload_model_endpoint(request: ModelUnloadRequest):
+    """Unload a model endpoint"""
+    try:
+        logger.info(f"Unloading model: {request.modelId}")
+        
+        # Simulate unloading
+        result = {
+            "status": "success",
+            "message": f"Model {request.modelId} unloaded successfully",
+            "modelId": request.modelId
+        }
+        
+        return result
+        
+    except Exception as e:
+        logger.exception(f"Failed to unload model {request.modelId}")
+        raise HTTPException(status_code=500, detail=f"Failed to unload model: {str(e)}")
+
+@app.get("/model/{model_id}/status")
+async def get_model_status_endpoint(model_id: str):
+    """Get model status endpoint"""
+    try:
+        # Simulate status check
+        result = {
+            "modelId": model_id,
+            "status": "loaded",  # or "not_loaded", "loading", "error"
+            "type": "llama",     # or "blip"
+            "loadTime": datetime.now().isoformat()
+        }
+        
+        return result
+        
+    except Exception as e:
+        logger.exception(f"Failed to get status for model {model_id}")
+        raise HTTPException(status_code=500, detail=f"Failed to get model status: {str(e)}")
+
+@app.get("/model/loaded")
+async def get_loaded_models_endpoint():
+    """Get all loaded models endpoint"""
+    try:
+        # Simulate loaded models list
+        loaded_models = [
+            {
+                "modelId": "llama3",
+                "type": "llama",
+                "status": "loaded",
+                "loadTime": datetime.now().isoformat()
+            }
+        ]
+        
+        return {"loaded_models": loaded_models, "count": len(loaded_models)}
+        
+    except Exception as e:
+        logger.exception("Failed to get loaded models")
+        raise HTTPException(status_code=500, detail=f"Failed to get loaded models: {str(e)}")
+
+# ✅ INTENT RECOGNITION ENDPOINT
 class IntentRequest(BaseModel):
     message: str
 
