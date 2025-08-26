@@ -220,9 +220,10 @@ export const uploadFileHandler = async (req, res) => {
 };
 
 
-// 🔹 Stream AI response over HTTP with full context support - ENHANCED WITH TEXT EXTRACTION
+// Replace the sendMessage function in chatController.js:
+
 export const sendMessage = async (req, res) => {
-  console.log("📨 [SEND MESSAGE] Request received...");
+  console.log("📨 [SEND MESSAGE] Request received for streaming...");
   try {
     const {
       sessionId,
@@ -240,6 +241,7 @@ export const sendMessage = async (req, res) => {
         .status(400)
         .json({ success: false, error: "Session ID and message are required" });
     }
+
     const session = await ChatSession.findById(sessionId);
     if (!session || session.user.toString() !== userId.toString()) {
       return res
@@ -247,28 +249,11 @@ export const sendMessage = async (req, res) => {
         .json({ success: false, error: "Access denied or session not found" });
     }
 
-    // Call FastAPI intent recognition API
-    let recognizedIntent = "unknown";
-    try {
-      const intentRes = await axios.post(
-        `${FASTAPI_BASE_URL}/intent`,
-        { message },
-        { headers: { "Content-Type": "application/json" } }
-      );
-      if (intentRes.status === 200 && intentRes.data.intent) {
-        recognizedIntent = intentRes.data.intent;
-        console.log("🎯 Recognized intent:", recognizedIntent);
-      }
-    } catch (err) {
-      console.error("❌ Intent recognition failed:", err.message);
-    }
-
-    // Save User's Message with recognized intent
+    // ✅ SAVE USER MESSAGE FIRST
     const userMessage = new Message({
       session: sessionId,
       message,
       sender: userId,
-      intent: recognizedIntent,  // <-- intent logic implemented here
       type,
       fileUrl: fileUrl || null,
       fileType: fileType || null,
@@ -277,57 +262,113 @@ export const sendMessage = async (req, res) => {
       hasTextExtraction: !!(extractedText && !extractedText.startsWith("❌")),
       textLength: extractedText ? extractedText.length : 0,
     });
-    await userMessage.save();
-    console.log("✅ User message saved with intent.");
+    
+    const savedUserMessage = await userMessage.save();
+    console.log("✅ User message saved:", savedUserMessage._id);
 
-    // --- Get AI Response ---
-    console.log("🤖 Calling AI service with user prompt and extracted text...");
-    // ✅ Always pass all relevant fields to AI service
-    const aiResponse = await getAIResponse({
-      message,
-      extractedText,
-      type,
-      fileUrl,
-      fileType,
-      fileName,
-      sessionId,
+    // ✅ ENHANCED STREAMING HEADERS
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Transfer-Encoding': 'chunked', // ✅ Force chunked encoding
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Cache-Control'
     });
-    console.log("✅ AI response received.");
 
-    // --- Save AI's Message ---
-    const aiMessage = new Message({
-      session: sessionId,
-      message: typeof aiResponse === "string" ? aiResponse : aiResponse.message,
-      sender: "AI",
-      type: type || "text",
-      fileUrl: fileUrl || null,
-      fileType: fileType || null,
-      fileName: fileName || null,
-      extractedText: extractedText || null,
-      hasTextExtraction: !!(extractedText && !extractedText.startsWith("❌")),
-      textLength: extractedText ? extractedText.length : 0,
-      metadata: {
-        usedExtractedText: !!(extractedText && !extractedText.startsWith("❌")),
-      },
-    });
-    await aiMessage.save();
-    console.log("✅ AI message saved.");
+    let streamedResponse = "";
+    let chunkCount = 0;
+    let totalBytes = 0;
 
-    // --- Update Session and Send Response ---
-    session.lastActivity = new Date();
-    await session.save();
+    try {
+      const fastApiResponse = await axios.post(`${FASTAPI_BASE_URL}/chat`, {
+        message, extractedText, type, fileUrl, fileType, fileName, sessionId,
+      }, {
+        responseType: 'stream',
+        timeout: 120000,
+        headers: { 'Content-Type': 'application/json' }
+      });
 
-    res.status(200).json({
-      success: true,
-      aiMessage,
-    });
+      fastApiResponse.data.on('data', (chunk) => {
+        const text = chunk.toString();
+        streamedResponse += text;
+        chunkCount++;
+        totalBytes += chunk.length;
+        
+        console.log(`📦 [CHUNK ${chunkCount}] Received: "${text}"`);
+        
+        // ✅ IMMEDIATE SEND WITH FLUSH
+        res.write(text);
+        if (res.flush) res.flush(); // Force immediate send
+        
+        console.log(`📤 [FRONTEND] Sent chunk ${chunkCount} immediately`);
+      });
+
+      fastApiResponse.data.on('end', async () => {
+        console.log("✅ [STREAMING] FastAPI stream completed");
+        console.log(`📊 [STREAMING SUMMARY]:`, {
+          totalChunks: chunkCount,
+          totalBytes: totalBytes,
+          responseLength: streamedResponse.length,
+          wordsCount: streamedResponse.split(' ').length,
+          completeResponse: streamedResponse.substring(0, 200) + '...'
+        });
+        
+        // Save AI message to database
+        const aiMessage = new Message({
+          session: sessionId,
+          message: streamedResponse,
+          sender: "AI",
+          type: type || "text",
+          fileUrl: fileUrl || null,
+          fileType: fileType || null,
+          fileName: fileName || null,
+          extractedText: extractedText || null,
+          hasTextExtraction: !!(extractedText && !extractedText.startsWith("❌")),
+          textLength: extractedText ? extractedText.length : 0,
+          metadata: {
+            usedExtractedText: !!(extractedText && !extractedText.startsWith("❌")),
+            streamingCompleted: true
+          },
+        });
+        
+        const savedAiMessage = await aiMessage.save();
+        console.log("✅ AI message saved to database:", savedAiMessage._id);
+
+        // Update session last activity
+        session.lastActivity = new Date();
+        await session.save();
+        console.log("✅ Session updated");
+
+        res.end();
+      });
+
+      fastApiResponse.data.on('error', (error) => {
+        console.error("❌ [STREAMING] FastAPI stream error:", error);
+        res.write(`❌ Streaming Error: ${error.message}`);
+        res.end();
+      });
+
+    } catch (error) {
+      console.error("❌ [STREAMING] Error:", error);
+      res.write(`❌ Failed to stream response: ${error.message}`);
+      res.end();
+    }
+
   } catch (error) {
     console.error("❌ [SEND MESSAGE] Error:", error);
-    res
-      .status(500)
-      .json({ success: false, error: "Failed to send message", details: error.message });
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        success: false, 
+        error: "Failed to send message", 
+        details: error.message 
+      });
+    }
   }
 };
+
 
 // ✅ NEW: Get file type validation
 export const validateFileType = async (req, res) => {

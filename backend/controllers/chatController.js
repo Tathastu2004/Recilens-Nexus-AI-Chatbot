@@ -1,4 +1,4 @@
-// /controllers/chatController.js
+// controllers/chatController.js - UPDATED
 import ChatSession from '../models/ChatSession.js';
 import Message from '../models/Message.js';
 import fs from 'fs';
@@ -20,8 +20,10 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
+
 const FASTAPI_BASE_URL = process.env.FASTAPI_BASE_URL || "http://127.0.0.1:8000";
 
+// ✅ EXISTING UTILITY FUNCTIONS (UNCHANGED)
 const generateFileHash = (fileBuffer) => {
   try {
     return crypto.createHash('md5').update(fileBuffer).digest('hex');
@@ -37,11 +39,13 @@ const uploadWithDeduplication = async (filePath, options = {}) => {
     const fileBuffer = fs.readFileSync(filePath);
     const fileHash = generateFileHash(fileBuffer);
     console.log('🔍 [DEDUP] File hash generated:', fileHash.substring(0, 8) + '...');
+    
     try {
       const searchResult = await cloudinary.search
         .expression(`tags=${fileHash}`)
         .max_results(1)
         .execute();
+        
       if (searchResult.resources && searchResult.resources.length > 0) {
         const existingFile = searchResult.resources[0];
         console.log('♻️ [DEDUP] Duplicate found, reusing existing file:', existingFile.public_id);
@@ -55,6 +59,7 @@ const uploadWithDeduplication = async (filePath, options = {}) => {
     } catch (searchError) {
       console.warn('⚠️ [DEDUP] Search failed, proceeding with new upload:', searchError.message);
     }
+    
     console.log('📤 [DEDUP] Uploading new file...');
     const uploadResult = await cloudinary.uploader.upload(filePath, {
       ...options,
@@ -65,6 +70,7 @@ const uploadWithDeduplication = async (filePath, options = {}) => {
         uploaded_at: new Date().toISOString()
       }
     });
+    
     console.log('✅ [DEDUP] New file uploaded successfully:', uploadResult.public_id);
     return {
       ...uploadResult,
@@ -78,7 +84,7 @@ const uploadWithDeduplication = async (filePath, options = {}) => {
   }
 };
 
-// 🔹 Create new chat session
+// ✅ EXISTING CRUD OPERATIONS (UNCHANGED)
 export const createChatSession = async (req, res) => {
   try {
     const newSession = new ChatSession({
@@ -92,7 +98,6 @@ export const createChatSession = async (req, res) => {
   }
 };
 
-// 🔹 Get all user chat sessions
 export const getUserChatSessions = async (req, res) => {
   try {
     const sessions = await ChatSession.find({ user: req.user._id }).sort({ createdAt: -1 });
@@ -102,18 +107,25 @@ export const getUserChatSessions = async (req, res) => {
   }
 };
 
-// 🔹 Get messages in a session
 export const getSessionMessages = async (req, res) => {
   try {
     const sessionId = req.params.sessionId;
     const messages = await Message.find({ session: sessionId }).sort({ createdAt: 1 });
-    res.status(200).json(messages);
+    
+    // ✅ NEW: Include context stats in response
+    const contextStats = await cacheService.getContextStats(sessionId, req.user._id);
+    
+    res.status(200).json({
+      success: true,
+      messages,
+      contextStats,
+      sessionId
+    });
   } catch (error) {
     res.status(500).json({ message: 'Error retrieving messages' });
   }
 };
 
-// 🔹 Update session title
 export const updateSessionTitle = async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -130,11 +142,14 @@ export const updateSessionTitle = async (req, res) => {
   }
 };
 
-// 🔹 Delete chat session
 export const deleteChatSession = async (req, res) => {
   try {
     const { sessionId } = req.params;
     const userId = req.user._id;
+    
+    // ✅ NEW: Clear context from Redis when deleting session
+    await cacheService.clearContext(sessionId, userId);
+    
     const messages = await Message.find({ session: sessionId });
     const publicIds = messages
       .map(msg => msg.fileUrl?.match(/\/upload\/(?:v\d+\/)?(.+)\.\w+$/)?.[1])
@@ -149,6 +164,7 @@ export const deleteChatSession = async (req, res) => {
   }
 };
 
+// ✅ EXISTING FILE UPLOAD (UNCHANGED)
 export const uploadFileHandler = async (req, res) => {
   console.log('📤 [UPLOAD] Starting file upload and text extraction...');
   try {
@@ -160,22 +176,19 @@ export const uploadFileHandler = async (req, res) => {
     let uploadResult;
     let extractedText = null;
 
-    // ✅ ADD: Enhanced file type detection
     const fileExtension = path.extname(req.file.originalname).toLowerCase();
     const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'].includes(fileExtension);
     const isDocument = ['.pdf', '.txt', '.docx', '.doc'].includes(fileExtension);
 
-    // --- Cloudinary Upload ---
     uploadResult = await cloudinary.uploader.upload(req.file.path, {
       folder: 'nexus_chat_files',
-      resource_type: isImage ? 'image' : 'raw', // ✅ FIX: Correct resource type
+      resource_type: isImage ? 'image' : 'raw',
       use_filename: true,
       unique_filename: true,
       access_mode: 'public',
     });
 
-    // --- Text Extraction ONLY for documents ---
-    if (isDocument) { // ✅ FIX: Only extract text from documents
+    if (isDocument) {
       const fileBuffer = fs.readFileSync(req.file.path);
       if (fileExtension === '.pdf') {
         try {
@@ -195,7 +208,6 @@ export const uploadFileHandler = async (req, res) => {
 
     const hasValidText = extractedText && !extractedText.startsWith('❌');
     
-    // ✅ FIX: Enhanced response with explicit file type
     res.status(200).json({
       success: true,
       message: isImage ? 
@@ -203,8 +215,8 @@ export const uploadFileHandler = async (req, res) => {
         'Document processed successfully. Ready for user prompt.',
       fileUrl: uploadResult.secure_url,
       fileName: req.file.originalname,
-      fileType: isImage ? 'image' : 'document', // ✅ ADD: Explicit file type
-      extractedText: isDocument ? extractedText : undefined, // ✅ FIX: Only for documents
+      fileType: isImage ? 'image' : 'document',
+      extractedText: isDocument ? extractedText : undefined,
       hasText: isDocument ? hasValidText : false,
       textLength: isDocument && hasValidText ? extractedText.length : 0,
     });
@@ -219,11 +231,9 @@ export const uploadFileHandler = async (req, res) => {
   }
 };
 
-
-// Replace the sendMessage function in chatController.js:
-
+// ✅ UPDATED SEND MESSAGE WITH CONTEXT WINDOW
 export const sendMessage = async (req, res) => {
-  console.log("📨 [SEND MESSAGE] Request received for streaming...");
+  console.log("📨 [SEND MESSAGE] Request received for streaming with context...");
   try {
     const {
       sessionId,
@@ -249,7 +259,7 @@ export const sendMessage = async (req, res) => {
         .json({ success: false, error: "Access denied or session not found" });
     }
 
-    // ✅ SAVE USER MESSAGE FIRST
+    // ✅ SAVE USER MESSAGE TO DATABASE
     const userMessage = new Message({
       session: sessionId,
       message,
@@ -264,12 +274,24 @@ export const sendMessage = async (req, res) => {
     });
     
     const savedUserMessage = await userMessage.save();
-    console.log("✅ User message saved:", savedUserMessage._id);
+    console.log("✅ User message saved to database:", savedUserMessage._id);
+
+    // ✅ ADD USER MESSAGE TO CONTEXT WINDOW
+    await cacheService.addMessageToContext(sessionId, {
+      role: 'user',
+      content: message,
+      _id: savedUserMessage._id,
+      sender: userId,
+      type
+    }, userId);
+
+    // ✅ GET RECENT CONTEXT FOR LLAMA
+    const recentContext = await cacheService.getFormattedContextForLlama(sessionId, userId);
 
     // ✅ ENHANCED STREAMING HEADERS
     res.writeHead(200, {
       'Content-Type': 'text/plain; charset=utf-8',
-      'Transfer-Encoding': 'chunked', // ✅ Force chunked encoding
+      'Transfer-Encoding': 'chunked',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Pragma': 'no-cache',
       'Expires': '0',
@@ -283,9 +305,24 @@ export const sendMessage = async (req, res) => {
     let totalBytes = 0;
 
     try {
-      const fastApiResponse = await axios.post(`${FASTAPI_BASE_URL}/chat`, {
-        message, extractedText, type, fileUrl, fileType, fileName, sessionId,
-      }, {
+      // ✅ SEND CONTEXT TO FASTAPI
+      const fastApiPayload = {
+        message, 
+        extractedText, 
+        type, 
+        fileUrl, 
+        fileType, 
+        fileName, 
+        sessionId,
+        conversationContext: recentContext // ✅ INCLUDE CONTEXT
+      };
+
+      console.log('🦙 [CONTEXT] Sending context to FastAPI:', {
+        contextMessages: recentContext.length,
+        roles: recentContext.map(m => m.role).join(', ')
+      });
+
+      const fastApiResponse = await axios.post(`${FASTAPI_BASE_URL}/chat`, fastApiPayload, {
         responseType: 'stream',
         timeout: 120000,
         headers: { 'Content-Type': 'application/json' }
@@ -299,9 +336,8 @@ export const sendMessage = async (req, res) => {
         
         console.log(`📦 [CHUNK ${chunkCount}] Received: "${text}"`);
         
-        // ✅ IMMEDIATE SEND WITH FLUSH
         res.write(text);
-        if (res.flush) res.flush(); // Force immediate send
+        if (res.flush) res.flush();
         
         console.log(`📤 [FRONTEND] Sent chunk ${chunkCount} immediately`);
       });
@@ -316,7 +352,7 @@ export const sendMessage = async (req, res) => {
           completeResponse: streamedResponse.substring(0, 200) + '...'
         });
         
-        // Save AI message to database
+        // ✅ SAVE AI MESSAGE TO DATABASE
         const aiMessage = new Message({
           session: sessionId,
           message: streamedResponse,
@@ -330,14 +366,27 @@ export const sendMessage = async (req, res) => {
           textLength: extractedText ? extractedText.length : 0,
           metadata: {
             usedExtractedText: !!(extractedText && !extractedText.startsWith("❌")),
-            streamingCompleted: true
+            streamingCompleted: true,
+            contextUsed: recentContext.length
           },
         });
         
         const savedAiMessage = await aiMessage.save();
         console.log("✅ AI message saved to database:", savedAiMessage._id);
 
-        // Update session last activity
+        // ✅ ADD AI MESSAGE TO CONTEXT WINDOW
+        await cacheService.addMessageToContext(sessionId, {
+          role: 'assistant',
+          content: streamedResponse,
+          _id: savedAiMessage._id,
+          sender: 'AI',
+          type: type || 'text'
+        }, userId);
+
+        // ✅ LOG CONTEXT STATS
+        const contextStats = await cacheService.getContextStats(sessionId, userId);
+        console.log('📊 [CONTEXT STATS]:', contextStats);
+
         session.lastActivity = new Date();
         await session.save();
         console.log("✅ Session updated");
@@ -369,8 +418,49 @@ export const sendMessage = async (req, res) => {
   }
 };
 
+// ✅ NEW: GET CONTEXT ENDPOINT
+export const getSessionContext = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const userId = req.user._id;
+    
+    const context = await cacheService.getRecentContext(sessionId, userId);
+    const contextStats = await cacheService.getContextStats(sessionId, userId);
+    
+    res.json({
+      success: true,
+      context,
+      stats: contextStats
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to get session context' 
+    });
+  }
+};
 
-// ✅ NEW: Get file type validation
+// ✅ NEW: CLEAR CONTEXT ENDPOINT
+export const clearSessionContext = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const userId = req.user._id;
+    
+    await cacheService.clearContext(sessionId, userId);
+    
+    res.json({
+      success: true,
+      message: 'Session context cleared successfully'
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to clear session context' 
+    });
+  }
+};
+
+// ✅ EXISTING UTILITY ENDPOINTS (UNCHANGED)
 export const validateFileType = async (req, res) => {
   try {
     const { fileName, fileType } = req.body;
@@ -392,11 +482,14 @@ export const validateFileType = async (req, res) => {
   }
 };
 
-// ✅ NEW: Get session statistics
 export const getSessionStats = async (req, res) => {
   try {
     const { sessionId } = req.params;
     const messages = await Message.find({ session: sessionId }).lean();
+    
+    // ✅ INCLUDE CONTEXT STATS
+    const contextStats = await cacheService.getContextStats(sessionId, req.user._id);
+    
     const stats = {
       totalMessages: messages.length,
       userMessages: messages.filter(m => m.sender !== 'AI').length,
@@ -405,7 +498,8 @@ export const getSessionStats = async (req, res) => {
       documentMessages: messages.filter(m => m.type === 'document').length,
       filesUploaded: messages.filter(m => m.fileUrl).length,
       documentsWithText: messages.filter(m => m.extractedText && !m.extractedText.startsWith('❌')).length,
-      totalExtractedChars: messages.reduce((sum, m) => sum + (m.extractedText?.length || 0), 0)
+      totalExtractedChars: messages.reduce((sum, m) => sum + (m.extractedText?.length || 0), 0),
+      contextStats // ✅ INCLUDE CONTEXT INFORMATION
     };
     res.json(stats);
   } catch (error) {
@@ -413,7 +507,6 @@ export const getSessionStats = async (req, res) => {
   }
 };
 
-// ✅ NEW: Get duplicate files statistics
 export const getDuplicateStats = async (req, res) => {
   try {
     const duplicateSearch = await cloudinary.search
@@ -471,7 +564,6 @@ export const getDuplicateStats = async (req, res) => {
   }
 };
 
-// ✅ NEW: Clean up duplicate files (keep only the first one)
 export const cleanupDuplicates = async (req, res) => {
   try {
     const { dryRun = true } = req.query;

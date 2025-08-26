@@ -14,6 +14,91 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import '../styles/animations.css';
 
+// ✅ ENHANCED CONTEXT WINDOW INDICATOR COMPONENT
+const ContextWindowIndicator = ({ sessionId, contextStats, onClearContext }) => {
+  if (!contextStats || !contextStats.isActive) return null;
+  
+  const percentage = (contextStats.messageCount / contextStats.maxSize) * 100;
+  const isNearFull = percentage > 80;
+  const isAlmostFull = percentage > 90;
+  
+  return (
+    <div className={`mx-4 mb-2 p-3 rounded-xl border transition-all duration-200 ${
+      isAlmostFull
+        ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700'
+        : isNearFull 
+        ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-700'
+        : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-700'
+    }`}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${
+            isAlmostFull ? 'bg-red-500 animate-pulse' : isNearFull ? 'bg-amber-500' : 'bg-blue-500'
+          }`}></div>
+          <span className={`text-sm font-medium ${
+            isAlmostFull
+              ? 'text-red-800 dark:text-red-200'
+              : isNearFull 
+              ? 'text-amber-800 dark:text-amber-200'
+              : 'text-blue-800 dark:text-blue-200'
+          }`}>
+            Context Window ({contextStats.messageCount}/{contextStats.maxSize})
+          </span>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${
+            contextStats.storageType === 'redis' 
+              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+          }`}>
+            {contextStats.storageType === 'redis' ? '🔄 Redis' : '💾 Memory'}
+          </span>
+        </div>
+        <button
+          onClick={() => onClearContext(sessionId)}
+          className={`text-xs px-3 py-1 rounded transition-colors ${
+            isAlmostFull 
+              ? 'bg-red-200 dark:bg-red-800 hover:bg-red-500 hover:text-white'
+              : 'bg-gray-200 dark:bg-gray-700 hover:bg-red-500 hover:text-white'
+          }`}
+          title="Clear context window"
+        >
+          Clear Context
+        </button>
+      </div>
+      
+      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+        <div 
+          className={`h-2 rounded-full transition-all duration-300 ${
+            isAlmostFull ? 'bg-red-500' : isNearFull ? 'bg-amber-500' : 'bg-blue-500'
+          }`}
+          style={{ width: `${percentage}%` }}
+        ></div>
+      </div>
+      
+      <div className={`text-xs mt-2 flex items-center justify-between ${
+        isAlmostFull
+          ? 'text-red-600 dark:text-red-400'
+          : isNearFull 
+          ? 'text-amber-600 dark:text-amber-400'
+          : 'text-blue-600 dark:text-blue-400'
+      }`}>
+        <span>
+          {isAlmostFull 
+            ? '🚨 Context almost full - messages being removed'
+            : isNearFull 
+            ? '⚠️ Context window nearly full - older messages will be removed'
+            : `✅ AI remembers your last ${contextStats.messageCount} messages`
+          }
+        </span>
+        {contextStats.expiresIn > 0 && (
+          <span className="text-xs opacity-75">
+            Expires: {Math.floor(contextStats.expiresIn / 3600)}h {Math.floor((contextStats.expiresIn % 3600) / 60)}m
+          </span>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) => {
   // Constants and token
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
@@ -83,7 +168,11 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     generateFileHash,
     checkDuplicateFile,
     getDuplicateStats,
-    cleanupDuplicates
+    cleanupDuplicates,
+    contextStats,
+    getContextStats,
+    clearSessionContext,
+    fetchContextStats  // ✅ NEW: Add this if available
   } = chatContext || {};
 
   // FALLBACK MESSAGE FETCHING
@@ -93,6 +182,40 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   // CONNECTION STATUS
   const actualIsConnected = chatContextAvailable ? (isConnected ?? false) : false;
   const activeSessionId = selectedSession || currentSessionId;
+
+  // ✅ NEW: CONTEXT CLEAR HANDLER
+  const handleClearContext = useCallback(async (sessionId) => {
+    if (!clearSessionContext) {
+      console.warn('⚠️ [CONTEXT] clearSessionContext function not available');
+      setFileValidationError('Context clearing is not available. Please refresh the page.');
+      return;
+    }
+
+    try {
+      console.log('🗑️ [CONTEXT] Clearing context for session:', sessionId.substring(0, 8) + '...');
+      
+      const success = await clearSessionContext(sessionId);
+      if (success) {
+        console.log('✅ [CONTEXT] Context cleared successfully');
+        
+        // ✅ Refresh context stats to reflect the change
+        if (fetchContextStats) {
+          await fetchContextStats(sessionId);
+        }
+        
+        // ✅ Show success feedback
+        setShowPasteIndicator(true);
+        setTimeout(() => setShowPasteIndicator(false), 2000);
+        
+      } else {
+        console.error('❌ [CONTEXT] Failed to clear context');
+        setFileValidationError('Failed to clear context. Please try again.');
+      }
+    } catch (error) {
+      console.error('❌ [CONTEXT] Error clearing context:', error);
+      setFileValidationError(`Error clearing context: ${error.message}`);
+    }
+  }, [clearSessionContext, fetchContextStats]);
 
   // ENHANCED FILE TYPE DETECTION
   const getFileIcon = useCallback((fileType, fileName) => {
@@ -300,7 +423,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   }, [backendUrl, token, chatContextAvailable, reconnect, setSessionMessages]);
 
-  // INITIALIZE SESSION ON MOUNT
+  // ✅ ENHANCED INITIALIZE SESSION WITH CONTEXT STATS
   useEffect(() => {
     const initializeSession = async () => {
       if (selectedSession && selectedSession !== 'null' && selectedSession !== 'undefined') {
@@ -311,14 +434,21 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           if ((!messages || messages.length === 0) && chatContextAvailable && fetchSessionMessages) {
             await fetchSessionMessages(selectedSession);
           }
-        } catch (error) {}
+          
+          // ✅ LOAD CONTEXT STATS FOR THE SESSION
+          if (chatContextAvailable && fetchContextStats) {
+            await fetchContextStats(selectedSession);
+          }
+        } catch (error) {
+          console.warn('⚠️ [INIT] Session initialization warning:', error);
+        }
       }
       setHasInitialized(true);
     };
     if (!hasInitialized) initializeSession();
-  }, [selectedSession, hasInitialized, chatContextAvailable, fetchMessagesViaHTTP, setSession, fetchSessionMessages]);
+  }, [selectedSession, hasInitialized, chatContextAvailable, fetchMessagesViaHTTP, setSession, fetchSessionMessages, fetchContextStats]);
 
-  // WATCH FOR SESSION CHANGES FROM PARENT
+  // ✅ ENHANCED WATCH FOR SESSION CHANGES WITH CONTEXT
   useEffect(() => {
     if (selectedSession && selectedSession !== currentSessionId) {
       setFallbackMessages([]);
@@ -328,8 +458,13 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       if (chatContextAvailable && setSession) setSession(selectedSession);
       fetchMessagesViaHTTP(selectedSession);
       if (chatContextAvailable && fetchSessionMessages) fetchSessionMessages(selectedSession);
+      
+      // ✅ LOAD CONTEXT STATS FOR NEW SESSION
+      if (chatContextAvailable && fetchContextStats) {
+        fetchContextStats(selectedSession);
+      }
     }
-  }, [selectedSession, currentSessionId, chatContextAvailable, setSession, fetchMessagesViaHTTP, fetchSessionMessages, clearPastedImage]);
+  }, [selectedSession, currentSessionId, chatContextAvailable, setSession, fetchMessagesViaHTTP, fetchSessionMessages, clearPastedImage, fetchContextStats]);
 
   // GET CURRENT MESSAGES
   const actualMessages = useMemo(() => {
@@ -443,98 +578,101 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     );
   };
 
-  // ✅ AI MESSAGE COMPONENT WITH IMAGE CONTEXT INTEGRATION
-// Replace the AiMessage component with this working version:
+  // AI MESSAGE COMPONENT WITH IMAGE CONTEXT INTEGRATION
+  const AiMessage = ({ message, timestamp, fileUrl, fileType, isStreaming = false, type, processingInfo, completedBy, metadata }) => {
+    const isImageResponse = type === 'image' || completedBy === 'BLIP';
+    const isDocumentResponse = type === 'document';
 
-const AiMessage = ({ message, timestamp, fileUrl, fileType, isStreaming = false, type, processingInfo, completedBy, metadata }) => {
-  const isImageResponse = type === 'image' || completedBy === 'BLIP';
-  const isDocumentResponse = type === 'document';
-
-  // Clean message
-  const displayMessage = useMemo(() => {
-    if (!message) return '';
-    if (typeof message === 'object' && message.message) return message.message;
-    if (typeof message === 'string' && message.trim().startsWith('{')) {
-      try {
-        const parsed = JSON.parse(message);
-        return parsed.message || parsed.aiMessage?.message || message;
-      } catch (e) {
-        return message;
+    // Clean message
+    const displayMessage = useMemo(() => {
+      if (!message) return '';
+      if (typeof message === 'object' && message.message) return message.message;
+      if (typeof message === 'string' && message.trim().startsWith('{')) {
+        try {
+          const parsed = JSON.parse(message);
+          return parsed.message || parsed.aiMessage?.message || message;
+        } catch (e) {
+          return message;
+        }
       }
-    }
-    return message;
-  }, [message]);
+      return message;
+    }, [message]);
 
-  return (
-    <div className="flex items-start gap-2 mb-4 animate-fade-in px-4">
-      <div className="flex-shrink-0 w-7 h-7 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-full flex items-center justify-center shadow-md">
-        <IconRobot size={14} className="text-white" />
-      </div>
-      
-      <div className="flex-1 max-w-[85%]">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl px-4 py-3 shadow-sm border border-gray-200 dark:border-gray-700">
-          {isStreaming && (!displayMessage || displayMessage.length === 0) ? (
-            <div className="flex items-center gap-3">
-              <div className="typing-indicator">
-                <span />
-                <span />
-                <span />
-              </div>
-              <span className="text-sm text-gray-500 dark:text-gray-400">
-                {isImageResponse ? "Analyzing image..." : isDocumentResponse ? "Processing document..." : "AI is thinking..."}
-              </span>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {(isImageResponse || isDocumentResponse) && (
-                <div className={`inline-flex items-center gap-2 px-2 py-1 rounded-md text-xs mb-2 ${
-                  isImageResponse 
-                    ? 'bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 text-purple-600 dark:text-purple-400'
-                    : 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400'
-                }`}>
-                  <div className={`w-1.5 h-1.5 rounded-full ${isImageResponse ? 'bg-purple-500' : 'bg-blue-500'}`}></div>
-                  {isImageResponse ? 'Image Analysis' : 'Document Analysis'}
+    return (
+      <div className="flex items-start gap-2 mb-4 animate-fade-in px-4">
+        <div className="flex-shrink-0 w-7 h-7 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-full flex items-center justify-center shadow-md">
+          <IconRobot size={14} className="text-white" />
+        </div>
+        
+        <div className="flex-1 max-w-[85%]">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl px-4 py-3 shadow-sm border border-gray-200 dark:border-gray-700">
+            {isStreaming && (!displayMessage || displayMessage.length === 0) ? (
+              <div className="flex items-center gap-3">
+                <div className="typing-indicator">
+                  <span />
+                  <span />
+                  <span />
                 </div>
-              )}
-              
-              <div className="prose prose-sm max-w-none text-gray-800 dark:text-gray-200">
-                <ReactMarkdown
-                  components={{
-                    p: ({children}) => <p className="mb-1 leading-relaxed">{children}</p>,
-                    code: ({node, inline, className, children, ...props}) => {
-                      const match = /language-(\w+)/.exec(className || '');
-                      return !inline && match ? (
-                        <SyntaxHighlighter style={oneDark} language={match[1]} PreTag="div" {...props}>
-                          {String(children).replace(/\n$/, '')}
-                        </SyntaxHighlighter>
-                      ) : (
-                        <code className={className} {...props}>{children}</code>
-                      );
-                    }
-                  }}
-                >
-                  {displayMessage}
-                </ReactMarkdown>
-
-                {/* Streaming cursor */}
-                {isStreaming && displayMessage && displayMessage.length > 0 && (
-                  <span className="animate-pulse ml-0.5 text-gray-400">▍</span>
-                )}
+                <span className="text-sm text-gray-500 dark:text-gray-400">
+                  {isImageResponse ? "Analyzing image..." : isDocumentResponse ? "Processing document..." : "AI is thinking..."}
+                </span>
               </div>
+            ) : (
+              <div className="space-y-2">
+                {(isImageResponse || isDocumentResponse) && (
+                  <div className={`inline-flex items-center gap-2 px-2 py-1 rounded-md text-xs mb-2 ${
+                    isImageResponse 
+                      ? 'bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 text-purple-600 dark:text-purple-400'
+                      : 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400'
+                  }`}>
+                    <div className={`w-1.5 h-1.5 rounded-full ${isImageResponse ? 'bg-purple-500' : 'bg-blue-500'}`}></div>
+                    {isImageResponse ? 'Image Analysis' : 'Document Analysis'}
+                    {/* ✅ NEW: Show if context was used */}
+                    {metadata && metadata.contextUsed > 0 && (
+                      <span className="ml-2 text-xs opacity-75">
+                        • Used {metadata.contextUsed} context messages
+                      </span>
+                    )}
+                  </div>
+                )}
+                
+                <div className="prose prose-sm max-w-none text-gray-800 dark:text-gray-200">
+                  <ReactMarkdown
+                    components={{
+                      p: ({children}) => <p className="mb-1 leading-relaxed">{children}</p>,
+                      code: ({node, inline, className, children, ...props}) => {
+                        const match = /language-(\w+)/.exec(className || '');
+                        return !inline && match ? (
+                          <SyntaxHighlighter style={oneDark} language={match[1]} PreTag="div" {...props}>
+                            {String(children).replace(/\n$/, '')}
+                          </SyntaxHighlighter>
+                        ) : (
+                          <code className={className} {...props}>{children}</code>
+                        );
+                      }
+                    }}
+                  >
+                    {displayMessage}
+                  </ReactMarkdown>
+
+                  {/* Streaming cursor */}
+                  {isStreaming && displayMessage && displayMessage.length > 0 && (
+                    <span className="animate-pulse ml-0.5 text-gray-400">▍</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {!isStreaming && timestamp && (
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 px-1">
+              {new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </div>
           )}
         </div>
-        
-        {!isStreaming && timestamp && (
-          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 px-1">
-            {new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-          </div>
-        )}
       </div>
-    </div>
-  );
-};
-
+    );
+  };
 
   // ✅ VOICE INPUT HANDLERS
   const handleVoiceInput = useCallback(() => {
@@ -621,213 +759,212 @@ const AiMessage = ({ message, timestamp, fileUrl, fileType, isStreaming = false,
     }
   };
 
-  // ✅ ENHANCED HANDLE SUBMIT WITH IMAGE CONTEXT
-// ✅ CORRECTED HANDLE SUBMIT WITH PROPER TYPE DETECTION
-const handleSubmit = async (e) => {
-  e.preventDefault();
-  setInput("");
-  let finalInput = input.trim();
+  // ✅ ENHANCED HANDLE SUBMIT WITH CONTEXT SUPPORT
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setInput("");
+    let finalInput = input.trim();
 
-  // Handle pasted image upload
-  let pastedImageUploadResult = null;
-  if (pastedImage) {
-    const formData = new FormData();
-    formData.append('file', pastedImage);
-    try {
-      const response = await axios.post(`${backendUrl}/api/chat/upload`, formData, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
-        }
-      });
-      pastedImageUploadResult = response.data;
-      setUploadResult(response.data);
-      setPastedImage(null);
-      setPastePreview(null);
-      setFile(null);
-    } catch (error) {
-      setFileValidationError('Failed to upload pasted image. Please try again.');
+    // Handle pasted image upload
+    let pastedImageUploadResult = null;
+    if (pastedImage) {
+      const formData = new FormData();
+      formData.append('file', pastedImage);
+      try {
+        const response = await axios.post(`${backendUrl}/api/chat/upload`, formData, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data',
+          }
+        });
+        pastedImageUploadResult = response.data;
+        setUploadResult(response.data);
+        setPastedImage(null);
+        setPastePreview(null);
+        setFile(null);
+      } catch (error) {
+        setFileValidationError('Failed to upload pasted image. Please try again.');
+        return;
+      }
+    }
+
+    // If no text input but a file is uploaded, set a default message
+    if (!finalInput && uploadResult) {
+      if (uploadResult.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i)) {
+        finalInput = `Uploaded document: ${uploadResult.fileName}`;
+      } else if (uploadResult.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i)) {
+        finalInput = `Uploaded image: ${uploadResult.fileName}`;
+      } else {
+        finalInput = "Uploaded a file.";
+      }
+    }
+
+    if (!finalInput && !uploadResult && !activeFileContext) return;
+    if (isAIStreaming) return;
+
+    if (!activeSessionId) {
+      setFileValidationError("No session selected. Please start or select a chat session.");
       return;
     }
-  }
 
-  // If no text input but a file is uploaded, set a default message
-  if (!finalInput && uploadResult) {
-    if (uploadResult.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i)) {
-      finalInput = `Uploaded document: ${uploadResult.fileName}`;
-    } else if (uploadResult.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i)) {
-      finalInput = `Uploaded image: ${uploadResult.fileName}`;
-    } else {
-      finalInput = "Uploaded a file.";
-    }
-  }
-
-  if (!finalInput && !uploadResult && !activeFileContext) return;
-  if (isAIStreaming) return;
-
-  if (!activeSessionId) {
-    setFileValidationError("No session selected. Please start or select a chat session.");
-    return;
-  }
-
-  // ✅ ENHANCED FILE TYPE DETECTION AND CONTEXT HANDLING
-  let fileContext = null;
-  let messageType = 'text';
-  
-  if (uploadResult && uploadResult.fileUrl) {
-    // ✅ PROPER FILE TYPE DETECTION
-    const isImage = uploadResult.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
-    const isDocument = uploadResult.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i);
+    // ✅ ENHANCED FILE TYPE DETECTION AND CONTEXT HANDLING
+    let fileContext = null;
+    let messageType = 'text';
     
-    if (isImage) {
-      fileContext = {
-        fileUrl: uploadResult.fileUrl,
-        fileName: uploadResult.fileName,
-        fileType: 'image', // ✅ EXPLICIT FILE TYPE
-      };
-      messageType = 'image'; // ✅ SEND 'image' TO FASTAPI
+    if (uploadResult && uploadResult.fileUrl) {
+      // ✅ PROPER FILE TYPE DETECTION
+      const isImage = uploadResult.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
+      const isDocument = uploadResult.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i);
       
-      // ✅ ESTABLISH IMAGE CONTEXT
-      setActiveFileContext({
-        fileUrl: uploadResult.fileUrl,
-        fileName: uploadResult.fileName,
-        fileType: 'image',
-        imageAnalysis: null // Will be filled by BLIP response
-      });
-      
-    } else if (isDocument && uploadResult.extractedText) {
-      fileContext = {
-        extractedText: uploadResult.extractedText,
-        fileUrl: uploadResult.fileUrl,
-        fileName: uploadResult.fileName,
-        fileType: 'document', // ✅ EXPLICIT FILE TYPE
-      };
-      messageType = 'document'; // ✅ SEND 'document' TO FASTAPI
-      setActiveFileContext(fileContext);
-    }
-  } else if (activeFileContext) {
-    // ✅ HANDLE EXISTING CONTEXT (for follow-up messages)
-    fileContext = activeFileContext;
-    
-    // ✅ DETERMINE TYPE FROM CONTEXT
-    const isImage = activeFileContext.fileType === 'image' || 
-                   activeFileContext.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
-    const isDocument = activeFileContext.extractedText || 
-                      activeFileContext.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i);
-    
-    if (isImage) {
-      messageType = 'image';
-    } else if (isDocument) {
-      messageType = 'document';
-    }
-  }
-
-  // Optimistically add user message
-  const optimisticUserMsg = {
-    _id: `user-${Date.now()}`,
-    sender: userId,
-    message: finalInput,
-    timestamp: new Date().toISOString(),
-    fileUrl: fileContext?.fileUrl || null,
-    fileName: fileContext?.fileName || null,
-    type: messageType,
-    hasTextExtraction: !!fileContext?.extractedText,
-    extractedTextLength: fileContext?.extractedText?.length || 0,
-    status: 'sending'
-  };
-  if (addMessageToSession) addMessageToSession(activeSessionId, optimisticUserMsg);
-
-  // ✅ INJECT CONTEXT INTO MESSAGE
-  const contextText = getImageContextText();
-  const messageWithContext = finalInput + contextText;
-
-  // ✅ PREPARE CORRECT MESSAGE DATA FOR BACKEND
-  const messageData = {
-    sessionId: activeSessionId,
-    message: messageWithContext,
-    type: messageType, // ✅ 'image', 'document', or 'text'
-    fileUrl: fileContext?.fileUrl || null,
-    fileName: fileContext?.fileName || null,
-    fileType: messageType, // ✅ MATCH TYPE FOR FASTAPI ROUTING
-    extractedText: messageType === 'document' ? fileContext?.extractedText : null, // ✅ ONLY FOR DOCUMENTS
-  };
-
-  console.log('🔍 [FRONTEND] Sending to backend:', {
-    type: messageData.type,
-    hasFile: !!messageData.fileUrl,
-    hasExtractedText: !!messageData.extractedText,
-    fileName: messageData.fileName
-  });
-
-  setIsAIStreaming(true);
-
-  try {
-    let response;
-    if (sendMessage) {
-      response = await sendMessage(messageData);
-    } else {
-      response = await axios.post(`${backendUrl}/api/chat/send`, messageData, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-    }
-
-    let aiMsg = response?.data?.aiMessage || response?.aiMessage;
-    if (aiMsg) {
-      const aiTimestamp = aiMsg.createdAt || aiMsg.timestamp || new Date().toISOString();
-      if (addMessageToSession) {
-        addMessageToSession(activeSessionId, {
-          _id: aiMsg._id,
-          sender: aiMsg.sender || 'AI',
-          message: aiMsg.message,
-          timestamp: aiTimestamp,
-          fileUrl: aiMsg.fileUrl,
-          fileName: aiMsg.fileName,
-          type: aiMsg.type,
-          completedBy: aiMsg.completedBy,
-          hasTextExtraction: aiMsg.hasTextExtraction,
-          extractedTextLength: aiMsg.textLength,
-          metadata: aiMsg.metadata,
-          status: 'sent'
+      if (isImage) {
+        fileContext = {
+          fileUrl: uploadResult.fileUrl,
+          fileName: uploadResult.fileName,
+          fileType: 'image', // ✅ EXPLICIT FILE TYPE
+        };
+        messageType = 'image'; // ✅ SEND 'image' TO FASTAPI
+        
+        // ✅ ESTABLISH IMAGE CONTEXT
+        setActiveFileContext({
+          fileUrl: uploadResult.fileUrl,
+          fileName: uploadResult.fileName,
+          fileType: 'image',
+          imageAnalysis: null // Will be filled by BLIP response
         });
+        
+      } else if (isDocument && uploadResult.extractedText) {
+        fileContext = {
+          extractedText: uploadResult.extractedText,
+          fileUrl: uploadResult.fileUrl,
+          fileName: uploadResult.fileName,
+          fileType: 'document', // ✅ EXPLICIT FILE TYPE
+        };
+        messageType = 'document'; // ✅ SEND 'document' TO FASTAPI
+        setActiveFileContext(fileContext);
+      }
+    } else if (activeFileContext) {
+      // ✅ HANDLE EXISTING CONTEXT (for follow-up messages)
+      fileContext = activeFileContext;
+      
+      // ✅ DETERMINE TYPE FROM CONTEXT
+      const isImage = activeFileContext.fileType === 'image' || 
+                     activeFileContext.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
+      const isDocument = activeFileContext.extractedText || 
+                        activeFileContext.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i);
+      
+      if (isImage) {
+        messageType = 'image';
+      } else if (isDocument) {
+        messageType = 'document';
       }
     }
 
-    // ✅ UPDATE SESSION TITLE WITH FIRST MESSAGE
-    const sessionMessages = getCurrentSessionMessages ? getCurrentSessionMessages() : [];
-    const userMessages = sessionMessages.filter(msg => msg.sender !== 'AI' && msg.sender !== 'ai');
+    // Optimistically add user message
+    const optimisticUserMsg = {
+      _id: `user-${Date.now()}`,
+      sender: userId,
+      message: finalInput,
+      timestamp: new Date().toISOString(),
+      fileUrl: fileContext?.fileUrl || null,
+      fileName: fileContext?.fileName || null,
+      type: messageType,
+      hasTextExtraction: !!fileContext?.extractedText,
+      extractedTextLength: fileContext?.extractedText?.length || 0,
+      status: 'sending',
+      // ✅ NEW: Context metadata
+      contextEnabled: true,
+      willUseContext: true
+    };
+    if (addMessageToSession) addMessageToSession(activeSessionId, optimisticUserMsg);
 
-    if (userMessages.length <= 1) { // This is the first user message
-      const titleText = finalInput.length > 50 
-        ? finalInput.substring(0, 50) + '...' 
-        : finalInput;
-      
-      try {
-        await axios.patch(`${backendUrl}/api/chat/session/${activeSessionId}`, {
-          title: titleText
-        }, {
+    // ✅ ENHANCED: Build message data with context info
+    const messageData = {
+      sessionId: activeSessionId,
+      message: finalInput, // ✅ Use the actual input text
+      type: messageType,
+      fileUrl: fileContext?.fileUrl || null,
+      fileName: fileContext?.fileName || null,
+      fileType: messageType,
+      extractedText: messageType === 'document' ? fileContext?.extractedText : null,
+      contextEnabled: true
+    };
+
+    console.log('🔍 [FRONTEND] Sending message with context support:', {
+      type: messageData.type,
+      hasFile: !!messageData.fileUrl,
+      hasExtractedText: !!messageData.extractedText,
+      fileName: messageData.fileName,
+      contextEnabled: messageData.contextEnabled
+    });
+
+    setIsAIStreaming(true);
+
+    try {
+      let response;
+      if (sendMessage) {
+        response = await sendMessage(messageData);
+      } else {
+        response = await axios.post(`${backendUrl}/api/chat/send`, messageData, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        
-        // Dispatch event to update UI
-        window.dispatchEvent(new CustomEvent('sessionTitleUpdated', {
-          detail: { sessionId: activeSessionId, title: titleText }
-        }));
-        
-        console.log('✅ [TITLE UPDATE] Session title updated to:', titleText);
-      } catch (titleError) {
-        console.warn('⚠️ [TITLE UPDATE] Failed to update session title:', titleError);
       }
-    }
-  } catch (error) {
-    console.error('❌ [FRONTEND] Send message error:', error);
-    setFileValidationError('Failed to send message. Please try again.');
-  } finally {
-    setFile(null);
-    setUploadResult(null);
-    setIsAIStreaming(false);
-  }
-};
 
+      let aiMsg = response?.data?.aiMessage || response?.aiMessage;
+      if (aiMsg) {
+        const aiTimestamp = aiMsg.createdAt || aiMsg.timestamp || new Date().toISOString();
+        if (addMessageToSession) {
+          addMessageToSession(activeSessionId, {
+            _id: aiMsg._id,
+            sender: aiMsg.sender || 'AI',
+            message: aiMsg.message,
+            timestamp: aiTimestamp,
+            fileUrl: aiMsg.fileUrl,
+            fileName: aiMsg.fileName,
+            type: aiMsg.type,
+            completedBy: aiMsg.completedBy,
+            hasTextExtraction: aiMsg.hasTextExtraction,
+            extractedTextLength: aiMsg.textLength,
+            metadata: aiMsg.metadata,
+            status: 'sent'
+          });
+        }
+      }
+
+      // ✅ UPDATE SESSION TITLE WITH FIRST MESSAGE
+      const sessionMessages = getCurrentSessionMessages ? getCurrentSessionMessages() : [];
+      const userMessages = sessionMessages.filter(msg => msg.sender !== 'AI' && msg.sender !== 'ai');
+
+      if (userMessages.length <= 1) { // This is the first user message
+        const titleText = finalInput.length > 50 
+          ? finalInput.substring(0, 50) + '...' 
+          : finalInput;
+        
+        try {
+          await axios.patch(`${backendUrl}/api/chat/session/${activeSessionId}`, {
+            title: titleText
+          }, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          
+          // Dispatch event to update UI
+          window.dispatchEvent(new CustomEvent('sessionTitleUpdated', {
+            detail: { sessionId: activeSessionId, title: titleText }
+          }));
+          
+          console.log('✅ [TITLE UPDATE] Session title updated to:', titleText);
+        } catch (titleError) {
+          console.warn('⚠️ [TITLE UPDATE] Failed to update session title:', titleError);
+        }
+      }
+    } catch (error) {
+      console.error('❌ [FRONTEND] Send message error:', error);
+      setFileValidationError('Failed to send message. Please try again.');
+    } finally {
+      setFile(null);
+      setUploadResult(null);
+      setIsAIStreaming(false);
+    }
+  };
 
   // AUTO-SCROLL
   useEffect(() => {
@@ -870,15 +1007,17 @@ const handleSubmit = async (e) => {
         </div>
       )}
       
-      {/* PASTE INDICATOR */}
+      {/* ✅ ENHANCED PASTE INDICATOR */}
       {showPasteIndicator && (
         <div className="absolute top-4 right-4 z-50 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg animate-fade-in flex items-center gap-2">
           <IconClipboard size={16} />
-          <span className="text-sm font-medium">Image pasted!</span>
+          <span className="text-sm font-medium">
+            {pastedImage ? 'Image pasted!' : 'Context cleared!'}
+          </span>
         </div>
       )}
       
-      {/* ENHANCED HEADER */}
+      {/* ✅ ENHANCED HEADER WITH CONTEXT INFO */}
       <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-b border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -889,8 +1028,24 @@ const handleSubmit = async (e) => {
               <h1 className="text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
                 Nexus AI Assistant
               </h1>
-              <div className="text-xs text-gray-500 dark:text-gray-400">
-                BLIP • Document Processor • Llama3
+              <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                <span>BLIP • Document Processor • Llama3</span>
+                {/* ✅ NEW: Context indicator */}
+                {contextStats && contextStats[activeSessionId] && (
+                  <>
+                    <span>•</span>
+                    <span className={`${
+                      contextStats[activeSessionId].messageCount > 12 
+                        ? 'text-amber-600 dark:text-amber-400' 
+                        : 'text-blue-600 dark:text-blue-400'
+                    }`}>
+                      Context: {contextStats[activeSessionId].messageCount}/15
+                    </span>
+                    {contextStats[activeSessionId].storageType === 'redis' && (
+                      <span className="text-green-600 dark:text-green-400">• Redis</span>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -910,6 +1065,15 @@ const handleSubmit = async (e) => {
           </button>
         </div>
       </div>
+
+      {/* ✅ NEW: Context Window Indicator */}
+      {activeSessionId && contextStats && contextStats[activeSessionId] && (
+        <ContextWindowIndicator 
+          sessionId={activeSessionId}
+          contextStats={contextStats[activeSessionId]}
+          onClearContext={handleClearContext}
+        />
+      )}
 
       {/* MESSAGES AREA */}
       <div className="flex-1 overflow-y-auto py-4">
@@ -935,7 +1099,9 @@ const handleSubmit = async (e) => {
                   Hello! I'm your AI assistant
                 </h2>
                 <p className="text-gray-600 dark:text-gray-400 leading-relaxed text-sm">
-                  I can analyze images with BLIP, process documents (PDF, DOCX, TXT), and help with general questions using Llama3.
+                  I can analyze images with BLIP, process documents (PDF, DOCX, TXT), and help with general questions using Llama3. 
+                  <br />
+                  <strong>I'll remember our last 15 messages for better context!</strong>
                 </p>
               </div>
             </div>
@@ -1017,7 +1183,7 @@ const handleSubmit = async (e) => {
         </div>
       )}
 
-      {/* INPUT AREA */}
+      {/* ✅ ENHANCED INPUT AREA WITH CONTEXT AWARENESS */}
       <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-t border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
         <div className="max-w-4xl mx-auto">
           
@@ -1134,7 +1300,9 @@ const handleSubmit = async (e) => {
                 onChange={handleInputChange}
                 placeholder={listening ? "Listening..." : 
                            pastedImage ? "Add a message (optional)..." : 
-                           "Ask me anything, paste images, or drag & drop documents..."}
+                           activeSessionId && contextStats && contextStats[activeSessionId] && contextStats[activeSessionId].messageCount > 0
+                           ? `Ask me anything (AI remembers last ${contextStats[activeSessionId].messageCount} messages)...`
+                           : "Ask me anything, paste images, or drag & drop documents..."}
                 className="flex-1 bg-transparent border-none outline-none text-gray-800 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-400 text-sm py-1"
                 disabled={isAIStreaming}
               />
@@ -1158,7 +1326,7 @@ const handleSubmit = async (e) => {
             </div>
           </form>
 
-          {/* AI STREAMING INDICATOR */}
+          {/* ✅ ENHANCED AI STREAMING INDICATOR WITH CONTEXT INFO */}
           {isAIStreaming && (
             <div className="text-xs text-blue-500 dark:text-blue-400 mt-2 px-2 flex items-center gap-2">
               <div className="typing-indicator">
@@ -1166,7 +1334,13 @@ const handleSubmit = async (e) => {
                 <span></span>
                 <span></span>
               </div>
-              AI is responding...
+              <span>
+                AI is responding
+                {activeSessionId && contextStats && contextStats[activeSessionId] && contextStats[activeSessionId].messageCount > 0
+                  ? ` (using ${contextStats[activeSessionId].messageCount} previous messages)...`
+                  : '...'
+                }
+              </span>
             </div>
           )}
         </div>

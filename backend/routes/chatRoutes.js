@@ -19,7 +19,9 @@ import {
   getSessionStats,
   getDuplicateStats,
   cleanupDuplicates,
-  uploadFileHandler // ✅ IMPORT FROM CONTROLLER, NOT MIDDLEWARE
+  uploadFileHandler, // ✅ IMPORT FROM CONTROLLER, NOT MIDDLEWARE
+   getSessionContext,      // ✅ NEW
+  clearSessionContext 
 } from '../controllers/chatController.js';
 import { v2 as cloudinary } from 'cloudinary';
 import { cacheService } from '../services/cacheService.js';
@@ -584,6 +586,10 @@ router.get('/debug/cache-status', verifyToken, async (req, res) => {
     });
   }
 });
+router.get('/session/:sessionId/context', verifyToken, getSessionContext);
+router.delete('/session/:sessionId/context', verifyToken, clearSessionContext);
+
+
 
 console.log('✅ [CHAT ROUTES] Enhanced chat routes initialized with controller-based text extraction');
 console.log('🔧 [CHAT ROUTES] Features: file upload, pdfjs-dist text extraction, deduplication, streaming AI responses');

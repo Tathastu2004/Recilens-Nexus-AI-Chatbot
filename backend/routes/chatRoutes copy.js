@@ -201,7 +201,23 @@ router.patch('/session/:sessionId', verifyToken, updateSessionTitle);
 router.delete('/session/:sessionId', verifyToken, deleteChatSession);
 
 // 🔹 Enhanced send message endpoint using the updated sendMessage controller
-router.post('/send', verifyToken, debugRequest, sendMessage);
+router.post('/send', verifyToken, debugRequest, async (req, res) => {
+  console.log("📨 [ROUTE] Send message with streaming...");
+  
+  try {
+    // Call the updated controller function which now handles streaming
+    await sendMessage(req, res);
+  } catch (error) {
+    console.error('❌ [ROUTE] Send message error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to send message',
+        details: error.message
+      });
+    }
+  }
+});
 
 // 🔹 ✅ FIXED: Upload file using CONTROLLER handler, not middleware handler
 router.post(

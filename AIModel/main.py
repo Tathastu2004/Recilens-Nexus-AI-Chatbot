@@ -1,3 +1,4 @@
+# main.py - UPDATED
 import asyncio
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -44,44 +45,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ SESSION MEMORY STORAGE
-class ConversationMemory:
-    def __init__(self):
-        self.conversations = {}
-    
-    def add_message(self, session_id: str, role: str, content: str, message_type: str = "text", metadata: dict = None):
-        if session_id not in self.conversations:
-            self.conversations[session_id] = []
-        
-        message = {
-            "id": str(uuid.uuid4()),
-            "role": role,
-            "content": content,
-            "type": message_type,
-            "timestamp": datetime.now().isoformat(),
-            "metadata": metadata or {}
-        }
-        
-        self.conversations[session_id].append(message)
-        
-        # Keep only last 20 messages
-        if len(self.conversations[session_id]) > 20:
-            self.conversations[session_id] = self.conversations[session_id][-20:]
-    
-    def get_conversation(self, session_id: str) -> List[dict]:
-        return self.conversations.get(session_id, [])
-
-# Initialize memory
-memory = ConversationMemory()
-
-# Initialize services
-training_service = TrainingService(TrainingConfig.NODE_BACKEND_URL)
-model_manager = ModelManager()
-
-# Ensure model directories exist
-TrainingConfig.ensure_model_directories()
-
-# ✅ SIMPLIFIED CHAT REQUEST MODEL
+# ✅ ENHANCED CHAT REQUEST MODEL WITH CONTEXT
 class ChatRequest(BaseModel):
     message: Optional[str] = None
     type: Optional[str] = "text"
@@ -89,7 +53,7 @@ class ChatRequest(BaseModel):
     fileType: Optional[str] = None
     fileName: Optional[str] = None
     extractedText: Optional[str] = None
-    conversationContext: Optional[List[Dict[str, Any]]] = []
+    conversationContext: Optional[List[Dict[str, Any]]] = []  # ✅ NEW: CONTEXT WINDOW
     sessionId: Optional[str] = None
 
 def generate_session_id():
@@ -280,10 +244,10 @@ async def blip_health():
             "timestamp": datetime.now().isoformat()
         }
 
-# ✅ MAIN CHAT ROUTE - HANDLES ALL TYPES
+# ✅ MAIN CHAT ROUTE WITH CONTEXT WINDOW SUPPORT
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
-    print("🚀 [FASTAPI] ==================== CHAT REQUEST RECEIVED ====================")
+    print("🚀 [FASTAPI] ==================== CHAT REQUEST WITH CONTEXT ====================")
     print(f"📥 [FASTAPI] Request details:")
     print(f"   Session: {request.sessionId[:8] if request.sessionId else 'None'}...")
     print(f"   Type: {request.type}")
@@ -293,8 +257,12 @@ async def chat_endpoint(request: ChatRequest):
     print(f"   File Name: {request.fileName}")
     print(f"   Has Pre-extracted Text: {bool(request.extractedText)}")
     print(f"   Extracted Text Length: {len(request.extractedText) if request.extractedText else 0}")
-    if request.extractedText:
-        print(f"   Extracted Text Preview: {request.extractedText[:200]}...")
+    print(f"   🆕 CONTEXT Messages: {len(request.conversationContext)}")  # ✅ NEW
+    
+    if request.conversationContext:
+        print(f"   🦙 CONTEXT Preview:")
+        for i, ctx_msg in enumerate(request.conversationContext[-3:]):  # Show last 3
+            print(f"      [{i+1}] {ctx_msg.get('role', 'unknown')}: {ctx_msg.get('content', '')[:50]}...")
     
     try:
         session_id = request.sessionId or generate_session_id()
@@ -304,26 +272,38 @@ async def chat_endpoint(request: ChatRequest):
         file_name = request.fileName
         extracted_text = request.extractedText
         request_type = request.type or "text"
+        conversation_context = request.conversationContext or []  # ✅ NEW
 
         print(f"🔍 [FASTAPI] Processing parameters:")
         print(f"   Request Type: {request_type}")
         print(f"   Will use extracted text: {bool(extracted_text and len(extracted_text.strip()) > 10)}")
+        print(f"   🆕 Context messages to include: {len(conversation_context)}")
         
-        # ✅ DOCUMENT PROCESSING WITH PRE-EXTRACTED TEXT
+        # ✅ DOCUMENT PROCESSING WITH CONTEXT
         if request_type == "document":
-            print(f"📄 [FASTAPI] Document processing request...")
+            print(f"📄 [FASTAPI] Document processing request with context...")
             
             if extracted_text and len(extracted_text.strip()) > 10:
                 print(f"✅ [FASTAPI] Using pre-extracted text from Node.js backend")
                 print(f"   Text length: {len(extracted_text)} characters")
                 print(f"   Text preview: {extracted_text[:100]}...")
                 
-                async def llama_with_extracted_text():
+                async def llama_with_extracted_text_and_context():
                     try:
-                        print(f"🦙 [LLAMA3] Connecting to Ollama...")
+                        print(f"🦙 [LLAMA3] Connecting to Ollama with context...")
                         client = AsyncClient(host=LLAMA_URL)
                         
-                        enhanced_prompt = f"""DOCUMENT CONTENT:
+                        # ✅ BUILD CONTEXT-AWARE PROMPT
+                        context_summary = ""
+                        if conversation_context:
+                            context_summary = "\n--- CONVERSATION HISTORY ---\n"
+                            for msg in conversation_context:
+                                role = msg.get('role', 'unknown')
+                                content = msg.get('content', '')[:200]  # Limit length
+                                context_summary += f"{role.upper()}: {content}\n"
+                            context_summary += "--- END CONVERSATION HISTORY ---\n\n"
+
+                        enhanced_prompt = f"""{context_summary}DOCUMENT CONTENT:
 {extracted_text}
 
 DOCUMENT INFO:
@@ -333,20 +313,33 @@ DOCUMENT INFO:
 
 USER REQUEST: {user_message}
 
-INSTRUCTIONS: Analyze the document content above and respond to the user's request."""
+INSTRUCTIONS: Based on the conversation history above and the document content, respond to the user's request."""
 
-                        print(f"📝 [LLAMA3] Processing with enhanced prompt...")
+                        print(f"📝 [LLAMA3] Processing with context-enhanced prompt...")
+                        
+                        # ✅ PREPARE MESSAGES WITH CONTEXT
+                        messages = [
+                            {'role': 'system', 'content': 'You are a helpful document analysis assistant. Use the conversation history to provide contextually relevant responses.'}
+                        ]
+                        
+                        # Add conversation context (limit to last 10 for token management)
+                        recent_context = conversation_context[-10:] if len(conversation_context) > 10 else conversation_context
+                        for ctx_msg in recent_context:
+                            messages.append({
+                                'role': ctx_msg.get('role', 'user'),
+                                'content': ctx_msg.get('content', '')
+                            })
+                        
+                        # Add current request
+                        messages.append({'role': 'user', 'content': enhanced_prompt})
                         
                         stream = await client.chat(
                             model='llama3',
-                            messages=[
-                                {'role': 'system', 'content': 'You are a helpful document analysis assistant. Analyze the provided document content and respond to user questions.'},
-                                {'role': 'user', 'content': enhanced_prompt}
-                            ],
+                            messages=messages,
                             stream=True
                         )
                         
-                        print(f"🌊 [LLAMA3] Starting word-by-word document response stream...")
+                        print(f"🌊 [LLAMA3] Starting context-aware document response stream...")
                         response_content = ""
                         chunk_count = 0
                         word_buffer = ""
@@ -370,30 +363,15 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
                         if word_buffer.strip():
                             yield word_buffer
                         
-                        print(f"✅ [LLAMA3] Document streaming completed: {chunk_count} chunks, {len(response_content)} characters")
-                        
-                        memory.add_message(session_id, "assistant", response_content, "document", {
-                            "model": "Llama3",
-                            "used_extracted_text": True,
-                            "text_length": len(extracted_text),
-                            "file_name": file_name,
-                            "chunks_streamed": chunk_count
-                        })
+                        print(f"✅ [LLAMA3] Context-aware document streaming completed: {chunk_count} chunks, {len(response_content)} characters, used {len(recent_context)} context messages")
                         
                     except Exception as e:
                         error_msg = f"❌ Document Processing Error: {str(e)}"
                         print(f"❌ [LLAMA3] Document processing failed: {error_msg}")
                         yield error_msg
                 
-                memory.add_message(session_id, "user", user_message, "document", {
-                    "file_url": file_url,
-                    "file_type": file_type,
-                    "file_name": file_name,
-                    "extracted_text_length": len(extracted_text)
-                })
-                
-                print(f"🌊 [FASTAPI] Starting StreamingResponse for document...")
-                return StreamingResponse(llama_with_extracted_text(), media_type="text/plain")
+                print(f"🌊 [FASTAPI] Starting StreamingResponse for document with context...")
+                return StreamingResponse(llama_with_extracted_text_and_context(), media_type="text/plain")
             
             else:
                 print(f"❌ [FASTAPI] No extracted text provided from backend!")
@@ -403,18 +381,32 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
                 
                 return StreamingResponse(error_response(), media_type="text/plain")
         
-        # ✅ IMAGE PROCESSING
+        # ✅ IMAGE PROCESSING WITH CONTEXT
         elif request_type == "image":
-            print(f"🖼️ [FASTAPI] Image analysis request...")
+            print(f"🖼️ [FASTAPI] Image analysis request with context...")
             print(f"🖼️ [FASTAPI] Image URL: {file_url}")
 
-            async def blip_response():
+            async def blip_response_with_context():
                 try:
-                    print(f"📡 [BLIP] Sending request to BLIP server...")
+                    print(f"📡 [BLIP] Sending request to BLIP server with context...")
+
+                    # ✅ BUILD CONTEXT FOR IMAGE ANALYSIS
+                    context_info = ""
+                    if conversation_context:
+                        context_info = "Previous conversation context: "
+                        recent_messages = conversation_context[-3:]  # Last 3 messages for context
+                        for msg in recent_messages:
+                            role = msg.get('role', 'unknown')
+                            content = msg.get('content', '')[:100]  # Limit length
+                            context_info += f"{role}: {content}; "
+
+                    enhanced_question = user_message
+                    if context_info and user_message and not user_message.startswith("Uploaded image:"):
+                        enhanced_question = f"{context_info}\n\nCurrent question: {user_message}"
 
                     payload = {
                         "image_url": file_url,
-                        "question": user_message if user_message and not user_message.startswith("Uploaded image:") else None
+                        "question": enhanced_question if enhanced_question else None
                     }
 
                     headers = {
@@ -422,7 +414,7 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
                         "Accept": "application/json"
                     }
 
-                    print(f"📡 [BLIP] Request payload: {payload}")
+                    print(f"📡 [BLIP] Request payload with context: {payload}")
 
                     # Check BLIP server health
                     try:
@@ -447,10 +439,10 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
                         result = blip_response.json()
                         content = result.get('result', 'Image analysis completed')
 
-                        print(f"✅ [BLIP] Analysis successful: {content[:100]}...")
+                        print(f"✅ [BLIP] Context-aware analysis successful: {content[:100]}...")
 
                         # ✅ WORD-BY-WORD STREAMING FOR BLIP RESPONSE
-                        print(f"🌊 [BLIP] Starting word-by-word streaming...")
+                        print(f"🌊 [BLIP] Starting word-by-word streaming with context awareness...")
                         words = content.split(' ')
                         print(f"📊 [BLIP] Will stream {len(words)} words")
 
@@ -460,10 +452,7 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
                             yield word_to_send
                             await asyncio.sleep(0.08)  # 80ms delay for images
 
-                        memory.add_message(session_id, "user", user_message, "image", {"file_url": file_url})
-                        memory.add_message(session_id, "assistant", content, "image", {"model": "BLIP"})
-
-                        print(f"✅ [BLIP] Word-by-word image analysis completed")
+                        print(f"✅ [BLIP] Context-aware image analysis completed")
                     else:
                         error_msg = f"❌ BLIP Error: HTTP {blip_response.status_code}"
                         if blip_response.text:
@@ -497,29 +486,45 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
                         yield word + (' ' if i < len(words) - 1 else '')
                         await asyncio.sleep(0.05)
 
-            return StreamingResponse(blip_response(), media_type="text/plain")
+            return StreamingResponse(blip_response_with_context(), media_type="text/plain")
 
-        # ✅ TEXT CHAT - CORRECTED
+        # ✅ TEXT CHAT WITH CONTEXT WINDOW
         else:
-            print(f"🦙 [FASTAPI] Text chat request...")
+            print(f"🦙 [FASTAPI] Text chat request with {len(conversation_context)} context messages...")
 
-            async def llama_response():
+            async def llama_response_with_context():
                 try:
-                    print(f"🦙 [LLAMA3] Connecting to Ollama for text chat...")
+                    print(f"🦙 [LLAMA3] Connecting to Ollama for context-aware text chat...")
                     client = AsyncClient(host=LLAMA_URL)
 
-                    print(f"🦙 [LLAMA3] Starting chat with message: {user_message[:100]}...")
+                    # ✅ PREPARE MESSAGES WITH CONVERSATION CONTEXT
+                    messages = [
+                        {'role': 'system', 'content': 'You are a helpful AI assistant. Use the conversation history to provide contextually relevant and coherent responses.'}
+                    ]
+                    
+                    # ✅ ADD CONVERSATION CONTEXT (LIMIT TO LAST 12 FOR TOKEN MANAGEMENT)
+                    recent_context = conversation_context[-12:] if len(conversation_context) > 12 else conversation_context
+                    
+                    print(f"🦙 [CONTEXT] Adding {len(recent_context)} context messages to prompt")
+                    for i, ctx_msg in enumerate(recent_context):
+                        messages.append({
+                            'role': ctx_msg.get('role', 'user'),
+                            'content': ctx_msg.get('content', '')
+                        })
+                        print(f"   Context [{i+1}] {ctx_msg.get('role', 'user')}: {ctx_msg.get('content', '')[:50]}...")
+                    
+                    # ✅ ADD CURRENT MESSAGE
+                    messages.append({'role': 'user', 'content': user_message})
+
+                    print(f"🦙 [LLAMA3] Starting context-aware chat with {len(messages)} total messages...")
 
                     stream = await client.chat(
                         model='llama3',
-                        messages=[
-                            {'role': 'system', 'content': 'You are a helpful AI assistant.'},
-                            {'role': 'user', 'content': user_message}
-                        ],
+                        messages=messages,
                         stream=True
                     )
 
-                    print(f"🌊 [LLAMA3] Starting ENHANCED word-by-word streaming with detailed logging...")
+                    print(f"🌊 [LLAMA3] Starting CONTEXT-AWARE word-by-word streaming...")
                     response_content = ""
                     chunk_count = 0
                     word_count = 0
@@ -560,21 +565,19 @@ INSTRUCTIONS: Analyze the document content above and respond to the user's reque
                         print(f"📝 [FINAL WORD] Sending: '{word_buffer}' (len: {len(word_buffer)})")
                         yield word_buffer
 
-                    print(f"✅ [LLAMA3] STREAMING SUMMARY:")
+                    print(f"✅ [LLAMA3] CONTEXT-AWARE STREAMING SUMMARY:")
                     print(f"   Total chunks: {chunk_count}")
                     print(f"   Total words sent: {word_count}")
                     print(f"   Total characters: {len(response_content)}")
+                    print(f"   Context messages used: {len(recent_context)}")
                     print(f"   Full response: {response_content[:200]}...")
-
-                    memory.add_message(session_id, "user", user_message, "text")
-                    memory.add_message(session_id, "assistant", response_content, "text", {"model": "Llama3"})
 
                 except Exception as e:
                     error_msg = f"❌ Llama3 Error: {str(e)}"
                     print(f"❌ [LLAMA3] Error: {error_msg}")
                     yield error_msg
 
-            return StreamingResponse(llama_response(), media_type="text/plain")
+            return StreamingResponse(llama_response_with_context(), media_type="text/plain")
 
     except Exception as error:
         print(f"❌ [FASTAPI] ==================== FATAL ERROR ====================")
@@ -634,10 +637,11 @@ if __name__ == "__main__":
     import uvicorn
 
     print("="*60)
-    print("🚀 Starting FastAPI server...")
+    print("🚀 Starting FastAPI server with CONTEXT WINDOW support...")
     print("📡 Endpoint: POST /chat")
     print("🎯 Supported types: text, image, document")
     print("✅ [FASTAPI] Backend text extraction integration enabled")
+    print("🆕 [CONTEXT] 15-message context window enabled")
     print("="*60)
 
     try:
@@ -645,5 +649,6 @@ if __name__ == "__main__":
         print("✅ [FASTAPI] Server is READY and listening for requests!")
         print("✅ [LLAMA] Llama (Ollama) integration is READY!")
         print("✅ [BLIP] BLIP integration is READY (make sure BLIP server is running)!")
+        print("✅ [CONTEXT] Context window feature is ACTIVE!")
     except Exception as e:
         print("❌ [FASTAPI] Server failed to start:", str(e))
