@@ -276,7 +276,8 @@ export const sendMessage = async (req, res) => {
     const savedUserMessage = await userMessage.save();
     console.log("✅ User message saved to database:", savedUserMessage._id);
 
-    // ✅ ADD USER MESSAGE TO CONTEXT WINDOW
+    // ✅ ADD USER MESSAGE TO CONTEXT WINDOW (Redis)
+    console.log(`[CONTEXT WINDOW] Adding user message to Redis context window for session: ${sessionId}`);
     await cacheService.addMessageToContext(sessionId, {
       role: 'user',
       content: message,
@@ -285,7 +286,8 @@ export const sendMessage = async (req, res) => {
       type
     }, userId);
 
-    // ✅ GET RECENT CONTEXT FOR LLAMA
+    // ✅ GET RECENT CONTEXT FOR LLAMA (from Redis)
+    console.log(`[CONTEXT WINDOW] Fetching recent context window from Redis for session: ${sessionId}`);
     const recentContext = await cacheService.getFormattedContextForLlama(sessionId, userId);
 
     // ✅ ENHANCED STREAMING HEADERS
@@ -374,7 +376,8 @@ export const sendMessage = async (req, res) => {
         const savedAiMessage = await aiMessage.save();
         console.log("✅ AI message saved to database:", savedAiMessage._id);
 
-        // ✅ ADD AI MESSAGE TO CONTEXT WINDOW
+        // ✅ ADD AI MESSAGE TO CONTEXT WINDOW (Redis)
+        console.log(`[CONTEXT WINDOW] Adding AI message to Redis context window for session: ${sessionId}`);
         await cacheService.addMessageToContext(sessionId, {
           role: 'assistant',
           content: streamedResponse,
@@ -383,9 +386,9 @@ export const sendMessage = async (req, res) => {
           type: type || 'text'
         }, userId);
 
-        // ✅ LOG CONTEXT STATS
+        // ✅ LOG CONTEXT STATS (from Redis)
         const contextStats = await cacheService.getContextStats(sessionId, userId);
-        console.log('📊 [CONTEXT STATS]:', contextStats);
+        console.log('[CONTEXT WINDOW] Current context stats:', contextStats);
 
         session.lastActivity = new Date();
         await session.save();
@@ -445,14 +448,19 @@ export const clearSessionContext = async (req, res) => {
   try {
     const { sessionId } = req.params;
     const userId = req.user._id;
-    
+
+    console.log(`[Controller] Attempting to clear context for session: ${sessionId}, user: ${userId}`);
+
     await cacheService.clearContext(sessionId, userId);
-    
+
+    console.log(`[Controller] Successfully cleared context for session: ${sessionId}, user: ${userId}`);
+
     res.json({
       success: true,
       message: 'Session context cleared successfully'
     });
   } catch (error) {
+    console.error(`[Controller] Error clearing context:`, error);
     res.status(500).json({ 
       success: false, 
       error: 'Failed to clear session context' 
