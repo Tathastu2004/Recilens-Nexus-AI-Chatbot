@@ -12,6 +12,10 @@ export const ChatProvider = ({ children }) => {
   const [supportedFileTypes, setSupportedFileTypes] = useState(null);
   const [aiServiceHealth, setAiServiceHealth] = useState(null);
 
+  // ✅ NEW: CONTEXT STATE
+  const [contextStats, setContextStats] = useState({}); // sessionId -> context stats
+  const [contextEnabled, setContextEnabled] = useState(true);
+
   // ✅ ENHANCED ENVIRONMENT VARIABLE HANDLING
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
   const fastapiUrl = import.meta.env.VITE_FASTAPI_URL || 
@@ -261,121 +265,213 @@ export const ChatProvider = ({ children }) => {
     }
   }, [backendUrl, token]);
 
-  // ✅ ENHANCED STREAMING SEND MESSAGE WITH BACKEND TEXT EXTRACTION
- // In ChatContext.jsx
+  // ✅ NEW: FETCH CONTEXT STATS FOR SESSION
+  const fetchContextStats = useCallback(async (sessionId) => {
+    try {
+      const response = await axios.get(
+        `${backendUrl}/api/chat/session/${sessionId}/context`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 5000
+        }
+      );
+      if (response.data.success) {
+        const stats = response.data.stats;
+        setContextStats(prev => ({
+          ...prev,
+          [sessionId]: stats
+        }));
+        console.log('📊 [CONTEXT STATS] Updated for session:', {
+          sessionId: sessionId.substring(0, 8) + '...',
+          messageCount: stats.messageCount,
+          maxSize: stats.maxSize,
+          storageType: stats.storageType
+        });
+        return stats;
+      }
+    } catch (error) {
+      console.warn('⚠️ [CONTEXT STATS] Failed to fetch:', error.message);
+      return null;
+    }
+  }, [backendUrl, token]);
 
-const sendMessage = useCallback(async (messageData) => {
-  const { sessionId, message, file, extractedText } = messageData;
+  // ✅ NEW: CLEAR CONTEXT FOR SESSION
+  const clearSessionContext = useCallback(async (sessionId) => {
+    try {
+      const response = await axios.delete(
+        `${backendUrl}/api/chat/session/${sessionId}/context`,
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      if (response.data.success) {
+        setContextStats(prev => {
+          const updated = { ...prev };
+          delete updated[sessionId];
+          return updated;
+        });
+        console.log('🗑️ [CONTEXT] Cleared context for session:', sessionId.substring(0, 8) + '...');
+        return true;
+      }
+    } catch (error) {
+      console.error('❌ [CONTEXT] Failed to clear context:', error.message);
+      return false;
+    }
+  }, [backendUrl, token]);
 
-  if (!sessionId || (!message?.trim() && !file && !extractedText)) {
-    console.error('❌ [STREAMING] Missing required fields');
-    return { success: false, error: 'A message or a file is required to start.' };
-  }
+  // ✅ ENHANCED STREAMING SEND MESSAGE WITH 15-MESSAGE CONTEXT WINDOW
+  const sendMessage = useCallback(async (messageData) => {
+    const { sessionId, message, file, extractedText } = messageData;
 
-  setStreamingStates(prev => ({ ...prev, [sessionId]: true }));
-  const abortController = new AbortController();
-  setActiveStreams(prev => ({ ...prev, [sessionId]: abortController }));
-
-  try {
-    const aiMessageId = `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    // Add placeholder message
-    setMessages(prev => ({
-      ...prev,
-      [sessionId]: [...(prev[sessionId] || []), { 
-        _id: aiMessageId, 
-        message: '', 
-        sender: 'AI', 
-        isStreaming: true,
-        timestamp: new Date().toISOString(),
-        type: messageData.type || 'text',
-        renderKey: 0 // ✅ Force render tracking
-      }]
-    }));
-
-    const response = await fetch(`${backendUrl}/api/chat/send`, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify(messageData),
-      signal: abortController.signal
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    if (!sessionId || (!message?.trim() && !file && !extractedText)) {
+      console.error('❌ [STREAMING] Missing required fields');
+      return { success: false, error: 'A message or a file is required to start.' };
     }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let accumulatedText = '';
-    let chunkCount = 0;
+    setStreamingStates(prev => ({ ...prev, [sessionId]: true }));
+    const abortController = new AbortController();
+    setActiveStreams(prev => ({ ...prev, [sessionId]: abortController }));
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        console.log('✅ [FRONTEND] Stream completed');
-        break;
+    try {
+      const aiMessageId = `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      // Add placeholder message
+      setMessages(prev => ({
+        ...prev,
+        [sessionId]: [...(prev[sessionId] || []), { 
+          _id: aiMessageId, 
+          message: '', 
+          sender: 'AI', 
+          isStreaming: true,
+          timestamp: new Date().toISOString(),
+          type: messageData.type || 'text',
+          renderKey: 0
+        }]
+      }));
+
+      // ✅ BUILD 15-MESSAGE CONTEXT WINDOW
+      const currentMessages = messages[sessionId] || [];
+      const textMessages = currentMessages.filter(msg => 
+        msg.message && 
+        msg.message.trim() && 
+        typeof msg.message === 'string' &&
+        !msg.message.startsWith('❌')
+      );
+      const contextWindow = textMessages
+        .slice(-15)
+        .map(msg => ({
+          role: msg.sender === 'AI' ? 'assistant' : 'user',
+          content: msg.message.trim()
+        }));
+
+      const enhancedMessageData = {
+        ...messageData,
+        conversationContext: contextWindow
+      };
+
+      console.log('🆕 [CONTEXT WINDOW] Sending message with context:', {
+        sessionId: sessionId.substring(0, 8) + '...',
+        contextMessages: contextWindow.length,
+        roles: contextWindow.map(m => m.role).join(', '),
+        messageType: messageData.type || 'text'
+      });
+
+      await fetchContextStats(sessionId);
+
+      const response = await fetch(`${backendUrl}/api/chat/send`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(enhancedMessageData),
+        signal: abortController.signal
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const chunk = decoder.decode(value, { stream: true });
-      accumulatedText += chunk;
-      chunkCount++;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedText = '';
+      let chunkCount = 0;
 
-      console.log(`📦 [CHUNK ${chunkCount}]:`, chunk);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          console.log('✅ [FRONTEND] Context-aware stream completed');
+          break;
+        }
 
-      // ✅ FORCE REACT TO RENDER EACH CHUNK
+        const chunk = decoder.decode(value, { stream: true });
+        accumulatedText += chunk;
+        chunkCount++;
+
+        console.log(`📦 [CONTEXT CHUNK ${chunkCount}]:`, chunk);
+
+        setMessages(prev => ({
+          ...prev,
+          [sessionId]: (prev[sessionId] || []).map(msg => 
+            msg._id === aiMessageId ? { 
+              ...msg,
+              message: accumulatedText,
+              isStreaming: true,
+              renderKey: chunkCount,
+              lastChunk: chunk
+            } : msg
+          )
+        }));
+
+        await new Promise(resolve => {
+          setTimeout(() => {
+            requestAnimationFrame(resolve);
+          }, 30);
+        });
+      }
+
       setMessages(prev => ({
         ...prev,
         [sessionId]: (prev[sessionId] || []).map(msg => 
           msg._id === aiMessageId ? { 
-            ...msg,
+            ...msg, 
             message: accumulatedText,
-            isStreaming: true,
-            renderKey: chunkCount, // ✅ Unique key forces re-render
-            lastChunk: chunk
+            isStreaming: false, 
+            timestamp: new Date().toISOString(),
+            renderKey: chunkCount + 1
           } : msg
         )
       }));
 
-      // ✅ CRITICAL: Force React to process this update before continuing
-      await new Promise(resolve => {
-        setTimeout(() => {
-          requestAnimationFrame(resolve);
-        }, 30); // 30ms delay allows React to render
+      await fetchContextStats(sessionId);
+
+      return { success: true, message: accumulatedText };
+
+    } catch (error) {
+      console.error('❌ [STREAMING] Context-aware streaming error:', error);
+
+      setMessages(prev => ({
+        ...prev,
+        [sessionId]: (prev[sessionId] || []).map(msg => 
+          msg._id === aiMessageId ? { 
+            ...msg, 
+            message: `❌ Error: ${error.message}`,
+            isStreaming: false,
+            error: true
+          } : msg
+        )
+      }));
+
+      return { success: false, error: error.message };
+    } finally {
+      setStreamingStates(prev => ({ ...prev, [sessionId]: false }));
+      setActiveStreams(prev => {
+        const updated = { ...prev };
+        delete updated[sessionId];
+        return updated;
       });
     }
-
-    // Finalize message
-    setMessages(prev => ({
-      ...prev,
-      [sessionId]: (prev[sessionId] || []).map(msg => 
-        msg._id === aiMessageId ? { 
-          ...msg, 
-          message: accumulatedText,
-          isStreaming: false, 
-          timestamp: new Date().toISOString(),
-          renderKey: chunkCount + 1
-        } : msg
-      )
-    }));
-
-    return { success: true, message: accumulatedText };
-
-  } catch (error) {
-    console.error('❌ [STREAMING] Error:', error);
-    // Error handling...
-    return { success: false, error: error.message };
-  } finally {
-    setStreamingStates(prev => ({ ...prev, [sessionId]: false }));
-    setActiveStreams(prev => {
-      const updated = { ...prev };
-      delete updated[sessionId];
-      return updated;
-    });
-  }
-}, [backendUrl, token]);
+  }, [backendUrl, token, messages, fetchContextStats]);
 
   // ✅ CANCEL STREAMING FOR SESSION
   const cancelStream = useCallback((sessionId) => {

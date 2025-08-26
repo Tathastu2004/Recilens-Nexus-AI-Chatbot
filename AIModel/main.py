@@ -383,110 +383,133 @@ INSTRUCTIONS: Based on the conversation history above and the document content, 
         
         # ✅ IMAGE PROCESSING WITH CONTEXT
         elif request_type == "image":
-            print(f"🖼️ [FASTAPI] Image analysis request with context...")
-            print(f"🖼️ [FASTAPI] Image URL: {file_url}")
+            print(f"🖼️ [FASTAPI] Enhanced image analysis with context integration...")
 
-            async def blip_response_with_context():
+            async def enhanced_blip_llama_response():
                 try:
-                    print(f"📡 [BLIP] Sending request to BLIP server with context...")
+                    # ✅ STEP 1: GET BLIP ANALYSIS (SYNC FOR NOW TO DEBUG)
+                    print(f"📡 [BLIP] Getting image analysis...")
+                    
+                    clean_question = user_message if user_message and not user_message.startswith("Uploaded image:") else None
+                    if clean_question:
+                        clean_question = clean_question.replace("Current question:", "").strip()
+                        if len(clean_question) < 3:
+                            clean_question = None
 
-                    # ✅ BUILD CONTEXT FOR IMAGE ANALYSIS
-                    context_info = ""
-                    if conversation_context:
-                        context_info = "Previous conversation context: "
-                        recent_messages = conversation_context[-3:]  # Last 3 messages for context
-                        for msg in recent_messages:
-                            role = msg.get('role', 'unknown')
-                            content = msg.get('content', '')[:100]  # Limit length
-                            context_info += f"{role}: {content}; "
-
-                    enhanced_question = user_message
-                    if context_info and user_message and not user_message.startswith("Uploaded image:"):
-                        enhanced_question = f"{context_info}\n\nCurrent question: {user_message}"
-
-                    payload = {
+                    blip_payload = {
                         "image_url": file_url,
-                        "question": enhanced_question if enhanced_question else None
+                        "question": clean_question
                     }
 
-                    headers = {
-                        "Content-Type": "application/json",
-                        "Accept": "application/json"
-                    }
+                    print(f"📡 [BLIP] Request payload: {blip_payload}")
 
-                    print(f"📡 [BLIP] Request payload with context: {payload}")
-
-                    # Check BLIP server health
-                    try:
-                        health_check = requests.get(f"{BLIP_URL}/health", timeout=5)
-                        if health_check.status_code != 200:
-                            yield "❌ BLIP server is not healthy. Please restart the BLIP service."
-                            return
-                    except requests.exceptions.ConnectionError:
-                        yield "❌ Cannot connect to BLIP server. Please make sure it's running on port 5001."
+                    # Get BLIP analysis
+                    blip_response = requests.post(f"{BLIP_URL}/analyze", json=blip_payload, timeout=60)
+                    
+                    if blip_response.status_code != 200:
+                        yield f"❌ BLIP Error: HTTP {blip_response.status_code}"
                         return
 
-                    blip_response = requests.post(
-                        f"{BLIP_URL}/analyze",
-                        json=payload,
-                        headers=headers,
-                        timeout=60
-                    )
+                    blip_result = blip_response.json()
+                    blip_analysis = blip_result.get('result', 'Image analysis completed')
+                    
+                    print(f"✅ [BLIP] Raw analysis result: {blip_analysis}")
+                    
+                    # ✅ CRITICAL: Check if BLIP actually analyzed the image
+                    if not blip_analysis or blip_analysis == "Image analysis completed":
+                        yield "❌ BLIP failed to analyze the image properly."
+                        return
+                    
+                    if "Unable to load image" in blip_analysis or "Error" in blip_analysis:
+                        yield f"❌ BLIP Error: {blip_analysis}"
+                        return
 
-                    print(f"📥 [BLIP] BLIP response: {blip_response.status_code}")
+                    # ✅ STEP 2: Build enhanced context with BLIP analysis
+                    print(f"🦙 [LLAMA] Building context with BLIP result...")
+                    
+                    messages = [
+                        {
+                            'role': 'system',
+                            'content': '''You are an AI assistant with image analysis capabilities. You have received a detailed image analysis from BLIP (Bootstrapping Language-Image Pre-training). 
 
-                    if blip_response.status_code == 200:
-                        result = blip_response.json()
-                        content = result.get('result', 'Image analysis completed')
+Your task is to:
+1. Use the BLIP analysis as the foundation for understanding the image
+2. Provide a natural, conversational response about the image
+3. Be specific about what you can see in the image
+4. Reference the conversation history if relevant
 
-                        print(f"✅ [BLIP] Context-aware analysis successful: {content[:100]}...")
+IMPORTANT: Never say "no image was provided" - you have BLIP's analysis of the image.'''
+                        }
+                    ]
+                    
+                    # Add conversation context
+                    recent_context = conversation_context[-8:] if len(conversation_context) > 8 else conversation_context
+                    for ctx_msg in recent_context:
+                        messages.append({
+                            'role': ctx_msg.get('role', 'user'),
+                            'content': ctx_msg.get('content', '')
+                        })
+                    
+                    # ✅ CRITICAL: Add BLIP analysis as system message
+                    messages.append({
+                        'role': 'system',
+                        'content': f"BLIP Image Analysis: {blip_analysis}"
+                    })
+                    
+                    # Add user request with context
+                    user_prompt = f"Based on the BLIP image analysis provided, please {user_message or 'describe what you can see in this image'}."
+                    messages.append({
+                        'role': 'user',
+                        'content': user_prompt
+                    })
 
-                        # ✅ WORD-BY-WORD STREAMING FOR BLIP RESPONSE
-                        print(f"🌊 [BLIP] Starting word-by-word streaming with context awareness...")
-                        words = content.split(' ')
-                        print(f"📊 [BLIP] Will stream {len(words)} words")
+                    print(f"🦙 [LLAMA] Messages prepared: {len(messages)} total")
+                    print(f"🦙 [LLAMA] BLIP analysis included: {blip_analysis[:100]}...")
 
-                        for i, word in enumerate(words):
-                            word_to_send = word if i == len(words) - 1 else word + ' '
-                            print(f"📝 [BLIP WORD {i+1}/{len(words)}] Sending: '{word_to_send}'")
-                            yield word_to_send
-                            await asyncio.sleep(0.08)  # 80ms delay for images
+                    # ✅ STEP 3: Send to Llama with BLIP context
+                    try:
+                        client = AsyncClient(host=LLAMA_URL)
+                        
+                        stream = await client.chat(
+                            model='llama3',
+                            messages=messages,
+                            stream=True
+                        )
 
-                        print(f"✅ [BLIP] Context-aware image analysis completed")
-                    else:
-                        error_msg = f"❌ BLIP Error: HTTP {blip_response.status_code}"
-                        if blip_response.text:
-                            error_msg += f" - {blip_response.text}"
-                        print(f"❌ [BLIP] Error: {error_msg}")
+                        print(f"🌊 [LLAMA+BLIP] Starting enhanced streaming with BLIP analysis...")
+                        word_buffer = ""
+                        
+                        async for chunk in stream:
+                            content = chunk.get('message', {}).get('content', '')
+                            if content:
+                                word_buffer += content
+                                words = word_buffer.split(' ')
+                                
+                                if len(words) > 1:
+                                    for word in words[:-1]:
+                                        yield word + ' '
+                                        await asyncio.sleep(0.05)
+                                    word_buffer = words[-1]
+                        
+                        if word_buffer.strip():
+                            yield word_buffer
 
-                        words = error_msg.split(' ')
+                        print(f"✅ [LLAMA+BLIP] Enhanced analysis completed successfully")
+
+                    except Exception as llama_error:
+                        print(f"⚠️ [LLAMA] Enhancement failed, returning BLIP analysis: {llama_error}")
+                        # Fallback to BLIP analysis
+                        words = blip_analysis.split(' ')
                         for i, word in enumerate(words):
                             yield word + (' ' if i < len(words) - 1 else '')
-                            await asyncio.sleep(0.05)
+                            await asyncio.sleep(0.08)
 
-                except requests.exceptions.ConnectionError:
-                    error_msg = "❌ Cannot connect to BLIP server. Make sure it's running on port 5001."
-                    print(f"❌ [BLIP] Connection Error: {error_msg}")
-                    words = error_msg.split(' ')
-                    for i, word in enumerate(words):
-                        yield word + (' ' if i < len(words) - 1 else '')
-                        await asyncio.sleep(0.05)
-                except requests.exceptions.Timeout:
-                    error_msg = "❌ BLIP server timeout. Image analysis took too long."
-                    print(f"❌ [BLIP] Timeout Error: {error_msg}")
-                    words = error_msg.split(' ')
-                    for i, word in enumerate(words):
-                        yield word + (' ' if i < len(words) - 1 else '')
-                        await asyncio.sleep(0.05)
                 except Exception as e:
-                    error_msg = f"❌ Image Analysis Error: {str(e)}"
-                    print(f"❌ [BLIP] Exception: {error_msg}")
-                    words = error_msg.split(' ')
-                    for i, word in enumerate(words):
-                        yield word + (' ' if i < len(words) - 1 else '')
-                        await asyncio.sleep(0.05)
+                    error_msg = f"❌ Enhanced Image Analysis Error: {str(e)}"
+                    print(f"❌ [BLIP+LLAMA] Error: {error_msg}")
+                    yield error_msg
 
-            return StreamingResponse(blip_response_with_context(), media_type="text/plain")
+            return StreamingResponse(enhanced_blip_llama_response(), media_type="text/plain")
 
         # ✅ TEXT CHAT WITH CONTEXT WINDOW
         else:
@@ -543,7 +566,7 @@ INSTRUCTIONS: Based on the conversation history above and the document content, 
                             # Split by spaces to get words
                             words = word_buffer.split(' ')
 
-                            # Send complete words (keep last incomplete word in buffer)
+                            # Send complete words immediately
                             if len(words) > 1:
                                 for word in words[:-1]:
                                     word_count += 1

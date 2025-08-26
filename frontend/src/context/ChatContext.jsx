@@ -319,6 +319,27 @@ export const ChatProvider = ({ children }) => {
     }
   }, [backendUrl, token]);
 
+  // ✅ NEW: Clear context handler
+  const handleClearContext = useCallback(async (sessionId) => {
+    if (!clearSessionContext) {
+      console.warn('⚠️ [CONTEXT] clearSessionContext not available');
+      return;
+    }
+
+    try {
+      const success = await clearSessionContext(sessionId);
+      if (success) {
+        console.log('✅ [CONTEXT] Context cleared successfully');
+        // Refresh context stats
+        if (fetchContextStats) {
+          await fetchContextStats(sessionId);
+        }
+      }
+    } catch (error) {
+      console.error('❌ [CONTEXT] Error clearing context:', error);
+    }
+  }, [clearSessionContext, fetchContextStats]);
+
   // ✅ ENHANCED STREAMING SEND MESSAGE WITH 15-MESSAGE CONTEXT WINDOW
   const sendMessage = useCallback(async (messageData) => {
     const { sessionId, message, file, extractedText } = messageData;
@@ -349,42 +370,18 @@ export const ChatProvider = ({ children }) => {
         }]
       }));
 
-      // ✅ BUILD 15-MESSAGE CONTEXT WINDOW
-      const currentMessages = messages[sessionId] || [];
-      const textMessages = currentMessages.filter(msg => 
-        msg.message && 
-        msg.message.trim() && 
-        typeof msg.message === 'string' &&
-        !msg.message.startsWith('❌')
-      );
-      const contextWindow = textMessages
-        .slice(-15)
-        .map(msg => ({
-          role: msg.sender === 'AI' ? 'assistant' : 'user',
-          content: msg.message.trim()
-        }));
+      console.log('🆕 [CONTEXT] Sending message with context support');
 
-      const enhancedMessageData = {
-        ...messageData,
-        conversationContext: contextWindow
-      };
-
-      console.log('🆕 [CONTEXT WINDOW] Sending message with context:', {
-        sessionId: sessionId.substring(0, 8) + '...',
-        contextMessages: contextWindow.length,
-        roles: contextWindow.map(m => m.role).join(', '),
-        messageType: messageData.type || 'text'
-      });
-
-      await fetchContextStats(sessionId);
-
+      // ✅ PROPER STREAMING REQUEST WITH CORRECT HEADERS
       const response = await fetch(`${backendUrl}/api/chat/send`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'text/plain',
+          'Cache-Control': 'no-cache'
         },
-        body: JSON.stringify(enhancedMessageData),
+        body: JSON.stringify(messageData),
         signal: abortController.signal
       });
 
@@ -392,50 +389,81 @@ export const ChatProvider = ({ children }) => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
+      // ✅ FIXED STREAMING READER WITH PROPER BUFFERING
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let accumulatedText = '';
       let chunkCount = 0;
+      let wordBuffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          console.log('✅ [FRONTEND] Context-aware stream completed');
-          break;
+      console.log('🌊 [STREAMING] Starting enhanced stream reading...');
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            console.log('✅ [STREAMING] Stream completed');
+            break;
+          }
+
+          // ✅ PROPER CHUNK DECODING
+          const chunk = decoder.decode(value, { stream: true });
+          wordBuffer += chunk;
+          chunkCount++;
+
+          console.log(`📦 [CHUNK ${chunkCount}] Received: "${chunk}" (${chunk.length} chars)`);
+
+          // ✅ WORD-BY-WORD PROCESSING
+          const words = wordBuffer.split(' ');
+          if (words.length > 1) {
+            // Process complete words
+            const completeWords = words.slice(0, -1);
+            for (const word of completeWords) {
+              accumulatedText += word + ' ';
+              
+              // ✅ IMMEDIATE UI UPDATE PER WORD
+              setMessages(prev => ({
+                ...prev,
+                [sessionId]: (prev[sessionId] || []).map(msg => 
+                  msg._id === aiMessageId ? { 
+                    ...msg,
+                    message: accumulatedText,
+                    isStreaming: true,
+                    renderKey: chunkCount,
+                    lastChunk: word + ' '
+                  } : msg
+                )
+              }));
+
+              // ✅ ALLOW REACT TO RENDER
+              await new Promise(resolve => {
+                requestAnimationFrame(() => {
+                  setTimeout(resolve, 5); // Faster updates
+                });
+              });
+            }
+            
+            // Keep incomplete word in buffer
+            wordBuffer = words[words.length - 1];
+          }
         }
 
-        const chunk = decoder.decode(value, { stream: true });
-        accumulatedText += chunk;
-        chunkCount++;
+        // ✅ PROCESS REMAINING BUFFER
+        if (wordBuffer.trim()) {
+          accumulatedText += wordBuffer;
+        }
 
-        console.log(`📦 [CONTEXT CHUNK ${chunkCount}]:`, chunk);
-
-        setMessages(prev => ({
-          ...prev,
-          [sessionId]: (prev[sessionId] || []).map(msg => 
-            msg._id === aiMessageId ? { 
-              ...msg,
-              message: accumulatedText,
-              isStreaming: true,
-              renderKey: chunkCount,
-              lastChunk: chunk
-            } : msg
-          )
-        }));
-
-        await new Promise(resolve => {
-          setTimeout(() => {
-            requestAnimationFrame(resolve);
-          }, 30);
-        });
+      } finally {
+        reader.releaseLock();
       }
 
+      // ✅ FINALIZE MESSAGE
       setMessages(prev => ({
         ...prev,
         [sessionId]: (prev[sessionId] || []).map(msg => 
           msg._id === aiMessageId ? { 
             ...msg, 
-            message: accumulatedText,
+            message: accumulatedText.trim(),
             isStreaming: false, 
             timestamp: new Date().toISOString(),
             renderKey: chunkCount + 1
@@ -443,13 +471,21 @@ export const ChatProvider = ({ children }) => {
         )
       }));
 
+      console.log('✅ [STREAMING] Final result:', {
+        totalChunks: chunkCount,
+        finalLength: accumulatedText.length,
+        preview: accumulatedText.substring(0, 200) + '...'
+      });
+
+      // Update context stats
       await fetchContextStats(sessionId);
 
-      return { success: true, message: accumulatedText };
+      return { success: true, message: accumulatedText.trim() };
 
     } catch (error) {
-      console.error('❌ [STREAMING] Context-aware streaming error:', error);
-
+      console.error('❌ [STREAMING] Error:', error);
+      
+      // Update error message  
       setMessages(prev => ({
         ...prev,
         [sessionId]: (prev[sessionId] || []).map(msg => 
@@ -461,7 +497,7 @@ export const ChatProvider = ({ children }) => {
           } : msg
         )
       }));
-
+      
       return { success: false, error: error.message };
     } finally {
       setStreamingStates(prev => ({ ...prev, [sessionId]: false }));
@@ -471,7 +507,7 @@ export const ChatProvider = ({ children }) => {
         return updated;
       });
     }
-  }, [backendUrl, token, messages, fetchContextStats]);
+  }, [backendUrl, token, fetchContextStats]);
 
   // ✅ CANCEL STREAMING FOR SESSION
   const cancelStream = useCallback((sessionId) => {
@@ -842,7 +878,15 @@ export const ChatProvider = ({ children }) => {
         };
         return acc;
       }, {})
-    }
+    },
+
+    // ✅ NEW: Context window features
+    contextStats,
+    contextEnabled,
+    fetchContextStats,
+    clearSessionContext,
+    handleClearContext,  // ✅ Add this
+    getContextStats: (sessionId) => contextStats[sessionId] || null,
   };
 
   // ✅ ENHANCED DEBUG LOGGING WITH TEXT EXTRACTION INFO

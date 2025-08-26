@@ -626,11 +626,16 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                       : 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400'
                   }`}>
                     <div className={`w-1.5 h-1.5 rounded-full ${isImageResponse ? 'bg-purple-500' : 'bg-blue-500'}`}></div>
-                    {isImageResponse ? 'Image Analysis' : 'Document Analysis'}
-                    {/* ✅ NEW: Show if context was used */}
+                    {isImageResponse ? 'BLIP+Llama Enhanced Analysis' : 'Document Analysis'}
+                    {/* ✅ Show enhanced processing info */}
+                    {metadata && metadata.blipIntegrated && (
+                      <span className="ml-2 text-xs opacity-75">
+                        • BLIP→Llama Pipeline
+                      </span>
+                    )}
                     {metadata && metadata.contextUsed > 0 && (
                       <span className="ml-2 text-xs opacity-75">
-                        • Used {metadata.contextUsed} context messages
+                        • {metadata.contextUsed} context msgs
                       </span>
                     )}
                   </div>
