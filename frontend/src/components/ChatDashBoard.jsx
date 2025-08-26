@@ -14,91 +14,6 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import '../styles/animations.css';
 
-// ✅ ENHANCED CONTEXT WINDOW INDICATOR COMPONENT
-const ContextWindowIndicator = ({ sessionId, contextStats, onClearContext }) => {
-  if (!contextStats || !contextStats.isActive) return null;
-  
-  const percentage = (contextStats.messageCount / contextStats.maxSize) * 100;
-  const isNearFull = percentage > 80;
-  const isAlmostFull = percentage > 90;
-  
-  return (
-    <div className={`mx-4 mb-2 p-3 rounded-xl border transition-all duration-200 ${
-      isAlmostFull
-        ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700'
-        : isNearFull 
-        ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-700'
-        : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-700'
-    }`}>
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${
-            isAlmostFull ? 'bg-red-500 animate-pulse' : isNearFull ? 'bg-amber-500' : 'bg-blue-500'
-          }`}></div>
-          <span className={`text-sm font-medium ${
-            isAlmostFull
-              ? 'text-red-800 dark:text-red-200'
-              : isNearFull 
-              ? 'text-amber-800 dark:text-amber-200'
-              : 'text-blue-800 dark:text-blue-200'
-          }`}>
-            Context Window ({contextStats.messageCount}/{contextStats.maxSize})
-          </span>
-          <span className={`text-xs px-2 py-0.5 rounded-full ${
-            contextStats.storageType === 'redis' 
-              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
-          }`}>
-            {contextStats.storageType === 'redis' ? '🔄 Redis' : '💾 Memory'}
-          </span>
-        </div>
-        <button
-          onClick={() => onClearContext(sessionId)}
-          className={`text-xs px-3 py-1 rounded transition-colors ${
-            isAlmostFull 
-              ? 'bg-red-200 dark:bg-red-800 hover:bg-red-500 hover:text-white'
-              : 'bg-gray-200 dark:bg-gray-700 hover:bg-red-500 hover:text-white'
-          }`}
-          title="Clear context window"
-        >
-          Clear Context
-        </button>
-      </div>
-      
-      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-        <div 
-          className={`h-2 rounded-full transition-all duration-300 ${
-            isAlmostFull ? 'bg-red-500' : isNearFull ? 'bg-amber-500' : 'bg-blue-500'
-          }`}
-          style={{ width: `${percentage}%` }}
-        ></div>
-      </div>
-      
-      <div className={`text-xs mt-2 flex items-center justify-between ${
-        isAlmostFull
-          ? 'text-red-600 dark:text-red-400'
-          : isNearFull 
-          ? 'text-amber-600 dark:text-amber-400'
-          : 'text-blue-600 dark:text-blue-400'
-      }`}>
-        <span>
-          {isAlmostFull 
-            ? '🚨 Context almost full - messages being removed'
-            : isNearFull 
-            ? '⚠️ Context window nearly full - older messages will be removed'
-            : `✅ AI remembers your last ${contextStats.messageCount} messages`
-          }
-        </span>
-        {contextStats.expiresIn > 0 && (
-          <span className="text-xs opacity-75">
-            Expires: {Math.floor(contextStats.expiresIn / 3600)}h {Math.floor((contextStats.expiresIn % 3600) / 60)}m
-          </span>
-        )}
-      </div>
-    </div>
-  );
-};
-
 const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) => {
   // Constants and token
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
@@ -172,7 +87,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     contextStats,
     getContextStats,
     clearSessionContext,
-    fetchContextStats  // ✅ NEW: Add this if available
+    fetchContextStats
   } = chatContext || {};
 
   // FALLBACK MESSAGE FETCHING
@@ -183,7 +98,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const actualIsConnected = chatContextAvailable ? (isConnected ?? false) : false;
   const activeSessionId = selectedSession || currentSessionId;
 
-  // ✅ NEW: CONTEXT CLEAR HANDLER
   const handleClearContext = useCallback(async (sessionId) => {
     if (!clearSessionContext) {
       console.warn('⚠️ [CONTEXT] clearSessionContext function not available');
@@ -198,12 +112,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       if (success) {
         console.log('✅ [CONTEXT] Context cleared successfully');
         
-        // ✅ Refresh context stats to reflect the change
         if (fetchContextStats) {
           await fetchContextStats(sessionId);
         }
         
-        // ✅ Show success feedback
         setShowPasteIndicator(true);
         setTimeout(() => setShowPasteIndicator(false), 2000);
         
@@ -236,7 +148,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   }, [detectFileType]);
 
-  // ✅ IMAGE CONTEXT INJECTION FUNCTION
   const getImageContextText = useCallback(() => {
     if (!activeFileContext?.imageAnalysis) return "";
     return `\n--- IMAGE CONTEXT ---\nImage: ${activeFileContext.fileName}\nPrevious Analysis: ${activeFileContext.imageAnalysis}\n---\n`;
@@ -423,7 +334,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   }, [backendUrl, token, chatContextAvailable, reconnect, setSessionMessages]);
 
-  // ✅ ENHANCED INITIALIZE SESSION WITH CONTEXT STATS
+  // ENHANCED INITIALIZE SESSION WITH CONTEXT STATS
   useEffect(() => {
     const initializeSession = async () => {
       if (selectedSession && selectedSession !== 'null' && selectedSession !== 'undefined') {
@@ -435,7 +346,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             await fetchSessionMessages(selectedSession);
           }
           
-          // ✅ LOAD CONTEXT STATS FOR THE SESSION
           if (chatContextAvailable && fetchContextStats) {
             await fetchContextStats(selectedSession);
           }
@@ -448,7 +358,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     if (!hasInitialized) initializeSession();
   }, [selectedSession, hasInitialized, chatContextAvailable, fetchMessagesViaHTTP, setSession, fetchSessionMessages, fetchContextStats]);
 
-  // ✅ ENHANCED WATCH FOR SESSION CHANGES WITH CONTEXT
+  // ENHANCED WATCH FOR SESSION CHANGES WITH CONTEXT
   useEffect(() => {
     if (selectedSession && selectedSession !== currentSessionId) {
       setFallbackMessages([]);
@@ -459,7 +369,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       fetchMessagesViaHTTP(selectedSession);
       if (chatContextAvailable && fetchSessionMessages) fetchSessionMessages(selectedSession);
       
-      // ✅ LOAD CONTEXT STATS FOR NEW SESSION
       if (chatContextAvailable && fetchContextStats) {
         fetchContextStats(selectedSession);
       }
@@ -504,62 +413,33 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             
             {fileUrl && (
               <div className="mt-3 pt-2 border-t border-white/20">
-                {detectedType === 'document' ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 p-2 bg-white/10 rounded-lg">
-                      {getFileIcon(fileType, fileName)}
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs text-white/90 font-medium truncate">
-                          {fileName || 'Document'}
-                        </div>
-                        <div className="text-xs text-white/70">
-                          {fileType || 'Document file'}
-                          {hasTextExtraction && (
-                            <span className="ml-2 text-green-300">
-                              • {extractedTextLength} chars extracted
-                            </span>
-                          )}
-                        </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 p-2 bg-white/10 rounded-lg">
+                    {getFileIcon(fileType, fileName)}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-white/90 font-medium truncate">
+                        {fileName || 'File'}
+                      </div>
+                      <div className="text-xs text-white/70">
+                        {fileType || 'File'}
+                        {hasTextExtraction && (
+                          <span className="ml-2 text-green-300">
+                            • {extractedTextLength} chars
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <div className="text-xs text-white/70 bg-white/10 rounded px-2 py-1 flex items-center gap-1">
-                      📄 <span>
-                        {hasTextExtraction 
-                          ? 'Text extracted & processed by Llama3' 
-                          : 'Document processed by Llama3'
-                        }
-                      </span>
-                      {isDuplicate && <span className="ml-1">• ♻️ Reused existing file</span>}
-                    </div>
+                    <a 
+                      href={fileUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="p-1 hover:bg-white/10 rounded transition-colors"
+                      title="Download file"
+                    >
+                      <IconDownload size={14} className="text-white/70" />
+                    </a>
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 p-2 bg-white/10 rounded-lg">
-                      {getFileIcon(fileType, fileName)}
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs text-white/90 font-medium truncate">
-                          {fileName || 'Document'}
-                        </div>
-                        <div className="text-xs text-white/70">
-                          {fileType || 'Document file'}
-                        </div>
-                      </div>
-                      <a 
-                        href={fileUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="p-1 hover:bg-white/10 rounded transition-colors"
-                        title="Download file"
-                      >
-                        <IconDownload size={14} className="text-white/70" />
-                      </a>
-                    </div>
-                    <div className="text-xs text-white/70 bg-white/10 rounded px-2 py-1 flex items-center gap-1">
-                      📄 <span>Document processed by Llama3</span>
-                      {isDuplicate && <span className="ml-1">• ♻️ Reused existing file</span>}
-                    </div>
-                  </div>
-                )}
+                </div>
               </div>
             )}
             
@@ -614,33 +494,11 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                   <span />
                 </div>
                 <span className="text-sm text-gray-500 dark:text-gray-400">
-                  {isImageResponse ? "Analyzing image..." : isDocumentResponse ? "Processing document..." : "AI is thinking..."}
+                  AI is thinking...
                 </span>
               </div>
             ) : (
               <div className="space-y-2">
-                {(isImageResponse || isDocumentResponse) && (
-                  <div className={`inline-flex items-center gap-2 px-2 py-1 rounded-md text-xs mb-2 ${
-                    isImageResponse 
-                      ? 'bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 text-purple-600 dark:text-purple-400'
-                      : 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400'
-                  }`}>
-                    <div className={`w-1.5 h-1.5 rounded-full ${isImageResponse ? 'bg-purple-500' : 'bg-blue-500'}`}></div>
-                    {isImageResponse ? 'BLIP+Llama Enhanced Analysis' : 'Document Analysis'}
-                    {/* ✅ Show enhanced processing info */}
-                    {metadata && metadata.blipIntegrated && (
-                      <span className="ml-2 text-xs opacity-75">
-                        • BLIP→Llama Pipeline
-                      </span>
-                    )}
-                    {metadata && metadata.contextUsed > 0 && (
-                      <span className="ml-2 text-xs opacity-75">
-                        • {metadata.contextUsed} context msgs
-                      </span>
-                    )}
-                  </div>
-                )}
-                
                 <div className="prose prose-sm max-w-none text-gray-800 dark:text-gray-200">
                   <ReactMarkdown
                     components={{
@@ -679,7 +537,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     );
   };
 
-  // ✅ VOICE INPUT HANDLERS
+  // VOICE INPUT HANDLERS
   const handleVoiceInput = useCallback(() => {
     if (!browserSupportsSpeechRecognition) {
       alert("Browser doesn't support speech recognition.");
@@ -712,7 +570,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   }, [listening]);
 
-  // ✅ ENHANCED FILE UPLOAD HANDLER WITH IMAGE CONTEXT
+  // ENHANCED FILE UPLOAD HANDLER WITH IMAGE CONTEXT
   const handleFileSelect = async (e) => {
     const selectedFile = e.target.files[0];
     if (!selectedFile) return;
@@ -738,7 +596,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       
       setUploadResult(response.data);
       
-      // ✅ Establish context for both images and documents
+      // Establish context for both images and documents
       if (response.data && response.data.extractedText) {
         // Document context
         setActiveFileContext({
@@ -747,7 +605,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           fileName: response.data.fileName,
         });
       } else if (/\.(png|jpe?g|gif|bmp|webp)$/i.test(response.data.fileName || "")) {
-        // ✅ Image context - will be populated after BLIP analysis
+        // Image context - will be populated after BLIP analysis
         setActiveFileContext({
           fileUrl: response.data.fileUrl,
           fileName: response.data.fileName,
@@ -764,7 +622,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   };
 
-  // ✅ ENHANCED HANDLE SUBMIT WITH CONTEXT SUPPORT
+  // ENHANCED HANDLE SUBMIT WITH CONTEXT SUPPORT
   const handleSubmit = async (e) => {
     e.preventDefault();
     setInput("");
@@ -812,12 +670,12 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       return;
     }
 
-    // ✅ ENHANCED FILE TYPE DETECTION AND CONTEXT HANDLING
+    // ENHANCED FILE TYPE DETECTION AND CONTEXT HANDLING
     let fileContext = null;
     let messageType = 'text';
     
     if (uploadResult && uploadResult.fileUrl) {
-      // ✅ PROPER FILE TYPE DETECTION
+      // PROPER FILE TYPE DETECTION
       const isImage = uploadResult.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
       const isDocument = uploadResult.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i);
       
@@ -825,11 +683,11 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         fileContext = {
           fileUrl: uploadResult.fileUrl,
           fileName: uploadResult.fileName,
-          fileType: 'image', // ✅ EXPLICIT FILE TYPE
+          fileType: 'image',
         };
-        messageType = 'image'; // ✅ SEND 'image' TO FASTAPI
+        messageType = 'image';
         
-        // ✅ ESTABLISH IMAGE CONTEXT
+        // ESTABLISH IMAGE CONTEXT
         setActiveFileContext({
           fileUrl: uploadResult.fileUrl,
           fileName: uploadResult.fileName,
@@ -842,16 +700,16 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           extractedText: uploadResult.extractedText,
           fileUrl: uploadResult.fileUrl,
           fileName: uploadResult.fileName,
-          fileType: 'document', // ✅ EXPLICIT FILE TYPE
+          fileType: 'document',
         };
-        messageType = 'document'; // ✅ SEND 'document' TO FASTAPI
+        messageType = 'document';
         setActiveFileContext(fileContext);
       }
     } else if (activeFileContext) {
-      // ✅ HANDLE EXISTING CONTEXT (for follow-up messages)
+      // HANDLE EXISTING CONTEXT (for follow-up messages)
       fileContext = activeFileContext;
       
-      // ✅ DETERMINE TYPE FROM CONTEXT
+      // DETERMINE TYPE FROM CONTEXT
       const isImage = activeFileContext.fileType === 'image' || 
                      activeFileContext.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
       const isDocument = activeFileContext.extractedText || 
@@ -876,16 +734,15 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       hasTextExtraction: !!fileContext?.extractedText,
       extractedTextLength: fileContext?.extractedText?.length || 0,
       status: 'sending',
-      // ✅ NEW: Context metadata
       contextEnabled: true,
       willUseContext: true
     };
     if (addMessageToSession) addMessageToSession(activeSessionId, optimisticUserMsg);
 
-    // ✅ ENHANCED: Build message data with context info
+    // ENHANCED: Build message data with context info
     const messageData = {
       sessionId: activeSessionId,
-      message: finalInput, // ✅ Use the actual input text
+      message: finalInput,
       type: messageType,
       fileUrl: fileContext?.fileUrl || null,
       fileName: fileContext?.fileName || null,
@@ -935,7 +792,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         }
       }
 
-      // ✅ UPDATE SESSION TITLE WITH FIRST MESSAGE
+      // UPDATE SESSION TITLE WITH FIRST MESSAGE
       const sessionMessages = getCurrentSessionMessages ? getCurrentSessionMessages() : [];
       const userMessages = sessionMessages.filter(msg => msg.sender !== 'AI' && msg.sender !== 'ai');
 
@@ -1012,7 +869,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         </div>
       )}
       
-      {/* ✅ ENHANCED PASTE INDICATOR */}
+      {/* PASTE INDICATOR */}
       {showPasteIndicator && (
         <div className="absolute top-4 right-4 z-50 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg animate-fade-in flex items-center gap-2">
           <IconClipboard size={16} />
@@ -1022,7 +879,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         </div>
       )}
       
-      {/* ✅ ENHANCED HEADER WITH CONTEXT INFO */}
+      {/* HEADER */}
       <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-b border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -1031,26 +888,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             </div>
             <div>
               <h1 className="text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
-                Nexus AI Assistant
+                AI Assistant
               </h1>
-              <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
-                <span>BLIP • Document Processor • Llama3</span>
-                {/* ✅ NEW: Context indicator */}
-                {contextStats && contextStats[activeSessionId] && (
-                  <>
-                    <span>•</span>
-                    <span className={`${
-                      contextStats[activeSessionId].messageCount > 12 
-                        ? 'text-amber-600 dark:text-amber-400' 
-                        : 'text-blue-600 dark:text-blue-400'
-                    }`}>
-                      Context: {contextStats[activeSessionId].messageCount}/15
-                    </span>
-                    {contextStats[activeSessionId].storageType === 'redis' && (
-                      <span className="text-green-600 dark:text-green-400">• Redis</span>
-                    )}
-                  </>
-                )}
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                <span>Image Analysis • Document Processing • Text Generation</span>
               </div>
             </div>
           </div>
@@ -1070,15 +911,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           </button>
         </div>
       </div>
-
-      {/* ✅ NEW: Context Window Indicator */}
-      {activeSessionId && contextStats && contextStats[activeSessionId] && (
-        <ContextWindowIndicator 
-          sessionId={activeSessionId}
-          contextStats={contextStats[activeSessionId]}
-          onClearContext={handleClearContext}
-        />
-      )}
 
       {/* MESSAGES AREA */}
       <div className="flex-1 overflow-y-auto py-4">
@@ -1104,9 +936,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                   Hello! I'm your AI assistant
                 </h2>
                 <p className="text-gray-600 dark:text-gray-400 leading-relaxed text-sm">
-                  I can analyze images with BLIP, process documents (PDF, DOCX, TXT), and help with general questions using Llama3. 
+                  I can analyze images, process documents (PDF, DOCX, TXT), and help with general questions.
                   <br />
-                  <strong>I'll remember our last 15 messages for better context!</strong>
+                  <strong>I'll remember our conversation context!</strong>
                 </p>
               </div>
             </div>
@@ -1116,7 +948,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             {actualMessages.map((msg, index) => (
               msg.sender === 'AI' ? (
                 <AiMessage
-                  key={`${msg._id}-${msg.renderKey || 0}`} // ✅ Force re-render on key change
+                  key={`${msg._id}-${msg.renderKey || 0}`}
                   message={msg.message}
                   timestamp={msg.timestamp}
                   fileUrl={msg.fileUrl}
@@ -1136,7 +968,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         )}
       </div>
 
-      {/* ✅ ACTIVE FILE CONTEXT BANNER */}
+      {/* ACTIVE FILE CONTEXT BANNER */}
       {activeFileContext && (
         <div className="max-w-4xl mx-auto px-4">
           <div className="flex items-center justify-between bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/30 dark:to-blue-900/30 border border-green-200 dark:border-green-700 rounded-xl px-4 py-2 mb-2 mt-2 relative">
@@ -1149,11 +981,8 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                     <>
                       <IconClipboard size={18} className="text-purple-600 dark:text-purple-400" />
                       <span className="text-sm text-purple-800 dark:text-purple-200 font-medium">
-                        Chat is referencing image:&nbsp;
+                        Referencing image:&nbsp;
                         <span className="font-semibold">{activeFileContext.fileName}</span>
-                        {activeFileContext.imageAnalysis && (
-                          <span className="ml-2 text-xs">• analysis saved</span>
-                        )}
                       </span>
                       {activeFileContext.fileUrl && (
                         <img
@@ -1170,7 +999,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                   <>
                     <IconFileText size={18} className="text-green-600 dark:text-green-400" />
                     <span className="text-sm text-green-800 dark:text-green-200 font-medium">
-                      Chat is referencing document:&nbsp;
+                      Referencing document:&nbsp;
                       <span className="font-semibold">{activeFileContext.fileName}</span>
                     </span>
                   </>
@@ -1188,7 +1017,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         </div>
       )}
 
-      {/* ✅ ENHANCED INPUT AREA WITH CONTEXT AWARENESS */}
+      {/* INPUT AREA */}
       <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-t border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
         <div className="max-w-4xl mx-auto">
           
@@ -1226,9 +1055,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                   <p className="text-xs text-blue-600 dark:text-blue-400">
                     {pastedImage.name} • {(pastedImage.size / 1024).toFixed(1)} KB
                   </p>
-                  <p className="text-xs text-blue-500 dark:text-blue-500 mt-1">
-                    Will be analyzed by BLIP model
-                  </p>
                 </div>
               </div>
             </div>
@@ -1257,9 +1083,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                   </div>
                   <p className="text-xs text-blue-600 dark:text-blue-400">
                     {file.name} • {(file.size / 1024).toFixed(1)} KB
-                  </p>
-                  <p className="text-xs text-blue-500 dark:text-blue-500 mt-1">
-                    Will be analyzed by BLIP model
                   </p>
                 </div>
               </div>
@@ -1305,9 +1128,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                 onChange={handleInputChange}
                 placeholder={listening ? "Listening..." : 
                            pastedImage ? "Add a message (optional)..." : 
-                           activeSessionId && contextStats && contextStats[activeSessionId] && contextStats[activeSessionId].messageCount > 0
-                           ? `Ask me anything (AI remembers last ${contextStats[activeSessionId].messageCount} messages)...`
-                           : "Ask me anything, paste images, or drag & drop documents..."}
+                           "Ask me anything, paste images, or drag & drop documents..."}
                 className="flex-1 bg-transparent border-none outline-none text-gray-800 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-400 text-sm py-1"
                 disabled={isAIStreaming}
               />
@@ -1331,7 +1152,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             </div>
           </form>
 
-          {/* ✅ ENHANCED AI STREAMING INDICATOR WITH CONTEXT INFO */}
+          {/* AI STREAMING INDICATOR */}
           {isAIStreaming && (
             <div className="text-xs text-blue-500 dark:text-blue-400 mt-2 px-2 flex items-center gap-2">
               <div className="typing-indicator">
@@ -1339,13 +1160,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                 <span></span>
                 <span></span>
               </div>
-              <span>
-                AI is responding
-                {activeSessionId && contextStats && contextStats[activeSessionId] && contextStats[activeSessionId].messageCount > 0
-                  ? ` (using ${contextStats[activeSessionId].messageCount} previous messages)...`
-                  : '...'
-                }
-              </span>
+              <span>AI is responding...</span>
             </div>
           )}
         </div>
