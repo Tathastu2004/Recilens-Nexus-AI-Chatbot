@@ -1,63 +1,66 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
-import { useUser } from '../context/UserContext';
+import { useAuth, useUser } from '@clerk/clerk-react';
+
+const allowedAdminEmails = ['apurvsrivastava1510@gmail.com'];
 
 const ProtectedRoute = ({ children, requiredRole, adminOnly = false, clientOnly = false }) => {
-  const { isAuthenticated, user, loading } = useUser();
+  const { isSignedIn, isLoaded } = useAuth();
+  const { user, isLoaded: userLoaded } = useUser();
 
-  // Show loading spinner while checking authentication
-  if (loading) {
+  // Show loading while checking authentication
+  if (!isLoaded || !userLoaded) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="flex flex-col items-center space-y-4">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          <p className="text-gray-600">Loading...</p>
+          <p className="text-gray-600 dark:text-gray-300">Loading...</p>
         </div>
       </div>
     );
   }
 
-  // Check if we have a token in localStorage as backup
-  const token = localStorage.getItem('token');
-  
-  // If not authenticated and no token, redirect to signup
-  if (!isAuthenticated && !token) {
+  // Redirect if not authenticated
+  if (!isSignedIn) {
     return <Navigate to="/signup" replace />;
   }
 
-  // If we have a token but not authenticated yet (still loading user data), show loading
-  if (!isAuthenticated && token) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          <p className="text-gray-600">Verifying authentication...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Check role-based access only if we have user data
+  // Role-based access control
   if (user) {
-    // Admin-only routes: allow admin and super-admin
-    if (adminOnly && !(user.role === 'admin' || user.role === 'super-admin')) {
+    const userEmail = user.emailAddresses?.[0]?.emailAddress;
+    const userRole = allowedAdminEmails.includes(userEmail) ? 'admin' : 'client';
+    
+    console.log('🔐 [PROTECTED ROUTE] Checking access:', {
+      userEmail,
+      userRole,
+      requiredRole,
+      adminOnly,
+      clientOnly
+    });
+
+    // Admin-only routes
+    if (adminOnly && userRole !== 'admin') {
+      console.log('❌ [PROTECTED ROUTE] Access denied - Admin required');
       return <Navigate to="/chat" replace />;
     }
 
     // Client-only routes
-    if (clientOnly && user.role !== 'client') {
-      return <Navigate to="/admin" replace />;
+    if (clientOnly && userRole !== 'client') {
+      console.log('❌ [PROTECTED ROUTE] Access denied - Client required');
+      return <Navigate to="/admin-dashboard" replace />;
     }
 
     // Specific role requirement
-    if (requiredRole && user.role !== requiredRole) {
-      // Redirect based on actual role
-      if (user.role === 'admin' || user.role === 'super-admin') {
-        return <Navigate to="/admin" replace />;
+    if (requiredRole && userRole !== requiredRole) {
+      console.log('❌ [PROTECTED ROUTE] Access denied - Specific role required');
+      if (userRole === 'admin') {
+        return <Navigate to="/admin-dashboard" replace />;
       } else {
         return <Navigate to="/chat" replace />;
       }
     }
+
+    console.log('✅ [PROTECTED ROUTE] Access granted');
   }
 
   return children;

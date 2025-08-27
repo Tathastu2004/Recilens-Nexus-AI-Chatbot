@@ -1,45 +1,45 @@
 import express from 'express';
 import {
-  registerUser,
-  verifyOtp,
-  resendOtp,
-  loginUser,
-  logoutUser,
-  sendPasswordResetOtp,
-  resetPasswordWithOtp,
+  syncClerkUser,
   getUserProfile,
   updateUserProfile
 } from '../controllers/authController.js';
-import { verifyToken } from '../middleware/authMiddleware.js';
+import { verifyToken, attachUserMiddleware } from '../middleware/authMiddleware.js';
 import { uploadProfilePic } from '../middleware/uploadMiddleware.js';
-import {
-  uploadProfilePhoto,
-  getProfilePhoto,
-  deleteProfilePhoto
-} from '../controllers/userPhotoController.js';
 
 const router = express.Router();
 
-router.post('/register', registerUser);
-router.post('/verify-otp', verifyOtp);
-router.post('/resend-otp', resendOtp);
-router.post('/login', loginUser);
-router.post('/logout', logoutUser);
-router.get('/getprofile', verifyToken, getUserProfile);
-router.put('/updateprofile', verifyToken, uploadProfilePic.single('photo'), updateUserProfile);
-router.post('/forgot-password', sendPasswordResetOtp);
-router.post('/reset-password', resetPasswordWithOtp);
+// ✅ WEBHOOK ENDPOINT (NO AUTH REQUIRED)
+router.post('/webhooks/sync-user', syncClerkUser);
 
-// ✅ ADD THIS TEST ROUTE
-router.get('/test-auth', verifyToken, (req, res) => {
+// ✅ PROTECTED ROUTES (REQUIRE CLERK AUTH + USER DATA)
+router.get('/getprofile', verifyToken, attachUserMiddleware, getUserProfile);
+router.put('/updateprofile', verifyToken, attachUserMiddleware, uploadProfilePic.single('photo'), updateUserProfile);
+
+// ✅ TEST ROUTES
+router.get('/test-auth', verifyToken, attachUserMiddleware, (req, res) => {
   res.json({
     success: true,
-    message: 'Token verification successful',
+    message: 'Clerk authentication successful',
     user: {
       id: req.user._id,
       email: req.user.email,
-      role: req.user.role
+      role: req.user.role,
+      clerkId: req.user.clerkUserId,
+      migrated: req.user.migratedToClerk
+    },
+    clerk: {
+      userId: req.auth.userId,
+      sessionId: req.auth.sessionId
     }
+  });
+});
+
+router.get('/test-webhook', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Webhook endpoint is accessible',
+    timestamp: new Date().toISOString()
   });
 });
 

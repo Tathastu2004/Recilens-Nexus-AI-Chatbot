@@ -1,79 +1,50 @@
-// middleware/authMiddleware.js - TRADITIONAL JWT MIDDLEWARE
-import jwt from 'jsonwebtoken';
+import { clerkMiddleware, requireAuth, getAuth } from '@clerk/express';
 import User from '../models/User.js';
 
-export const verifyToken = async (req, res, next) => {
+// 🔐 Admin whitelist
+const allowedAdminEmails = ['apurvsrivastava1510@gmail.com'];
+
+// ✅ CLERK GLOBAL MIDDLEWARE
+export const clerkAuth = clerkMiddleware({
+  debug: process.env.NODE_ENV === 'development'
+});
+
+// ✅ REQUIRE AUTHENTICATION
+export const verifyToken = requireAuth();
+
+// ✅ ATTACH USER MIDDLEWARE (FOR ROUTES THAT NEED USER DATA)
+export const attachUserMiddleware = async (req, res, next) => {
   try {
-    // ✅ GET TOKEN FROM AUTHORIZATION HEADER
-    const authHeader = req.headers.authorization;
-    console.log('🔑 [TRADITIONAL AUTH] Authorization header:', authHeader ? 'Present' : 'Missing');
+    const auth = getAuth(req);
     
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('❌ [TRADITIONAL AUTH] No valid Bearer token found');
+    if (!auth?.userId) {
       return res.status(401).json({
         success: false,
-        message: 'Access denied. No token provided.'
+        message: 'No authenticated user found'
       });
     }
 
-    // ✅ EXTRACT TOKEN
-    const token = authHeader.split(' ')[1];
-    console.log('🔍 [TRADITIONAL AUTH] Token extracted, length:', token?.length || 0);
-
-    if (!token || token === 'undefined' || token === 'null') {
-      console.log('❌ [TRADITIONAL AUTH] Invalid token format');
-      return res.status(401).json({
-        success: false,
-        message: 'Access denied. Invalid token format.'
-      });
-    }
-
-    // ✅ VERIFY JWT TOKEN WITH YOUR SECRET
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('✅ [TRADITIONAL AUTH] Token verified for user:', decoded.userId);
-
-    // ✅ GET USER FROM DATABASE
-    const user = await User.findById(decoded.userId).select('-password');
+    // Find user in MongoDB (should exist due to webhook)
+    const user = await User.findOne({ clerkUserId: auth.userId });
+    
     if (!user) {
-      console.log('❌ [TRADITIONAL AUTH] User not found:', decoded.userId);
-      return res.status(401).json({
+      return res.status(404).json({
         success: false,
-        message: 'Access denied. User not found.'
+        message: 'User not found in database. Please contact support.'
       });
     }
 
-    // ✅ ATTACH USER TO REQUEST
+    // Attach user to request
     req.user = user;
-    req.userId = user._id;
+    req.auth = auth;
     
-    console.log('👤 [TRADITIONAL AUTH] User authenticated:', {
-      id: user._id,
-      email: user.email,
-      role: user.role,
-      authMethod: 'traditional'
-    });
-
     next();
-  } catch (error) {
-    console.error('❌ [TRADITIONAL AUTH] JWT Verification Error:', error.message);
-    
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({
-        success: false,
-        message: 'Access denied. Invalid token.'
-      });
-    }
-    
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({
-        success: false,
-        message: 'Access denied. Token expired.'
-      });
-    }
 
-    return res.status(500).json({
+  } catch (error) {
+    console.error('❌ [ATTACH USER] Error:', error.message);
+    res.status(500).json({
       success: false,
-      message: 'Server error during authentication.'
+      message: 'Server error while fetching user data'
     });
   }
 };

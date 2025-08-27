@@ -1,28 +1,33 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { ClerkProvider } from '@clerk/clerk-react';
+
+// Context Providers
 import { UserProvider } from './context/UserContext';
 import { ChatProvider } from './context/ChatContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { AdminProvider } from './context/AdminContext';
-import { FeedbackProvider } from './context/feedbackContext'; // <-- Import FeedbackProvider
+import { FeedbackProvider } from './context/feedbackContext';
 import { ModelManagementProvider } from './context/ModelContext';
 
+// Components
 import ProtectedRoute from './components/ProtectedRoute';
 
-// Pages & Components
+// Pages
 import SignUpPage from './pages/SignUpPage';
-import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
-import VerifyEmailPage from './pages/VerifyEmailPage.jsx';
 import ChatInterface from './pages/chatInterface';
 import Profile from './pages/Profile';
 import FeedBack from './pages/FeedBack';
-
-
-//admin imports
 import AdminRoutes from './routes/AdminRoutes';
 
+// Clerk configuration
+const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
-// ✅ Keep your existing ErrorBoundary
+if (!PUBLISHABLE_KEY) {
+  throw new Error("Missing Clerk Publishable Key. Add VITE_CLERK_PUBLISHABLE_KEY to your .env file");
+}
+
+// Error Boundary
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -35,15 +40,16 @@ class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('🚨 [ERROR BOUNDARY] Error caught:', error);
-    console.error('🚨 [ERROR BOUNDARY] Error info:', errorInfo);
   }
 
   render() {
     if (this.state.hasError) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
-          <div className="text-center p-8 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700">
-            <h1 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-4">Something went wrong</h1>
+          <div className="text-center p-8 bg-white dark:bg-gray-800 rounded-lg shadow-lg border max-w-md mx-4">
+            <h1 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-4">
+              Something went wrong
+            </h1>
             <p className="text-gray-600 dark:text-gray-400 mb-4">
               {this.state.error?.message || 'An unexpected error occurred'}
             </p>
@@ -65,79 +71,93 @@ class ErrorBoundary extends React.Component {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider>
-        <UserProvider>
-          <ChatProvider>
-            <FeedbackProvider> {/* <-- Wrap your app with FeedbackProvider */}
-              <Router>
-                <div className="App min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300">
-                  <Routes>
-                    {/* Public Routes */}
-                    <Route path="/" element={<Navigate to="/signup" replace />} />
-                    <Route path="/signup" element={<SignUpPage />} />
-                    <Route path="/reset-password" element={<ResetPasswordPage />} />
-                    <Route path="/verify-email" element={<VerifyEmailPage />} />
+      <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
+        <ThemeProvider>
+          <UserProvider>
+            <ChatProvider>
+              <FeedbackProvider>
+                <Router>
+                  <div className="App min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300">
+                    <Routes>
+                      {/* Public Routes */}
+                      <Route path="/" element={<Navigate to="/signup" replace />} />
+                      <Route path="/signup" element={<SignUpPage />} />
+                      
+                      {/* Protected Client Routes */}
+                      <Route
+                        path="/chat"
+                        element={
+                          <ProtectedRoute clientOnly={true}>
+                            <ChatInterface />
+                          </ProtectedRoute>
+                        }
+                      />
+                      
+                      <Route
+                        path="/dashboard"
+                        element={
+                          <ProtectedRoute clientOnly={true}>
+                            <ChatInterface />
+                          </ProtectedRoute>
+                        }
+                      />
 
-                    {/* ✅ Chat Route with ChatProvider */}
-                    <Route
-                      path="/chat"
-                      element={
-                        <ProtectedRoute clientOnly={true}>
-                          <ChatInterface />
-                        </ProtectedRoute>
-                      }
-                    />
+                      {/* Protected User Routes */}
+                      <Route
+                        path="/profile"
+                        element={
+                          <ProtectedRoute>
+                            <Profile />
+                          </ProtectedRoute>
+                        }
+                      />
 
-                    {/* ✅ Optional: Dashboard route */}
-                    <Route
-                      path="/dashboard"
-                      element={
-                        <ProtectedRoute clientOnly={true}>
-                          <ChatInterface />
-                        </ProtectedRoute>
-                      }
-                    />
+                      <Route
+                        path="/feedback"
+                        element={
+                          <ProtectedRoute>
+                            <FeedBack />
+                          </ProtectedRoute>
+                        }
+                      />
 
-                    {/* Profile Page */}
-                    <Route
-                      path="/profile"
-                      element={
-                        <ProtectedRoute>
-                          <Profile />
-                        </ProtectedRoute>
-                      }
-                    />
-                    <Route
-                      path="/feedback"
-                      element={
-                        <ProtectedRoute>
-                          <FeedBack />
-                        </ProtectedRoute>
-                      }
-                    />
+                      {/* Protected Admin Routes */}
+                      <Route
+                        path="/admin/*"
+                        element={
+                          <ProtectedRoute adminOnly={true}>
+                            <AdminProvider>
+                              <ModelManagementProvider>
+                                <AdminRoutes />
+                              </ModelManagementProvider>
+                            </AdminProvider>
+                          </ProtectedRoute>
+                        }
+                      />
 
-                    {/* ✅ Wrap AdminRoutes inside AdminProvider */}
-                    <Route
-                      path="/*"
-                      element={
-                        <ProtectedRoute adminOnly={true}>
-                          <AdminProvider>
-                            <ModelManagementProvider>
-                            <AdminRoutes />
-                            </ModelManagementProvider>
-                          </AdminProvider>
-                        </ProtectedRoute>
-                      }
-                    />
-                    {/* Fallback route */}
-                    <Route path="*" element={<Navigate to="/signup" replace />} />
-                  </Routes>
-                </div>
-              </Router>
-            </FeedbackProvider>
-          </ChatProvider>
-        </UserProvider>
-      </ThemeProvider>
+                      <Route
+                        path="/admin-dashboard"
+                        element={
+                          <ProtectedRoute adminOnly={true}>
+                            <AdminProvider>
+                              <ModelManagementProvider>
+                                <AdminRoutes />
+                              </ModelManagementProvider>
+                            </AdminProvider>
+                          </ProtectedRoute>
+                        }
+                      />
+
+                      {/* Fallback */}
+                      <Route path="*" element={<Navigate to="/signup" replace />} />
+                    </Routes>
+                  </div>
+                </Router>
+              </FeedbackProvider>
+            </ChatProvider>
+          </UserProvider>
+        </ThemeProvider>
+      </ClerkProvider>
     </ErrorBoundary>
   );
 }

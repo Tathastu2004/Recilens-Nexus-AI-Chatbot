@@ -1,16 +1,15 @@
 import express from 'express';
+import { clerkMiddleware } from '@clerk/express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import compression from 'compression';
-import http from 'http';
 
 import './config/cloudinary.js';
 import connectDB from './config/mongodb.js';
 import authRoutes from './routes/authRoutes.js';
-
 import userRoutes from './routes/userRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
 import adminRoutes from './admin/routes/adminRoutes.js';
@@ -37,11 +36,17 @@ if (!fs.existsSync('/tmp')) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ✅ CLERK MIDDLEWARE (GLOBAL) - MUST BE FIRST
+app.use(clerkMiddleware());
+
+// ✅ CORS CONFIGURATION
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true
+}));
+
 // ✅ Apply compression
 app.use(compression({ threshold: 0 }));
-
-// ✅ Create HTTP server
-const server = http.createServer(app);
 
 // ✅ MongoDB connection
 if (!process.env.MONGO_URI) {
@@ -50,16 +55,9 @@ if (!process.env.MONGO_URI) {
 }
 connectDB();
 
-// ✅ Middlewares
-app.use(cors());
-app.use(express.json({ 
-  limit: '50mb',  // ✅ Increase from default 100kb to 50MB
-  extended: true 
-}));
-app.use(express.urlencoded({ 
-  limit: '50mb',  // ✅ Increase from default 100kb to 50MB
-  extended: true 
-}));
+// ✅ BODY PARSING (IMPORTANT: AFTER CORS)
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ✅ Serve uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -69,12 +67,12 @@ app.use('/uploads', (req, res, next) => {
   next();
 });
 
-// ✅ Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'ok', 
+// ✅ HEALTH CHECK
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
     timestamp: new Date().toISOString(),
-    server: 'running'
+    environment: process.env.NODE_ENV 
   });
 });
 
@@ -83,14 +81,29 @@ app.get('/', (req, res) => {
   res.send('Welcome to the Recilens Nexus AI Chatbot Backend!');
 });
 app.use('/api/auth', authRoutes);
-
 app.use('/api/admin', adminRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/chat', chatRoutes);
-app.use("/api/admin", adminRoutes);
 app.use("/api/feedback", feedbackRoutes);
 
-// ✅ Launch server (HTTP only — no Socket.IO)
-server.listen(PORT, () => {
-  console.log(`✅ Server is running on port ${PORT}`);
+// ✅ ERROR HANDLING
+app.use((error, req, res, next) => {
+  console.error('Server Error:', error.message);
+  res.status(500).json({
+    success: false,
+    message: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+  });
+});
+
+// ✅ 404 HANDLER
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Route not found'
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`📡 Webhook endpoint: http://localhost:${PORT}/api/auth/webhooks/sync`);
 });
