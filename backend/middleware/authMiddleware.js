@@ -1,50 +1,100 @@
+// middleware/authMiddleware.js - TRADITIONAL JWT MIDDLEWARE
 import jwt from 'jsonwebtoken';
-import dotenv from 'dotenv';
 import User from '../models/User.js';
-dotenv.config();
 
 export const verifyToken = async (req, res, next) => {
-  console.log('JWT_SECRET:', process.env.JWT_SECRET); // ✅ Log 1
-
-  const authHeader = req.headers.authorization;
-  console.log('authHeader:', authHeader); // ✅ Log 1
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'Unauthorized: No token provided' });
-  }
-
-  const token = authHeader.split(' ')[1];
-  console.log('Extracted Token:', token); // ✅ Log 2
-
   try {
+    // ✅ GET TOKEN FROM AUTHORIZATION HEADER
+    const authHeader = req.headers.authorization;
+    console.log('🔑 [TRADITIONAL AUTH] Authorization header:', authHeader ? 'Present' : 'Missing');
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.log('❌ [TRADITIONAL AUTH] No valid Bearer token found');
+      return res.status(401).json({
+        success: false,
+        message: 'Access denied. No token provided.'
+      });
+    }
+
+    // ✅ EXTRACT TOKEN
+    const token = authHeader.split(' ')[1];
+    console.log('🔍 [TRADITIONAL AUTH] Token extracted, length:', token?.length || 0);
+
+    if (!token || token === 'undefined' || token === 'null') {
+      console.log('❌ [TRADITIONAL AUTH] Invalid token format');
+      return res.status(401).json({
+        success: false,
+        message: 'Access denied. Invalid token format.'
+      });
+    }
+
+    // ✅ VERIFY JWT TOKEN WITH YOUR SECRET
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('Token Decoded:', decoded); // ✅ Log 3
+    console.log('✅ [TRADITIONAL AUTH] Token verified for user:', decoded.userId);
 
-    const user = await User.findById(decoded.userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    // ✅ GET USER FROM DATABASE
+    const user = await User.findById(decoded.userId).select('-password');
+    if (!user) {
+      console.log('❌ [TRADITIONAL AUTH] User not found:', decoded.userId);
+      return res.status(401).json({
+        success: false,
+        message: 'Access denied. User not found.'
+      });
+    }
 
+    // ✅ ATTACH USER TO REQUEST
     req.user = user;
+    req.userId = user._id;
+    
+    console.log('👤 [TRADITIONAL AUTH] User authenticated:', {
+      id: user._id,
+      email: user.email,
+      role: user.role,
+      authMethod: 'traditional'
+    });
+
     next();
-  } catch (err) {
-    console.error('JWT Verification Error:', err.message); // ✅ Log 4
-    return res.status(403).json({ message: 'Invalid or expired token' });
+  } catch (error) {
+    console.error('❌ [TRADITIONAL AUTH] JWT Verification Error:', error.message);
+    
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Access denied. Invalid token.'
+      });
+    }
+    
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Access denied. Token expired.'
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: 'Server error during authentication.'
+    });
   }
 };
 
-
-// Middleware for role: admin only
+// ✅ ROLE-BASED MIDDLEWARE
 export const requireAdmin = (req, res, next) => {
-  if (!req.user || req.user.role !== 'admin' && req.user.role !== 'super-admin') {
-    return res.status(403).json({ message: 'Access denied: Admins only' });
+  if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'super-admin')) {
+    return res.status(403).json({ 
+      success: false, 
+      message: 'Access denied: Admin privileges required' 
+    });
   }
   next();
 };
 
-// Middleware for role: client only (optional)
 export const requireClient = (req, res, next) => {
   if (!req.user || req.user.role !== 'client') {
-    return res.status(403).json({ message: 'Access denied: Clients only' });
+    return res.status(403).json({ 
+      success: false, 
+      message: 'Access denied: Client role required' 
+    });
   }
   next();
 };
-

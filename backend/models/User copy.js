@@ -3,7 +3,6 @@ import mongoose from 'mongoose';
 const userSchema = new mongoose.Schema({
   name: { type: String, required: false },
   email: { type: String, required: true, unique: true },
-  clerkId: { type: String, unique: true, sparse: true },
   password: String,
   role: { type: String, enum: ['admin', 'client' , 'super-admin'], default: 'client' },
   // Email verification fields
@@ -15,10 +14,8 @@ const userSchema = new mongoose.Schema({
   passwordResetOtpExpires: Date,
   profilePicture: { type: String, default: '' }, // file path or URL
 
-
 }, {
   timestamps: true
 });
-userSchema.index({ clerkId: 1 }, { unique: true, sparse: true });
-userSchema.index({ email: 1 }, { unique: true });
+
 export default mongoose.model('User', userSchema);
