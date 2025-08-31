@@ -18,8 +18,9 @@ import { cn } from "../lib/utils.js";
 import { useClerkUser } from "../context/ClerkUserContext";
 import { useChat } from "../context/ChatContext.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
+import { useAuth } from '@clerk/clerk-react'; // ✅ ADD CLERK AUTH
 
-// ✅ UTILITY FUNCTIONS
+// ✅ UTILITY FUNCTIONS (unchanged)
 const formatChatTitle = (chat) => {
   if (!chat) return "New Chat";
   
@@ -63,7 +64,7 @@ const formatDate = (dateString) => {
   return date.toLocaleDateString();
 };
 
-// ✅ STABLE DELETE CONFIRMATION DIALOG
+// ✅ DELETE CONFIRMATION DIALOG (unchanged)
 const DeleteConfirmationDialog = ({ isOpen, onConfirm, onCancel, isDark, chatTitle }) => {
   if (!isOpen) return null;
 
@@ -125,6 +126,7 @@ const DeleteConfirmationDialog = ({ isOpen, onConfirm, onCancel, isDark, chatTit
 const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete }) => {
   const [chats, setChats] = useState([]);
   const { clerkUser, dbUser, loading, isAuthenticated } = useClerkUser();
+  const { getToken } = useAuth(); // ✅ USE CLERK AUTH
   const { isDark } = useTheme();
   
   const user = dbUser || {
@@ -137,21 +139,21 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
 
   const navigate = useNavigate();
   
-  // ✅ FIX: STABLE SIDEBAR STATE WITH DEBOUNCING
+  // State management (unchanged)
   const [isOpen, setIsOpen] = useState(true);
   const [hoveredChat, setHoveredChat] = useState(null);
   const [deletingChat, setDeletingChat] = useState(null);
   const [creatingChat, setCreatingChat] = useState(false);
   const [error, setError] = useState(null);
   
-  // ✅ DEBOUNCING AND STABILITY REFS
+  // Refs (unchanged)
   const operationInProgress = useRef(false);
   const hoverTimeoutRef = useRef(null);
   const stateChangeTimeoutRef = useRef(null);
   const isHoveringRef = useRef(false);
   const lastStateChangeRef = useRef(Date.now());
 
-  // ✅ DELETE DIALOG STATE
+  // Delete dialog state (unchanged)
   const [deleteDialog, setDeleteDialog] = useState({
     isOpen: false,
     chatId: null,
@@ -159,9 +161,20 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
   });
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
-  const token = localStorage.getItem("token");
 
-  // ✅ STABLE LOGOUT FUNCTION
+  // ✅ GET CLERK TOKEN HELPER
+  const getAuthToken = useCallback(async () => {
+    try {
+      const token = await getToken();
+      console.log('🔑 [SIDEBAR] Got Clerk token:', token ? 'Present' : 'Missing');
+      return token;
+    } catch (error) {
+      console.error('❌ [SIDEBAR] Failed to get Clerk token:', error);
+      return null;
+    }
+  }, [getToken]);
+
+  // ✅ STABLE LOGOUT FUNCTION (unchanged)
   const logoutUser = async () => {
     try {
       localStorage.clear();
@@ -177,7 +190,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     }
   };
 
-  // ✅ CHAT CONTEXT INTEGRATION (STABLE)
+  // Chat context integration (unchanged)
   let chatContext = null;
   let chatContextAvailable = false;
 
@@ -198,11 +211,10 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     debug
   } = chatContext || {};
 
-  // ✅ STABLE SIDEBAR TOGGLE WITH DEBOUNCING
+  // Sidebar toggle handlers (unchanged)
   const handleSidebarToggle = useCallback((newState, immediate = false) => {
     const now = Date.now();
     
-    // ✅ PREVENT RAPID STATE CHANGES
     if (!immediate && now - lastStateChangeRef.current < 150) {
       return;
     }
@@ -222,7 +234,6 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     }
   }, []);
 
-  // ✅ STABLE HOVER HANDLERS WITH DEBOUNCING
   const handleMouseEnter = useCallback(() => {
     isHoveringRef.current = true;
     
@@ -251,7 +262,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     }, 200);
   }, [handleSidebarToggle]);
 
-  // ✅ CLEANUP TIMEOUTS
+  // Cleanup timeouts (unchanged)
   useEffect(() => {
     return () => {
       if (hoverTimeoutRef.current) {
@@ -263,25 +274,29 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     };
   }, []);
 
-  // ✅ STABLE FETCH CHATS FUNCTION
+  // ✅ FIXED FETCH CHATS FUNCTION - USE CLERK TOKEN
   const fetchChats = useCallback(async (useCache = true) => {
     if (operationInProgress.current) return;
     
     try {
       setError(null);
       
+      const token = await getAuthToken(); // ✅ USE CLERK TOKEN
       if (!token) {
-        console.warn("⚠️ [SIDEBAR] No authentication token found");
+        console.warn("⚠️ [SIDEBAR] No Clerk token available");
+        setError("Authentication required. Please sign in again.");
         setChats([]);
         return;
       }
+
+      console.log('📤 [SIDEBAR] Fetching sessions with Clerk token...');
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       const res = await fetch(`${backendUrl}/api/chat/sessions`, {
         headers: { 
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token}`, // ✅ USE CLERK TOKEN
           "Content-Type": "application/json"
         },
         cache: useCache ? 'default' : 'no-cache',
@@ -290,7 +305,16 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
 
       clearTimeout(timeoutId);
 
+      console.log('📥 [SIDEBAR] Response status:', res.status);
+
       if (!res.ok) {
+        if (res.status === 401) {
+          setError("Session expired. Please sign in again.");
+          // Clear local storage and redirect
+          localStorage.clear();
+          navigate('/signup');
+          return;
+        }
         throw new Error(`Failed to load chats (${res.status})`);
       }
 
@@ -301,6 +325,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
           new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)
         );
         setChats(sortedChats);
+        console.log('✅ [SIDEBAR] Loaded', sortedChats.length, 'chat sessions');
       } else {
         setChats([]);
       }
@@ -309,21 +334,28 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
       
       if (error.name === 'AbortError') {
         setError('Request timed out. Please check your connection.');
+      } else if (error.message.includes('401')) {
+        setError('Session expired. Please sign in again.');
+        localStorage.clear();
+        navigate('/signup');
       } else {
         setError(error.message || 'Failed to load chats');
       }
       setChats([]);
     }
-  }, [backendUrl, token]);
+  }, [backendUrl, getAuthToken, navigate]);
 
-  // ✅ SINGLE EFFECT FOR INITIAL FETCH
+  // ✅ EFFECT FOR INITIAL FETCH - WAIT FOR AUTHENTICATION
   useEffect(() => {
-    if (isAuthenticated && token) {
+    if (isAuthenticated && clerkUser) {
+      console.log('🔄 [SIDEBAR] User authenticated, fetching chats...');
       fetchChats();
+    } else {
+      console.log('⏳ [SIDEBAR] Waiting for authentication...', { isAuthenticated, hasClerkUser: !!clerkUser });
     }
-  }, [isAuthenticated, token, fetchChats]);
+  }, [isAuthenticated, clerkUser, fetchChats]);
 
-  // ✅ STABLE NEW CHAT CREATION
+  // ✅ FIXED NEW CHAT CREATION - USE CLERK TOKEN
   const handleNewChat = useCallback(async () => {
     if (operationInProgress.current || creatingChat) {
       return;
@@ -334,20 +366,26 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
       setCreatingChat(true);
       setError(null);
 
+      const token = await getAuthToken(); // ✅ USE CLERK TOKEN
       if (!token) {
-        throw new Error("No authentication token found");
+        throw new Error("Authentication required. Please sign in again.");
       }
+
+      console.log('🆕 [SIDEBAR] Creating new chat with Clerk token...');
 
       const res = await fetch(`${backendUrl}/api/chat/session`, {
         method: 'POST',
         headers: { 
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token}`, // ✅ USE CLERK TOKEN
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ title: "New Chat" })
       });
 
       if (!res.ok) {
+        if (res.status === 401) {
+          throw new Error("Session expired. Please sign in again.");
+        }
         throw new Error(`Failed to create session (${res.status})`);
       }
 
@@ -371,17 +409,25 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
         onSelectSession(newSession._id);
       }
       
+      console.log('✅ [SIDEBAR] New chat created:', newSession._id);
+      
     } catch (err) {
       console.error("❌ [SIDEBAR] Failed to create chat:", err.message);
-      setError(`Failed to create new chat: ${err.message}`);
+      if (err.message.includes('401') || err.message.includes('Authentication')) {
+        setError("Session expired. Please sign in again.");
+        localStorage.clear();
+        navigate('/signup');
+      } else {
+        setError(`Failed to create new chat: ${err.message}`);
+      }
       
     } finally {
       operationInProgress.current = false;
       setCreatingChat(false);
     }
-  }, [backendUrl, token, chatContextAvailable, setSession, onSelectSession]);
+  }, [backendUrl, getAuthToken, chatContextAvailable, setSession, onSelectSession, navigate]);
 
-  // ✅ STABLE DELETE DIALOG HANDLERS
+  // Delete dialog handlers (unchanged)
   const openDeleteDialog = useCallback((chatId, chatTitle) => {
     setDeleteDialog({
       isOpen: true,
@@ -398,7 +444,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     });
   }, []);
 
-  // ✅ STABLE DELETE CHAT FUNCTION
+  // ✅ FIXED DELETE CHAT FUNCTION - USE CLERK TOKEN
   const handleDeleteChat = useCallback(async () => {
     const { chatId } = deleteDialog;
     
@@ -411,10 +457,12 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
       setDeletingChat(chatId);
       setError(null);
       
+      const token = await getAuthToken(); // ✅ USE CLERK TOKEN
       if (!token) {
-        throw new Error("No authentication token found");
+        throw new Error("Authentication required. Please sign in again.");
       }
 
+      // Optimistically remove from UI
       setChats((prev) => prev.filter(chat => chat._id !== chatId));
       
       if (chatContextAvailable && currentSessionId === chatId) {
@@ -428,28 +476,40 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
       const res = await fetch(`${backendUrl}/api/chat/session/${chatId}`, {
         method: 'DELETE',
         headers: { 
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token}`, // ✅ USE CLERK TOKEN
           "Content-Type": "application/json"
         }
       });
 
       if (!res.ok) {
+        if (res.status === 401) {
+          throw new Error("Session expired. Please sign in again.");
+        }
         throw new Error(`Failed to delete session (${res.status})`);
       }
       
+      console.log('✅ [SIDEBAR] Chat deleted:', chatId);
+      
     } catch (err) {
       console.error("❌ [SIDEBAR] Failed to delete chat:", err.message);
-      setError(`Failed to delete chat: ${err.message}`);
-      fetchChats(false);
+      if (err.message.includes('401') || err.message.includes('Authentication')) {
+        setError("Session expired. Please sign in again.");
+        localStorage.clear();
+        navigate('/signup');
+      } else {
+        setError(`Failed to delete chat: ${err.message}`);
+        // Restore the chat list on error
+        fetchChats(false);
+      }
       
     } finally {
       operationInProgress.current = false;
       setDeletingChat(null);
       closeDeleteDialog();
     }
-  }, [deleteDialog, token, backendUrl, currentSessionId, selectedSessionId, chatContextAvailable, setSession, onSessionDelete, fetchChats, closeDeleteDialog]);
+  }, [deleteDialog, getAuthToken, backendUrl, currentSessionId, selectedSessionId, chatContextAvailable, setSession, onSessionDelete, fetchChats, closeDeleteDialog, navigate]);
 
-  // ✅ STABLE CHAT SELECTION
+  // Rest of the handlers (unchanged)
   const handleSelectChat = useCallback((sessionId) => {
     if (operationInProgress.current) return;
     
@@ -462,7 +522,6 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     }
   }, [chatContextAvailable, setSession, onSelectSession]);
 
-  // ✅ STABLE LOGOUT HANDLER
   const handleLogout = useCallback(async () => {
     try {
       const result = await logoutUser();
@@ -473,7 +532,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     }
   }, [navigate]);
 
-  // ✅ STABLE LINKS DEFINITION
+  // Links definition (unchanged)
   const links = [
     {
       label: creatingChat ? "Creating..." : "New Chat",
@@ -514,7 +573,6 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     },
   ];
 
-  // ✅ STABLE PROFILE PICTURE HANDLER
   const getProfilePictureUrl = useCallback(() => {
     if (!user?.profilePicture) return "https://assets.aceternity.com/manu.png";
     if (user.profilePicture.startsWith("http")) return user.profilePicture;
@@ -522,7 +580,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     return `${baseUrl}${user.profilePicture}`;
   }, [user?.profilePicture]);
 
-  // ✅ LOADING STATE
+  // Loading state
   if (loading && !user?._id && !clerkUser?.id) {
     return (
       <div className={`h-screen w-[280px] flex items-center justify-center ${
@@ -540,9 +598,10 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     );
   }
 
+  // Rest of the render method stays the same...
   return (
     <>
-      {/* ✅ FIXED SIDEBAR CONTAINER - STABLE HOVER BEHAVIOR */}
+      {/* ✅ SIDEBAR CONTAINER - UNCHANGED */}
       <div 
         className={`h-screen transition-all duration-300 ease-in-out ${  
           isOpen ? 'w-[280px]' : 'w-[70px]'
@@ -560,7 +619,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
             : 'bg-gradient-to-b from-white via-gray-50 to-gray-100 border-r border-gray-200'
         } overflow-hidden`}>
           <div className="flex flex-1 flex-col overflow-hidden">
-            {/* ✅ LOGO */}
+            {/* Logo section unchanged */}
             <div className={`relative z-20 flex items-center py-6 text-sm font-normal transition-all duration-300 ${
               isOpen ? 'justify-start px-6' : 'justify-center px-3'
             }`}>
@@ -598,7 +657,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
               </Link>
             </div>
 
-            {/* ✅ NEW CHAT BUTTON */}
+            {/* New Chat Button and Connection Status */}
             <div className={`mb-6 transition-all duration-300 ${
               isOpen ? 'px-6' : 'px-3'
             }`}>
@@ -636,7 +695,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
                   </button>
                 </div>
                 
-                {/* CONNECTION STATUS */}
+                {/* Connection Status */}
                 {chatContextAvailable && isOpen && (
                   <motion.div 
                     initial={{ opacity: 0, width: 0 }}
@@ -658,7 +717,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
                 )}
               </div>
               
-              {/* ERROR DISPLAY */}
+              {/* Error Display */}
               {error && isOpen && (
                 <motion.div 
                   initial={{ opacity: 0, height: 0 }}
@@ -739,16 +798,28 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
                               <IconBolt size={8} className="text-white" />
                             </div>
                           </div>
-                          <div className={`text-sm font-medium mb-2 ${
-                            isDark ? 'text-gray-300' : 'text-gray-700'
+                          <h3 className={`text-base font-bold mb-2 ${
+                            isDark 
+                              ? 'bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent' 
+                              : 'bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent'
                           }`}>
                             Ready to Chat!
-                          </div>
-                          <div className={`text-xs ${
-                            isDark ? 'text-gray-500' : 'text-gray-500'
+                          </h3>
+                          <p className={`text-sm mb-4 leading-relaxed ${
+                            isDark ? 'text-gray-400' : 'text-gray-600'
                           }`}>
-                            Start your first conversation
-                          </div>
+                            No conversations yet. Start your first AI chat session and explore the possibilities.
+                          </p>
+                          <button
+                            onClick={handleNewChat}
+                            className={`px-4 py-2 rounded-xl font-medium transition-all duration-200 ${
+                              isDark 
+                                ? 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white' 
+                                : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
+                            } shadow-lg hover:shadow-xl transform hover:scale-105`}
+                          >
+                            Start New Chat
+                          </button>
                         </div>
                       ) : (
                         chats.map((chat) => {
@@ -894,7 +965,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
               )}
             </div>
 
-            {/* ✅ NAVIGATION LINKS */}
+            {/* Navigation Links */}
             <div className={`mt-auto pt-6 border-t transition-all duration-300 ${
               isOpen ? 'px-6' : 'px-3'
             } ${isDark ? 'border-gray-700/50' : 'border-gray-200'}`}>
@@ -932,7 +1003,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
             </div>
           </div>
 
-          {/* ✅ USER PROFILE SECTION */}
+          {/* User Profile Section */}
           <div className={`border-t pt-5 pb-3 transition-all duration-300 ${
             isOpen ? 'px-6' : 'px-3'
           } ${isDark ? 'border-gray-700/50' : 'border-gray-200'} flex ${
@@ -995,7 +1066,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
         </div>
       </div>
 
-      {/* ✅ DELETE CONFIRMATION DIALOG */}
+      {/* Delete Confirmation Dialog */}
       <DeleteConfirmationDialog
         isOpen={deleteDialog.isOpen}
         onConfirm={handleDeleteChat}

@@ -9,16 +9,34 @@ import axios from "axios";
 import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 import { useChat } from '../context/ChatContext';
 import { useTheme } from '../context/ThemeContext';
+import { useAuth } from '@clerk/clerk-react'; // ✅ ADD CLERK AUTH
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import '../styles/animations.css';
 
 const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) => {
-  // Constants and token
+  // ✅ CLERK AUTH INTEGRATION
+  const { getToken, userId: clerkUserId, isSignedIn } = useAuth();
+  
+  // Constants
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
-  const token = localStorage.getItem("token");
-  const userId = JSON.parse(localStorage.getItem("user"))?._id;
+
+  // ✅ GET CLERK TOKEN HELPER
+  const getAuthToken = useCallback(async () => {
+    if (!isSignedIn) {
+      console.warn('⚠️ [CHAT DASHBOARD] User not signed in');
+      return null;
+    }
+    try {
+      const token = await getToken();
+      console.log('🔑 [CHAT DASHBOARD] Got Clerk token:', token ? 'Present' : 'Missing');
+      return token;
+    } catch (error) {
+      console.error('❌ [CHAT DASHBOARD] Failed to get Clerk token:', error);
+      return null;
+    }
+  }, [getToken, isSignedIn]);
 
   // THEME CONTEXT
   const { theme, isDark, toggleTheme, isTransitioning } = useTheme();
@@ -307,15 +325,23 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     };
   }, [handlePaste, handleKeyDown, handleDragOver, handleDragLeave, handleDrop]);
 
-  // FALLBACK FETCH FUNCTION
+  // ✅ UPDATED FALLBACK FETCH FUNCTION WITH CLERK TOKEN
   const fetchMessagesViaHTTP = useCallback(async (sessionId) => {
-    if (!sessionId || !token) return [];
+    if (!sessionId) return [];
+    
     try {
       setIsFetchingFallback(true);
+      const token = await getAuthToken(); // ✅ USE CLERK TOKEN
+      if (!token) {
+        console.warn('⚠️ [FETCH] No auth token available');
+        return [];
+      }
+
       const response = await axios.get(`${backendUrl}/api/chat/session/${sessionId}/messages`, {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         timeout: 15000
       });
+      
       if (response.data.success) {
         const messages = response.data.messages || [];
         setFallbackMessages(messages);
@@ -326,13 +352,14 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         return [];
       }
     } catch (error) {
+      console.error('❌ [FETCH] Error fetching messages:', error);
       setFallbackMessages([]);
       if (chatContextAvailable && reconnect) reconnect();
       return [];
     } finally {
       setIsFetchingFallback(false);
     }
-  }, [backendUrl, token, chatContextAvailable, reconnect, setSessionMessages]);
+  }, [backendUrl, getAuthToken, chatContextAvailable, reconnect, setSessionMessages]);
 
   // ENHANCED INITIALIZE SESSION WITH CONTEXT STATS
   useEffect(() => {
@@ -570,22 +597,30 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   }, [listening]);
 
-  // ENHANCED FILE UPLOAD HANDLER WITH IMAGE CONTEXT
+  // ✅ ENHANCED FILE UPLOAD HANDLER WITH CLERK TOKEN
   const handleFileSelect = async (e) => {
     const selectedFile = e.target.files[0];
     if (!selectedFile) return;
+    
     setFile(selectedFile);
     setIsUploading(true);
     setFileValidationError(null);
     setUploadProgress(0);
     
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-    
     try {
+      const token = await getAuthToken(); // ✅ USE CLERK TOKEN
+      if (!token) {
+        setFileValidationError('Authentication required. Please sign in again.');
+        setIsUploading(false);
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      
       const response = await axios.post(`${backendUrl}/api/chat/upload`, formData, {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${token}`, // ✅ USE CLERK TOKEN
           'Content-Type': 'multipart/form-data',
         },
         onUploadProgress: (progressEvent) => {
@@ -615,14 +650,19 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       }
       
     } catch (error) {
-      setFileValidationError('File upload failed. Please try again.');
+      console.error('❌ [FILE UPLOAD] Error:', error);
+      if (error.response?.status === 401) {
+        setFileValidationError('Session expired. Please sign in again.');
+      } else {
+        setFileValidationError('File upload failed. Please try again.');
+      }
       setFile(null);
     } finally {
       setIsUploading(false);
     }
   };
 
-  // ENHANCED HANDLE SUBMIT WITH CONTEXT SUPPORT
+  // ✅ ENHANCED HANDLE SUBMIT WITH CLERK TOKEN
   const handleSubmit = async (e) => {
     e.preventDefault();
     setInput("");
@@ -631,12 +671,19 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     // Handle pasted image upload
     let pastedImageUploadResult = null;
     if (pastedImage) {
-      const formData = new FormData();
-      formData.append('file', pastedImage);
       try {
+        const token = await getAuthToken(); // ✅ USE CLERK TOKEN
+        if (!token) {
+          setFileValidationError('Authentication required. Please sign in again.');
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', pastedImage);
+        
         const response = await axios.post(`${backendUrl}/api/chat/upload`, formData, {
           headers: {
-            'Authorization': `Bearer ${token}`,
+            'Authorization': `Bearer ${token}`, // ✅ USE CLERK TOKEN
             'Content-Type': 'multipart/form-data',
           }
         });
@@ -646,7 +693,12 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         setPastePreview(null);
         setFile(null);
       } catch (error) {
-        setFileValidationError('Failed to upload pasted image. Please try again.');
+        console.error('❌ [PASTED IMAGE UPLOAD] Error:', error);
+        if (error.response?.status === 401) {
+          setFileValidationError('Session expired. Please sign in again.');
+        } else {
+          setFileValidationError('Failed to upload pasted image. Please try again.');
+        }
         return;
       }
     }
@@ -725,7 +777,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     // Optimistically add user message
     const optimisticUserMsg = {
       _id: `user-${Date.now()}`,
-      sender: userId,
+      sender: clerkUserId, // ✅ USE CLERK USER ID
       message: finalInput,
       timestamp: new Date().toISOString(),
       fileUrl: fileContext?.fileUrl || null,
@@ -766,8 +818,15 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       if (sendMessage) {
         response = await sendMessage(messageData);
       } else {
+        // ✅ FALLBACK HTTP REQUEST WITH CLERK TOKEN
+        const token = await getAuthToken();
+        if (!token) {
+          setFileValidationError('Authentication required. Please sign in again.');
+          return;
+        }
+
         response = await axios.post(`${backendUrl}/api/chat/send`, messageData, {
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: { 'Authorization': `Bearer ${token}` } // ✅ USE CLERK TOKEN
         });
       }
 
@@ -792,7 +851,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         }
       }
 
-      // UPDATE SESSION TITLE WITH FIRST MESSAGE
+      // ✅ UPDATE SESSION TITLE WITH FIRST MESSAGE (WITH CLERK TOKEN)
       const sessionMessages = getCurrentSessionMessages ? getCurrentSessionMessages() : [];
       const userMessages = sessionMessages.filter(msg => msg.sender !== 'AI' && msg.sender !== 'ai');
 
@@ -802,25 +861,32 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           : finalInput;
         
         try {
-          await axios.patch(`${backendUrl}/api/chat/session/${activeSessionId}`, {
-            title: titleText
-          }, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          
-          // Dispatch event to update UI
-          window.dispatchEvent(new CustomEvent('sessionTitleUpdated', {
-            detail: { sessionId: activeSessionId, title: titleText }
-          }));
-          
-          console.log('✅ [TITLE UPDATE] Session title updated to:', titleText);
+          const token = await getAuthToken(); // ✅ USE CLERK TOKEN
+          if (token) {
+            await axios.patch(`${backendUrl}/api/chat/session/${activeSessionId}`, {
+              title: titleText
+            }, {
+              headers: { 'Authorization': `Bearer ${token}` } // ✅ USE CLERK TOKEN
+            });
+            
+            // Dispatch event to update UI
+            window.dispatchEvent(new CustomEvent('sessionTitleUpdated', {
+              detail: { sessionId: activeSessionId, title: titleText }
+            }));
+            
+            console.log('✅ [TITLE UPDATE] Session title updated to:', titleText);
+          }
         } catch (titleError) {
           console.warn('⚠️ [TITLE UPDATE] Failed to update session title:', titleError);
         }
       }
     } catch (error) {
       console.error('❌ [FRONTEND] Send message error:', error);
-      setFileValidationError('Failed to send message. Please try again.');
+      if (error.response?.status === 401) {
+        setFileValidationError('Session expired. Please sign in again.');
+      } else {
+        setFileValidationError('Failed to send message. Please try again.');
+      }
     } finally {
       setFile(null);
       setUploadResult(null);
@@ -841,6 +907,25 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       setInput(transcript);
     }
   }, [transcript, listening, isManuallyEditing, hasStoppedListening]);
+
+  // ✅ EARLY RETURN IF NOT SIGNED IN
+  if (!isSignedIn) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center space-y-4">
+          <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-xl mx-auto">
+            <IconRobot size={32} className="text-white" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-800 dark:text-gray-200">
+            Authentication Required
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400">
+            Please sign in to access the chat dashboard.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // MAIN RENDER
   return (
