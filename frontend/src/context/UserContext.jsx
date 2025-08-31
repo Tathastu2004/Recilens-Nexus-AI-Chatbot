@@ -500,7 +500,7 @@ export const UserProvider = ({ children }) => {
 
         // ✅ VERIFY TOKEN WITH PROFILE ENDPOINT
         try {
-          const response = await axios.get(`${backendUrl}/api/auth/getprofile`, {
+          const response = await axios.get(`${backendUrl}/api/auth/profile`, {
             headers: { 
               Authorization: `Bearer ${token}`,
               'Content-Type': 'application/json'

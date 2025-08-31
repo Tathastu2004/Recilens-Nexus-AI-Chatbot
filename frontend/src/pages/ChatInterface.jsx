@@ -3,6 +3,7 @@ import SideBar from '../components/SideBar';
 import ChatDashBoard from '../components/ChatDashBoard';
 import { useTheme } from '../context/ThemeContext';
 import { IconSun, IconMoon, IconBrain, IconFileText, IconMicrophone } from '@tabler/icons-react';
+import { TokenDebug } from '../components/TokenDebug';
 
 // ✅ MOVE SessionPersistence OUTSIDE the component - BEFORE the component definition
 const SessionPersistence = {
@@ -122,7 +123,7 @@ const SessionPersistence = {
 // ✅ NOW the ChatInterface component can use SessionPersistence
 const ChatInterface = () => {
   const [selectedSession, setSelectedSession] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // ✅ REMOVE sidebarOpen state - let SideBar manage its own state
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
   const [sessionVerified, setSessionVerified] = useState(false);
@@ -131,26 +132,26 @@ const ChatInterface = () => {
   // ✅ REFRESH-PROOF SESSION RESTORATION - Now SessionPersistence is available
   useEffect(() => {
     const restoreSessionOnRefresh = async () => {
-      // Check authentication first
-      const token = localStorage.getItem("token");
-      const user = localStorage.getItem("user");
+      // ✅ WAIT FOR CLERK AUTHENTICATION FIRST
+      const storedUser = localStorage.getItem("user");
+      const storedToken = localStorage.getItem("token");
       
-      if (!token || !user) {
-        setAuthError('Please log in to access the chat interface.');
+      if (!storedUser || !storedToken) {
+        console.log('⚠️ [REFRESH] No stored auth data, waiting for Clerk...');
         setIsLoading(false);
         return;
       }
 
       let parsedUser;
       try {
-        parsedUser = JSON.parse(user);
+        parsedUser = JSON.parse(storedUser);
         if (!parsedUser._id) {
-          setAuthError('Invalid user data. Please log in again.');
+          console.log('⚠️ [REFRESH] Invalid user data');
           setIsLoading(false);
           return;
         }
       } catch (error) {
-        setAuthError('Invalid user data. Please log in again.');
+        console.log('⚠️ [REFRESH] Failed to parse user data');
         setIsLoading(false);
         return;
       }
@@ -208,7 +209,9 @@ const ChatInterface = () => {
       setIsLoading(false);
     };
 
-    restoreSessionOnRefresh();
+    // Add a small delay to allow Clerk to initialize
+    const timer = setTimeout(restoreSessionOnRefresh, 1000);
+    return () => clearTimeout(timer);
   }, []); // ✅ Run only once on mount
 
   // ✅ ENHANCED SESSION VERIFICATION
@@ -259,121 +262,6 @@ const ChatInterface = () => {
     }
   };
 
-  // ✅ ENHANCED SESSION PERSISTENCE UTILITY
-  const SessionPersistence = {
-    // Get user-specific storage key
-    getUserSessionKey: (userId) => `nexus_session_${userId}`,
-    
-    // Save session with metadata
-    saveSession: (userId, sessionId, metadata = {}) => {
-      if (!userId || !sessionId) return false;
-      
-      const sessionData = {
-        sessionId,
-        userId,
-        timestamp: Date.now(),
-        url: window.location.href,
-        metadata
-      };
-      
-      try {
-        // Save to multiple locations for redundancy
-        localStorage.setItem(SessionPersistence.getUserSessionKey(userId), JSON.stringify(sessionData));
-        localStorage.setItem('nexus_last_session', JSON.stringify(sessionData));
-        localStorage.setItem('currentChatSession', sessionId); // ChatDashBoard compatibility
-        
-        console.log('💾 [PERSISTENCE] Session saved:', { userId, sessionId, timestamp: sessionData.timestamp });
-        return true;
-      } catch (error) {
-        console.error('❌ [PERSISTENCE] Save failed:', error);
-        return false;
-      }
-    },
-    
-    // Load session with validation
-    loadSession: (userId) => {
-      if (!userId) return null;
-      
-      try {
-        // Try user-specific storage first
-        const userKey = SessionPersistence.getUserSessionKey(userId);
-        let sessionData = localStorage.getItem(userKey);
-        
-        if (!sessionData) {
-          // Fallback to global storage
-          sessionData = localStorage.getItem('nexus_last_session');
-        }
-        
-        if (!sessionData) return null;
-        
-        const parsed = JSON.parse(sessionData);
-        
-        // Validate session data
-        if (!parsed.sessionId || !parsed.userId || parsed.userId !== userId) {
-          console.log('⚠️ [PERSISTENCE] Invalid session data, clearing');
-          SessionPersistence.clearSession(userId);
-          return null;
-        }
-        
-        // Check if session is too old (7 days)
-        const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
-        if (Date.now() - parsed.timestamp > maxAge) {
-          console.log('⚠️ [PERSISTENCE] Session expired, clearing');
-          SessionPersistence.clearSession(userId);
-          return null;
-        }
-        
-        console.log('✅ [PERSISTENCE] Session loaded:', { 
-          sessionId: parsed.sessionId, 
-          age: Math.round((Date.now() - parsed.timestamp) / 1000 / 60), 
-          minutes: 'minutes ago' 
-        });
-        
-        return parsed;
-      } catch (error) {
-        console.error('❌ [PERSISTENCE] Load failed:', error);
-        SessionPersistence.clearSession(userId);
-        return null;
-      }
-    },
-    
-    // Clear session data
-    clearSession: (userId) => {
-      try {
-        if (userId) {
-          localStorage.removeItem(SessionPersistence.getUserSessionKey(userId));
-        }
-        localStorage.removeItem('nexus_last_session');
-        localStorage.removeItem('currentChatSession');
-        console.log('🧹 [PERSISTENCE] Session cleared');
-      } catch (error) {
-        console.error('❌ [PERSISTENCE] Clear failed:', error);
-      }
-    },
-    
-    // Get session from URL
-    getSessionFromURL: () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      return urlParams.get('session');
-    },
-    
-    // Update URL with session
-    updateURL: (sessionId) => {
-      try {
-        const url = new URL(window.location);
-        if (sessionId) {
-          url.searchParams.set('session', sessionId);
-        } else {
-          url.searchParams.delete('session');
-        }
-        window.history.replaceState({}, '', url);
-        console.log('🔗 [PERSISTENCE] URL updated:', url.toString());
-      } catch (error) {
-        console.error('❌ [PERSISTENCE] URL update failed:', error);
-      }
-    }
-  };
-
   // ✅ ENHANCED SESSION SELECTION WITH PERSISTENCE
   const handleSessionSelect = (sessionId) => {
     console.log('🎯 [SELECT] Session selected:', sessionId);
@@ -409,9 +297,7 @@ const ChatInterface = () => {
     console.log('✅ [SELECT] Session selection completed and persisted');
   };
 
-  const handleSidebarToggle = (isOpen) => {
-    setSidebarOpen(isOpen);
-  };
+  // ✅ REMOVE handleSidebarToggle - not needed anymore
 
   const handleSessionUpdate = (updatedSession) => {
     console.log('📝 [CHAT INTERFACE] Session updated:', updatedSession);
@@ -628,25 +514,23 @@ const ChatInterface = () => {
   }
 
   return (
+    // ✅ FIXED: Use flex layout without fixed widths
     <div className={`flex h-screen w-full transition-all duration-300 ${
       isDark 
         ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900' 
         : 'bg-gradient-to-br from-gray-50 via-blue-50 to-indigo-50'
     }`}>
-      {/* ✅ SIDEBAR */}
-      <div className={`flex-shrink-0 transition-all duration-300 ease-in-out border-r ${
-        isDark ? 'border-gray-700' : 'border-gray-200'
-      } ${sidebarOpen ? 'w-[280px]' : 'w-[70px]'}`}>
-        <SideBar
-          onSelectSession={handleSessionSelect}
-          onToggle={handleSidebarToggle}
-          onSessionDelete={handleSessionDelete}
-          selectedSessionId={selectedSession}
-        />
-      </div>
+      <TokenDebug />
+      
+      {/* ✅ SIDEBAR - REMOVE FIXED WIDTH CONTAINER */}
+      <SideBar
+        onSelectSession={handleSessionSelect}
+        onSessionDelete={handleSessionDelete}
+        selectedSessionId={selectedSession}
+      />
 
-      {/* ✅ MAIN CONTENT - ONLY SHOW CHAT IF SESSION EXISTS AND IS VERIFIED */}
-      <div className="flex-grow">
+      {/* ✅ MAIN CONTENT - TAKES REMAINING SPACE */}
+      <div className="flex-1 min-w-0">
         {selectedSession && sessionVerified && selectedSession.match(/^[0-9a-fA-F]{24}$/) ? (
           <ChatDashBoard
             selectedSession={selectedSession}

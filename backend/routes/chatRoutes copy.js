@@ -7,6 +7,8 @@ import {
 } from '../middleware/uploadMiddleware.js';
 import ChatSession from '../models/ChatSession.js';
 import Message from '../models/Message.js';
+import { requireAuth, attachUser } from '../middleware/clerkAuth.js';
+
 import { getAIResponse } from '../services/aiService.js';
 import {
   createChatSession,
@@ -19,12 +21,17 @@ import {
   getSessionStats,
   getDuplicateStats,
   cleanupDuplicates,
-  uploadFileHandler // ✅ IMPORT FROM CONTROLLER, NOT MIDDLEWARE
+  uploadFileHandler, // ✅ IMPORT FROM CONTROLLER, NOT MIDDLEWARE
+   getSessionContext,      // ✅ NEW
+  clearSessionContext 
 } from '../controllers/chatController.js';
 import { v2 as cloudinary } from 'cloudinary';
 import { cacheService } from '../services/cacheService.js';
 
 const router = express.Router();
+
+router.use(requireAuth);
+router.use(attachUser);
 
 // ✅ ENHANCED DEBUG MIDDLEWARE WITH TEXT EXTRACTION LOGGING
 const debugRequest = (req, res, next) => {
@@ -44,13 +51,13 @@ const debugRequest = (req, res, next) => {
 };
 
 // 🔹 Start a new chat session
-router.post('/session', verifyToken, debugRequest, createChatSession);
+router.post('/session',  createChatSession);
 
 // 🔹 Get all sessions for current user
-router.get('/sessions', verifyToken, getUserChatSessions);
+router.get('/sessions', getUserChatSessions);
 
 // 🔹 Get individual session metadata with text extraction stats
-router.get('/session/:sessionId', verifyToken, async (req, res) => {
+router.get('/session/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
     const userId = req.user._id;
@@ -103,7 +110,7 @@ router.get('/session/:sessionId', verifyToken, async (req, res) => {
 });
 
 // 🔹 Get messages of a session with enhanced text extraction info
-router.get('/session/:sessionId/messages', verifyToken, async (req, res) => {
+router.get('/session/:sessionId/messages', async (req, res) => {
   try {
     const { sessionId } = req.params;
     const userId = req.user._id;
@@ -584,6 +591,10 @@ router.get('/debug/cache-status', verifyToken, async (req, res) => {
     });
   }
 });
+router.get('/session/:sessionId/context', verifyToken, getSessionContext);
+router.delete('/session/:sessionId/context', verifyToken, clearSessionContext);
+
+
 
 console.log('✅ [CHAT ROUTES] Enhanced chat routes initialized with controller-based text extraction');
 console.log('🔧 [CHAT ROUTES] Features: file upload, pdfjs-dist text extraction, deduplication, streaming AI responses');

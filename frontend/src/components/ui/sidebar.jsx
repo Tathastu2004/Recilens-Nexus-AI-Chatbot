@@ -57,21 +57,19 @@ export const SidebarBody = ({ className, children, ...props }) => {
   );
 };
 
+// ✅ REMOVED COMPETING HOVER EFFECTS
 export const DesktopSidebar = ({
   className,
   children,
   ...props
 }) => {
-  const { open, setOpen, animate } = useSidebar();
-  
+  // ✅ NO MORE AUTO HOVER - LET PARENT HANDLE IT
   return (
     <div
       className={cn(
         "h-full hidden md:flex md:flex-col shrink-0 w-full",
         className
       )}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
       {...props}
     >
       {children}

@@ -1,28 +1,32 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+
+// Context Providers
 import { UserProvider } from './context/UserContext';
 import { ChatProvider } from './context/ChatContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { AdminProvider } from './context/AdminContext';
-import { FeedbackProvider } from './context/feedbackContext'; // <-- Import FeedbackProvider
+import { FeedbackProvider } from './context/feedbackContext';
 import { ModelManagementProvider } from './context/ModelContext';
+import { ClerkUserProvider } from './context/ClerkUserContext';
 
+// Authentication Components
 import ProtectedRoute from './components/ProtectedRoute';
+import ClerkProtectedRoute from './components/ClerkProtectedRoute';
+import { ClerkSignIn, ClerkSignUp } from './components/ClerkAuth';
 
 // Pages & Components
 import SignUpPage from './pages/SignUpPage';
 import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
 import VerifyEmailPage from './pages/VerifyEmailPage.jsx';
-import ChatInterface from './pages/chatInterface';
+import ChatInterface from './pages/ChatInterface';
 import Profile from './pages/Profile';
 import FeedBack from './pages/FeedBack';
 
-
-//admin imports
+// Admin imports
 import AdminRoutes from './routes/AdminRoutes';
 
-
-// ✅ Keep your existing ErrorBoundary
+// ✅ Enhanced ErrorBoundary
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -66,78 +70,130 @@ function App() {
   return (
     <ErrorBoundary>
       <ThemeProvider>
-        <UserProvider>
-          <ChatProvider>
-            <FeedbackProvider> {/* <-- Wrap your app with FeedbackProvider */}
-              <Router>
-                <div className="App min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300">
-                  <Routes>
-                    {/* Public Routes */}
-                    <Route path="/" element={<Navigate to="/signup" replace />} />
-                    <Route path="/signup" element={<SignUpPage />} />
-                    <Route path="/reset-password" element={<ResetPasswordPage />} />
-                    <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <ClerkUserProvider>
+          <UserProvider>
+            <ChatProvider>
+              <FeedbackProvider>
+                <Router>
+                  <div className="App min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300">
+                    <Routes>
+                      {/* ✅ PRIMARY CLERK AUTHENTICATION ROUTES */}
+                      <Route path="/signin" element={<ClerkSignIn />} />
+                      <Route path="/signup" element={<ClerkSignUp />} />
+                      
+                      {/* OAuth callback routes */}
+                      <Route path="/signin/*" element={<ClerkSignIn />} />
+                      <Route path="/signup/*" element={<ClerkSignIn />} />
+                      <Route path="/sso-callback" element={<ClerkSignIn />} />
 
-                    {/* ✅ Chat Route */}
-                    <Route
-                      path="/chat"
-                      element={
-                        <ProtectedRoute clientOnly={true}>
-                          <ChatInterface />
-                        </ProtectedRoute>
-                      }
-                    />
+                      {/* ✅ MAIN APPLICATION ROUTES (CLERK PROTECTED) */}
+                      <Route
+                        path="/chat"
+                        element={
+                          <ClerkProtectedRoute>
+                            <ChatInterface />
+                          </ClerkProtectedRoute>
+                        }
+                      />
 
-                    {/* ✅ Dashboard route */}
-                    <Route
-                      path="/dashboard"
-                      element={
-                        <ProtectedRoute clientOnly={true}>
-                          <ChatInterface />
-                        </ProtectedRoute>
-                      }
-                    />
+                      <Route
+                        path="/dashboard"
+                        element={
+                          <ClerkProtectedRoute>
+                            <ChatInterface />
+                          </ClerkProtectedRoute>
+                        }
+                      />
 
-                    {/* Profile & Feedback */}
-                    <Route
-                      path="/profile"
-                      element={
-                        <ProtectedRoute>
-                          <Profile />
-                        </ProtectedRoute>
-                      }
-                    />
-                    <Route
-                      path="/feedback"
-                      element={
-                        <ProtectedRoute>
-                          <FeedBack />
-                        </ProtectedRoute>
-                      }
-                    />
+                      <Route
+                        path="/profile"
+                        element={
+                          <ClerkProtectedRoute>
+                            <Profile />
+                          </ClerkProtectedRoute>
+                        }
+                      />
 
-                    {/* ✅ FIXED: Specific admin routes instead of catch-all */}
-                    <Route
-                      path="/admin/*"
-                      element={
-                        <ProtectedRoute adminOnly={true}>
-                          <AdminProvider>
-                            <ModelManagementProvider>
-                              <AdminRoutes />
-                            </ModelManagementProvider>
-                          </AdminProvider>
-                        </ProtectedRoute>
-                      }
-                    />
-                    
-                    {/* Fallback route - MUST be last */}
-                    <Route path="*" element={<Navigate to="/signup" replace />} />
-                  </Routes>
-                </div>
-              </Router>
-            </FeedbackProvider>
-          </ChatProvider>
-        </UserProvider>
+                      <Route
+                        path="/feedback"
+                        element={
+                          <ClerkProtectedRoute>
+                            <FeedBack />
+                          </ClerkProtectedRoute>
+                        }
+                      />
+
+                      {/* ✅ ADMIN ROUTES */}
+                      <Route
+                        path="/admin/*"
+                        element={
+                          <ClerkProtectedRoute adminOnly={true}>
+                            <AdminProvider>
+                              <ModelManagementProvider>
+                                <AdminRoutes />
+                              </ModelManagementProvider>
+                            </AdminProvider>
+                          </ClerkProtectedRoute>
+                        }
+                      />
+
+                      {/* ✅ LEGACY AUTHENTICATION ROUTES (FALLBACK) */}
+                      <Route path="/legacy-signup" element={<SignUpPage />} />
+                      <Route path="/reset-password" element={<ResetPasswordPage />} />
+                      <Route path="/verify-email" element={<VerifyEmailPage />} />
+
+                      {/* Legacy protected routes */}
+                      <Route
+                        path="/legacy-chat"
+                        element={
+                          <ProtectedRoute clientOnly={true}>
+                            <ChatInterface />
+                          </ProtectedRoute>
+                        }
+                      />
+
+                      <Route
+                        path="/legacy-profile"
+                        element={
+                          <ProtectedRoute>
+                            <Profile />
+                          </ProtectedRoute>
+                        }
+                      />
+
+                      <Route
+                        path="/legacy-admin/*"
+                        element={
+                          <ProtectedRoute adminOnly={true}>
+                            <AdminProvider>
+                              <ModelManagementProvider>
+                                <AdminRoutes />
+                              </ModelManagementProvider>
+                            </AdminProvider>
+                          </ProtectedRoute>
+                        }
+                      />
+
+                      {/* ✅ ROOT REDIRECT - Go to chat if we have any auth */}
+                      <Route 
+                        path="/" 
+                        element={
+                          <Navigate 
+                            to="/chat" 
+                            replace 
+                          />
+                        } 
+                      />
+                      
+                      {/* Fallback route */}
+                      <Route path="*" element={<Navigate to="/signin" replace />} />
+                    </Routes>
+                  </div>
+                </Router>
+              </FeedbackProvider>
+            </ChatProvider>
+          </UserProvider>
+        </ClerkUserProvider>
       </ThemeProvider>
     </ErrorBoundary>
   );

@@ -1,61 +1,96 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import axios from 'axios';
+import { useAuth } from '@clerk/clerk-react';
 
 const ChatContext = createContext();
 
 export const ChatProvider = ({ children }) => {
-  const [messages, setMessages] = useState({}); // sessionId -> messages array
+  const { getToken, isSignedIn } = useAuth(); // ✅ Use Clerk auth
+  const [messages, setMessages] = useState({}); 
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [streamingStates, setStreamingStates] = useState({}); // sessionId -> streaming status
-  const [activeStreams, setActiveStreams] = useState({}); // sessionId -> AbortController
+  const [streamingStates, setStreamingStates] = useState({});
+  const [activeStreams, setActiveStreams] = useState({});
   const [supportedFileTypes, setSupportedFileTypes] = useState(null);
   const [aiServiceHealth, setAiServiceHealth] = useState(null);
-
-  // ✅ NEW: CONTEXT STATE
-  const [contextStats, setContextStats] = useState({}); // sessionId -> context stats
+  const [contextStats, setContextStats] = useState({});
   const [contextEnabled, setContextEnabled] = useState(true);
 
-  // ✅ ENHANCED ENVIRONMENT VARIABLE HANDLING
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
-  const fastapiUrl = import.meta.env.VITE_FASTAPI_URL || 
-                    import.meta.env.FASTAPI_BASE_URL || 
-                    import.meta.env.VITE_FASTAPI_BASE_URL ||
-                    "http://127.0.0.1:8000";
-  const token = localStorage.getItem("token");
+  const fastapiUrl = import.meta.env.VITE_FASTAPI_URL || "http://127.0.0.1:8000";
 
-  console.log('🚀 [CHAT CONTEXT] Initializing enhanced ChatProvider with backend text extraction...');
-  console.log('🔗 [CHAT CONTEXT] Environment URLs:', {
-    backend: backendUrl,
-    fastapi: fastapiUrl,
-    envVars: {
-      VITE_BACKEND_URL: import.meta.env.VITE_BACKEND_URL,
-      VITE_FASTAPI_URL: import.meta.env.VITE_FASTAPI_URL,
-      FASTAPI_BASE_URL: import.meta.env.FASTAPI_BASE_URL,
-      VITE_FASTAPI_BASE_URL: import.meta.env.VITE_FASTAPI_BASE_URL
+  // ✅ GET CLERK TOKEN HELPER
+  const getAuthToken = useCallback(async () => {
+    if (!isSignedIn) return null;
+    try {
+      const token = await getToken();
+      return token;
+    } catch (error) {
+      console.error('❌ [CHAT CONTEXT] Failed to get Clerk token:', error);
+      return null;
     }
-  });
+  }, [getToken, isSignedIn]);
 
-  // ✅ ENHANCED CONNECTION CHECK WITH AI SERVICE HEALTH
+  // ✅ DETECT FILE TYPE HELPER
+  const detectFileType = useCallback((fileUrl, fileName, mimeType) => {
+    if (!fileUrl && !fileName && !mimeType) return 'text';
+    
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+    const documentExtensions = ['.pdf', '.doc', '.docx', '.txt'];
+    
+    // Check by URL patterns
+    if (fileUrl) {
+      if (fileUrl.includes('/image/') || fileUrl.includes('upload/v')) return 'image';
+      if (fileUrl.includes('/raw/') || fileUrl.includes('/document/')) return 'document';
+    }
+    
+    // Check by file extension
+    if (fileName) {
+      const ext = fileName.toLowerCase().substring(fileName.lastIndexOf('.'));
+      if (imageExtensions.includes(ext)) return 'image';
+      if (documentExtensions.includes(ext)) return 'document';
+    }
+    
+    // Check by MIME type
+    if (mimeType) {
+      if (mimeType.startsWith('image/')) return 'image';
+      if (mimeType.includes('pdf') || mimeType.includes('document') || mimeType.includes('text')) return 'document';
+    }
+    
+    return 'text';
+  }, []);
+
+  // ✅ ENHANCED CONNECTION CHECK WITH CLERK AUTH
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        const response = await fetch(`${backendUrl}/api/chat/health`, {
-          signal: AbortSignal.timeout(5000),
-          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        // First try basic health check (no auth required)
+        const basicResponse = await fetch(`${backendUrl}/api/chat/health`, {
+          signal: AbortSignal.timeout(5000)
         });
         
-        if (response.ok) {
-          const healthData = await response.json();
+        if (basicResponse.ok) {
           setIsConnected(true);
-          setAiServiceHealth(healthData);
-          console.log('📊 [CONNECTION] Health check successful:', {
-            backend: healthData.services?.backend,
-            ai: healthData.services?.ai,
-            database: healthData.services?.database,
-            textExtraction: healthData.services?.textExtraction,
-            cloudinary: healthData.services?.cloudinary
-          });
+          
+          // Then try authenticated health check if signed in
+          if (isSignedIn) {
+            const token = await getAuthToken();
+            if (token) {
+              const authResponse = await fetch(`${backendUrl}/api/chat/health/auth`, {
+                headers: { Authorization: `Bearer ${token}` },
+                signal: AbortSignal.timeout(5000)
+              });
+              
+              if (authResponse.ok) {
+                const healthData = await authResponse.json();
+                setAiServiceHealth(healthData);
+                console.log('📊 [CONNECTION] Authenticated health check successful:', {
+                  user: healthData.user?.email,
+                  services: healthData.services
+                });
+              }
+            }
+          }
         } else {
           setIsConnected(false);
           setAiServiceHealth(null);
@@ -71,203 +106,37 @@ export const ChatProvider = ({ children }) => {
     const interval = setInterval(checkConnection, 30000);
     
     return () => clearInterval(interval);
-  }, [backendUrl, token]);
+  }, [backendUrl, isSignedIn, getAuthToken]);
 
-  // ✅ FETCH SUPPORTED FILE TYPES WITH TEXT EXTRACTION INFO
+  // ✅ FETCH SUPPORTED FILE TYPES
   useEffect(() => {
     const fetchSupportedTypes = async () => {
       try {
-        const response = await fetch(`${backendUrl}/api/chat/supported-types`);
+        const token = await getAuthToken();
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        
+        const response = await fetch(`${backendUrl}/api/chat/supported-types`, { headers });
         if (response.ok) {
           const data = await response.json();
           setSupportedFileTypes(data.supportedTypes);
-          console.log('📁 [FILE TYPES] Loaded supported file types:', {
-            images: data.supportedTypes.images?.extensions,
-            documents: data.supportedTypes.documents?.extensions,
-            textExtractionSupported: data.supportedTypes.documents?.textExtractable
-          });
+          console.log('📁 [FILE TYPES] Loaded supported file types:', data.supportedTypes);
         }
       } catch (error) {
         console.warn('⚠️ [FILE TYPES] Failed to load supported file types:', error.message);
       }
     };
 
-    fetchSupportedTypes();
-  }, [backendUrl]);
-
-  // ✅ ENHANCED FILE TYPE DETECTION WITH DOCUMENT SUPPORT
-  const detectFileType = useCallback((fileUrl, fileName, mimeType) => {
-    if (!fileUrl && !fileName && !mimeType) return 'text';
-
-    // Image detection
-    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
-    const imageTypes = ['image/'];
-    
-    // Document detection with enhanced support
-    const documentExtensions = ['.pdf', '.docx', '.doc', '.txt'];
-    const documentTypes = [
-      'application/pdf', 
-      'application/msword', 
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 
-      'text/plain'
-    ];
-
-    // Check by MIME type first
-    if (mimeType) {
-      if (imageTypes.some(type => mimeType.startsWith(type))) return 'image';
-      if (documentTypes.some(type => mimeType.includes(type))) return 'document';
+    if (isSignedIn) {
+      fetchSupportedTypes();
     }
+  }, [backendUrl, isSignedIn, getAuthToken]);
 
-    // Check by file extension
-    const fileName_lower = (fileName || fileUrl || '').toLowerCase();
-    if (imageExtensions.some(ext => fileName_lower.endsWith(ext))) return 'image';
-    if (documentExtensions.some(ext => fileName_lower.endsWith(ext))) return 'document';
-
-    // Check URL patterns
-    if (fileUrl) {
-      if (fileUrl.includes('/image/') || imageExtensions.some(ext => fileUrl.toLowerCase().includes(ext))) return 'image';
-      if (documentExtensions.some(ext => fileUrl.toLowerCase().includes(ext))) return 'document';
-    }
-
-    return 'text';
-  }, []);
-
-  // ✅ VALIDATE FILE BEFORE UPLOAD
-  const validateFile = useCallback(async (file) => {
-    try {
-      const detectedType = detectFileType(null, file.name, file.type);
-      
-      if (!supportedFileTypes) {
-        return { 
-          isValid: true, 
-          detectedType, 
-          warning: 'File type validation unavailable - assuming valid'
-        };
-      }
-
-      const isImage = supportedFileTypes.images?.extensions.some(ext => 
-        file.name.toLowerCase().endsWith(ext)
-      );
-      const isDocument = supportedFileTypes.documents?.extensions.some(ext => 
-        file.name.toLowerCase().endsWith(ext)
-      );
-
-      if (!isImage && !isDocument) {
-        return {
-          isValid: false,
-          detectedType,
-          error: `Unsupported file type "${file.name.split('.').pop()}". Supported: ${[
-            ...supportedFileTypes.images?.extensions || [],
-            ...supportedFileTypes.documents?.extensions || []
-          ].join(', ')}`
-        };
-      }
-
-      // Check file size limits
-      const maxSize = isImage ? 
-        (10 * 1024 * 1024) : // 10MB for images
-        (50 * 1024 * 1024);  // 50MB for documents
-
-      if (file.size > maxSize) {
-        const limit = isImage ? '10MB' : '50MB';
-        return {
-          isValid: false,
-          detectedType,
-          error: `File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum size for ${detectedType} files is ${limit}`
-        };
-      }
-
-      return {
-        isValid: true,
-        detectedType,
-        fileSize: file.size,
-        maxSize,
-        canExtractText: isDocument && supportedFileTypes.documents?.textExtractable,
-        processingInfo: isImage ? 'Will be analyzed by BLIP model' : 
-                       isDocument ? 'Will extract text and process with Llama3' : 
-                       'Will be processed by AI'
-      };
-
-    } catch (error) {
-      return {
-        isValid: false,
-        error: `Validation failed: ${error.message}`
-      };
-    }
-  }, [supportedFileTypes, detectFileType]);
-
-  // ✅ GENERATE FILE HASH FOR DEDUPLICATION
-  const generateFileHash = useCallback(async (file) => {
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-      return hashHex;
-    } catch (error) {
-      console.warn('⚠️ [HASH] Failed to generate file hash:', error.message);
-      return null;
-    }
-  }, []);
-
-  // ✅ CHECK FOR DUPLICATE FILES BEFORE UPLOAD
-  const checkDuplicateFile = useCallback(async (fileHash) => {
-    try {
-      const response = await axios.post(
-        `${backendUrl}/api/chat/check-duplicate`,
-        { fileHash },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 10000
-        }
-      );
-      
-      return response.data;
-    } catch (error) {
-      console.error('❌ [DUPLICATE CHECK] Failed:', error.message);
-      return { success: false, isDuplicate: false };
-    }
-  }, [backendUrl, token]);
-
-  // ✅ GET DUPLICATE STATISTICS
-  const getDuplicateStats = useCallback(async () => {
-    try {
-      const response = await axios.get(
-        `${backendUrl}/api/chat/duplicates/stats`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 15000
-        }
-      );
-      
-      return response.data;
-    } catch (error) {
-      console.error('❌ [DUPLICATE STATS] Failed:', error.message);
-      return null;
-    }
-  }, [backendUrl, token]);
-
-  // ✅ CLEANUP DUPLICATE FILES
-  const cleanupDuplicates = useCallback(async (dryRun = true) => {
-    try {
-      const response = await axios.delete(
-        `${backendUrl}/api/chat/duplicates/cleanup?dryRun=${dryRun}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 30000
-        }
-      );
-      
-      return response.data;
-    } catch (error) {
-      console.error('❌ [CLEANUP DUPLICATES] Failed:', error.message);
-      return null;
-    }
-  }, [backendUrl, token]);
-
-  // ✅ NEW: FETCH CONTEXT STATS FOR SESSION
+  // ✅ FETCH CONTEXT STATS FOR SESSION
   const fetchContextStats = useCallback(async (sessionId) => {
     try {
+      const token = await getAuthToken();
+      if (!token) return null;
+
       const response = await axios.get(
         `${backendUrl}/api/chat/session/${sessionId}/context`,
         {
@@ -293,11 +162,14 @@ export const ChatProvider = ({ children }) => {
       console.warn('⚠️ [CONTEXT STATS] Failed to fetch:', error.message);
       return null;
     }
-  }, [backendUrl, token]);
+  }, [backendUrl, getAuthToken]);
 
-  // ✅ NEW: CLEAR CONTEXT FOR SESSION
+  // ✅ CLEAR CONTEXT FOR SESSION
   const clearSessionContext = useCallback(async (sessionId) => {
     try {
+      const token = await getAuthToken();
+      if (!token) return false;
+
       const response = await axios.delete(
         `${backendUrl}/api/chat/session/${sessionId}/context`,
         {
@@ -317,9 +189,9 @@ export const ChatProvider = ({ children }) => {
       console.error('❌ [CONTEXT] Failed to clear context:', error.message);
       return false;
     }
-  }, [backendUrl, token]);
+  }, [backendUrl, getAuthToken]);
 
-  // ✅ NEW: Clear context handler
+  // ✅ CLEAR CONTEXT HANDLER
   const handleClearContext = useCallback(async (sessionId) => {
     if (!clearSessionContext) {
       console.warn('⚠️ [CONTEXT] clearSessionContext not available');
@@ -340,13 +212,18 @@ export const ChatProvider = ({ children }) => {
     }
   }, [clearSessionContext, fetchContextStats]);
 
-  // ✅ ENHANCED STREAMING SEND MESSAGE WITH 15-MESSAGE CONTEXT WINDOW
+  // ✅ ENHANCED STREAMING SEND MESSAGE WITH CONTEXT WINDOW (SINGLE DECLARATION)
   const sendMessage = useCallback(async (messageData) => {
     const { sessionId, message, file, extractedText } = messageData;
 
     if (!sessionId || (!message?.trim() && !file && !extractedText)) {
       console.error('❌ [STREAMING] Missing required fields');
       return { success: false, error: 'A message or a file is required to start.' };
+    }
+
+    const token = await getAuthToken();
+    if (!token) {
+      return { success: false, error: 'Authentication required. Please sign in.' };
     }
 
     setStreamingStates(prev => ({ ...prev, [sessionId]: true }));
@@ -372,7 +249,7 @@ export const ChatProvider = ({ children }) => {
 
       console.log('🆕 [CONTEXT] Sending message with context support');
 
-      // ✅ PROPER STREAMING REQUEST WITH CORRECT HEADERS
+      // ✅ PROPER STREAMING REQUEST WITH CLERK TOKEN
       const response = await fetch(`${backendUrl}/api/chat/send`, {
         method: 'POST',
         headers: { 
@@ -386,10 +263,13 @@ export const ChatProvider = ({ children }) => {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Authentication expired. Please sign in again.');
+        }
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      // ✅ FIXED STREAMING READER WITH PROPER BUFFERING
+      // ✅ STREAMING READER WITH PROPER BUFFERING
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let accumulatedText = '';
@@ -507,25 +387,9 @@ export const ChatProvider = ({ children }) => {
         return updated;
       });
     }
-  }, [backendUrl, token, fetchContextStats]);
+  }, [backendUrl, getAuthToken, fetchContextStats]);
 
-  // ✅ CANCEL STREAMING FOR SESSION
-  const cancelStream = useCallback((sessionId) => {
-    console.log('🛑 [STREAMING] Cancelling stream for session:', sessionId);
-    
-    const controller = activeStreams[sessionId];
-    if (controller) {
-      controller.abort();
-      console.log('✅ [STREAMING] Stream cancelled successfully');
-    }
-  }, [activeStreams]);
-
-  // ✅ CHECK IF SESSION IS STREAMING
-  const isSessionStreaming = useCallback((sessionId) => {
-    return streamingStates[sessionId] || false;
-  }, [streamingStates]);
-
-  // ✅ ENHANCED FETCH MESSAGES WITH TEXT EXTRACTION INFO
+  // ✅ FETCH SESSION MESSAGES WITH CLERK AUTH
   const fetchSessionMessages = useCallback(async (sessionId) => {
     if (!sessionId) {
       console.log('⚠️ [FETCH] No session ID provided');
@@ -535,6 +399,12 @@ export const ChatProvider = ({ children }) => {
     console.log('📤 [FETCH] Loading messages with text extraction info for session:', sessionId);
     
     try {
+      const token = await getAuthToken();
+      if (!token) {
+        console.warn('⚠️ [FETCH] No auth token available');
+        return [];
+      }
+
       const response = await axios.get(
         `${backendUrl}/api/chat/session/${sessionId}/messages?includeExtractedText=false`,
         {
@@ -608,11 +478,156 @@ export const ChatProvider = ({ children }) => {
       
       return [];
     }
-  }, [backendUrl, token, detectFileType]);
+  }, [backendUrl, getAuthToken, detectFileType]);
+
+  // ✅ VALIDATE FILE BEFORE UPLOAD
+  const validateFile = useCallback(async (file) => {
+    try {
+      const detectedType = detectFileType(null, file.name, file.type);
+      
+      if (!supportedFileTypes) {
+        return { 
+          isValid: true, 
+          detectedType, 
+          warning: 'File type validation unavailable - assuming valid'
+        };
+      }
+
+      const isImage = supportedFileTypes.images?.extensions.some(ext => 
+        file.name.toLowerCase().endsWith(ext)
+      );
+      const isDocument = supportedFileTypes.documents?.extensions.some(ext => 
+        file.name.toLowerCase().endsWith(ext)
+      );
+
+      if (!isImage && !isDocument) {
+        return {
+          isValid: false,
+          detectedType,
+          error: `Unsupported file type "${file.name.split('.').pop()}". Supported: ${[
+            ...supportedFileTypes.images?.extensions || [],
+            ...supportedFileTypes.documents?.extensions || []
+          ].join(', ')}`
+        };
+      }
+
+      // Check file size limits
+      const maxSize = isImage ? 
+        (10 * 1024 * 1024) : // 10MB for images
+        (50 * 1024 * 1024);  // 50MB for documents
+
+      if (file.size > maxSize) {
+        const limit = isImage ? '10MB' : '50MB';
+        return {
+          isValid: false,
+          detectedType,
+          error: `File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum size for ${detectedType} files is ${limit}`
+        };
+      }
+
+      return {
+        isValid: true,
+        detectedType,
+        fileSize: file.size,
+        maxSize,
+        canExtractText: isDocument && supportedFileTypes.documents?.textExtractable,
+        processingInfo: isImage ? 'Will be analyzed by BLIP model' : 
+                       isDocument ? 'Will extract text and process with Llama3' : 
+                       'Will be processed by AI'
+      };
+
+    } catch (error) {
+      return {
+        isValid: false,
+        error: `Validation failed: ${error.message}`
+      };
+    }
+  }, [supportedFileTypes, detectFileType]);
+
+  // ✅ GENERATE FILE HASH FOR DEDUPLICATION
+  const generateFileHash = useCallback(async (file) => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      return hashHex;
+    } catch (error) {
+      console.warn('⚠️ [HASH] Failed to generate file hash:', error.message);
+      return null;
+    }
+  }, []);
+
+  // ✅ CHECK FOR DUPLICATE FILES BEFORE UPLOAD
+  const checkDuplicateFile = useCallback(async (fileHash) => {
+    try {
+      const token = await getAuthToken();
+      if (!token) return { success: false, isDuplicate: false };
+
+      const response = await axios.post(
+        `${backendUrl}/api/chat/check-duplicate`,
+        { fileHash },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 10000
+        }
+      );
+      
+      return response.data;
+    } catch (error) {
+      console.error('❌ [DUPLICATE CHECK] Failed:', error.message);
+      return { success: false, isDuplicate: false };
+    }
+  }, [backendUrl, getAuthToken]);
+
+  // ✅ GET DUPLICATE STATISTICS
+  const getDuplicateStats = useCallback(async () => {
+    try {
+      const token = await getAuthToken();
+      if (!token) return null;
+
+      const response = await axios.get(
+        `${backendUrl}/api/chat/duplicates/stats`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 15000
+        }
+      );
+      
+      return response.data;
+    } catch (error) {
+      console.error('❌ [DUPLICATE STATS] Failed:', error.message);
+      return null;
+    }
+  }, [backendUrl, getAuthToken]);
+
+  // ✅ CLEANUP DUPLICATE FILES
+  const cleanupDuplicates = useCallback(async (dryRun = true) => {
+    try {
+      const token = await getAuthToken();
+      if (!token) return null;
+
+      const response = await axios.delete(
+        `${backendUrl}/api/chat/duplicates/cleanup?dryRun=${dryRun}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 30000
+        }
+      );
+      
+      return response.data;
+    } catch (error) {
+      console.error('❌ [CLEANUP DUPLICATES] Failed:', error.message);
+      return null;
+    }
+  }, [backendUrl, getAuthToken]);
 
   // ✅ GET SESSION STATISTICS INCLUDING TEXT EXTRACTION
   const getSessionStats = useCallback(async (sessionId) => {
     try {
+      const token = await getAuthToken();
+      if (!token) return null;
+
       const response = await axios.get(
         `${backendUrl}/api/chat/session/${sessionId}/stats`,
         {
@@ -631,11 +646,14 @@ export const ChatProvider = ({ children }) => {
       console.error('❌ [STATS] Failed to get session stats:', error.message);
       return null;
     }
-  }, [backendUrl, token]);
+  }, [backendUrl, getAuthToken]);
 
   // ✅ CLEAR SESSION CACHE
   const clearSessionCache = useCallback(async (sessionId) => {
     try {
+      const token = await getAuthToken();
+      if (!token) return null;
+
       const response = await axios.delete(
         `${backendUrl}/api/chat/session/${sessionId}/cache`,
         {
@@ -649,7 +667,23 @@ export const ChatProvider = ({ children }) => {
       console.error('❌ [CACHE] Failed to clear session cache:', error.message);
       return null;
     }
-  }, [backendUrl, token]);
+  }, [backendUrl, getAuthToken]);
+
+  // ✅ CANCEL STREAMING FOR SESSION
+  const cancelStream = useCallback((sessionId) => {
+    console.log('🛑 [STREAMING] Cancelling stream for session:', sessionId);
+    
+    const controller = activeStreams[sessionId];
+    if (controller) {
+      controller.abort();
+      console.log('✅ [STREAMING] Stream cancelled successfully');
+    }
+  }, [activeStreams]);
+
+  // ✅ CHECK IF SESSION IS STREAMING
+  const isSessionStreaming = useCallback((sessionId) => {
+    return streamingStates[sessionId] || false;
+  }, [streamingStates]);
 
   // ✅ SET CURRENT SESSION
   const setSession = useCallback((sessionId) => {
@@ -851,6 +885,14 @@ export const ChatProvider = ({ children }) => {
       };
     },
     
+    // ✅ Context window features
+    contextStats,
+    contextEnabled,
+    fetchContextStats,
+    clearSessionContext,
+    handleClearContext,
+    getContextStats: (sessionId) => contextStats[sessionId] || null,
+    
     // ✅ Enhanced debug info with text extraction
     debug: {
       totalSessions: Object.keys(messages).length,
@@ -878,31 +920,8 @@ export const ChatProvider = ({ children }) => {
         };
         return acc;
       }, {})
-    },
-
-    // ✅ NEW: Context window features
-    contextStats,
-    contextEnabled,
-    fetchContextStats,
-    clearSessionContext,
-    handleClearContext,  // ✅ Add this
-    getContextStats: (sessionId) => contextStats[sessionId] || null,
+    }
   };
-
-  // ✅ ENHANCED DEBUG LOGGING WITH TEXT EXTRACTION INFO
-  console.log('🎯 [CHAT CONTEXT] Enhanced context with backend text extraction updated:', {
-    currentSessionId,
-    isConnected,
-    totalSessions: Object.keys(messages).length,
-    totalMessages: Object.values(messages).flat().length,
-    activeStreams: Object.keys(activeStreams).length,
-    streamingSessions: Object.keys(streamingStates).filter(id => streamingStates[id]).length,
-    supportedFileTypes: supportedFileTypes ? 'Loaded' : 'Loading...',
-    aiServiceHealth: aiServiceHealth?.status || 'Checking...',
-    textExtractionSupported: aiServiceHealth?.features?.textExtraction || false,
-    backendTextProcessing: true,
-    urls: { backend: backendUrl, fastapi: fastapiUrl }
-  });
 
   return (
     <ChatContext.Provider value={contextValue}>

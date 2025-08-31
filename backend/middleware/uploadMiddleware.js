@@ -3,321 +3,287 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import crypto from 'crypto';
+import { v2 as cloudinary } from 'cloudinary';
+
+console.log('🚀 [UPLOAD MIDDLEWARE] Initializing enhanced upload middleware...');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-console.log('🚀 [UPLOAD MIDDLEWARE] Initializing enhanced upload middleware...');
-
 // ✅ ENSURE UPLOAD DIRECTORIES EXIST
-const ensureUploadDirs = () => {
-  const dirs = [
-    './uploads',
-    './uploads/profile', 
-    './uploads/chat', 
-    './uploads/documents', 
-    './uploads/images',
-    './uploads/datasets'  // ← ADDED
+const uploadDirs = {
+  profile: path.join(__dirname, '../uploads/profile'),
+  chat: path.join(__dirname, '../uploads/chat'),
+  images: path.join(__dirname, '../uploads/images'),
+  documents: path.join(__dirname, '../uploads/documents'),
+  datasets: path.join(__dirname, '../uploads/datasets')
+};
+
+Object.values(uploadDirs).forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+    console.log(`📁 [UPLOAD] Created directory: ${dir}`);
+  }
+});
+
+// ✅ PROFILE PICTURE STORAGE CONFIGURATION
+const profileStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDirs.profile);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, `profile-${uniqueSuffix}${ext}`);
+  }
+});
+
+// ✅ CHAT FILE STORAGE CONFIGURATION
+const chatStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    // Determine subdirectory based on file type
+    let subDir = 'chat';
+    if (file.mimetype.startsWith('image/')) {
+      subDir = 'images';
+    } else if (file.mimetype.includes('pdf') || file.mimetype.includes('document')) {
+      subDir = 'documents';
+    }
+    
+    const targetDir = uploadDirs[subDir];
+    cb(null, targetDir);
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    const randomId = Math.random().toString(36).substr(2, 9);
+    const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    cb(null, `${timestamp}-${randomId}-${sanitizedName}`);
+  }
+});
+
+// ✅ DATASET STORAGE CONFIGURATION (ADD THIS)
+const datasetStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDirs.datasets);
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    cb(null, `dataset-${timestamp}-${sanitizedName}`);
+  }
+});
+
+// ✅ FILE FILTER FOR IMAGES
+const imageFilter = (req, file, cb) => {
+  console.log('🖼️ [UPLOAD] Image filter check:', {
+    originalname: file.originalname,
+    mimetype: file.mimetype,
+    size: file.size
+  });
+
+  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+  
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error(`Invalid image type. Allowed: ${allowedTypes.join(', ')}`), false);
+  }
+};
+
+// ✅ FILE FILTER FOR CHAT
+const chatFileFilter = (req, file, cb) => {
+  console.log('📁 [UPLOAD] Chat file filter check:', {
+    originalname: file.originalname,
+    mimetype: file.mimetype,
+    size: file.size
+  });
+
+  const allowedImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+  const allowedDocTypes = [
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'text/plain'
   ];
   
-  dirs.forEach(dir => {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-      console.log('📁 [UPLOAD] Created directory:', dir);
-    }
-  });
-};
-
-ensureUploadDirs();
-
-// ✅ ENHANCED STORAGE CONFIGURATION
-const createStorage = (uploadType) => {
-  return multer.diskStorage({
-    destination: (req, file, cb) => {
-      const uploadPath = `./uploads/${uploadType}`;
-      cb(null, uploadPath);
-    },
-    filename: (req, file, cb) => {
-      const timestamp = Date.now();
-      const randomSuffix = Math.round(Math.random() * 1E9);
-      const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-      const filename = `${timestamp}-${randomSuffix}-${sanitizedName}`;
-      cb(null, filename);
-    }
-  });
-};
-
-// ✅ ENHANCED FILE FILTERS
-const createFileFilter = (allowedTypes) => {
-  return (req, file, cb) => {
-    console.log('📋 [FILTER] Checking file:', {
-      fieldname: file.fieldname,
-      originalname: file.originalname,
-      mimetype: file.mimetype,
-      size: file.size
-    });
-
-    try {
-      const ext = path.extname(file.originalname).toLowerCase();
-      const mimeType = file.mimetype.toLowerCase();
-      
-      // Check if file type is allowed
-      const isAllowed = allowedTypes.some(type => {
-        if (type.startsWith('.')) {
-          return ext === type;
-        }
-        return mimeType.includes(type) || mimeType === type;
-      });
-
-      if (isAllowed) {
-        // Add metadata to request
-        req.detectedFileType = getFileCategory(mimeType, ext);
-        req.fileCategory = req.detectedFileType;
-        cb(null, true);
-      } else {
-        const error = new Error(`Unsupported file type. Allowed: ${allowedTypes.join(', ')}`);
-        error.code = 'UNSUPPORTED_FILE_TYPE';
-        cb(error, false);
-      }
-    } catch (error) {
-      console.error('❌ [FILTER] Error:', error.message);
-      cb(error, false);
-    }
-  };
-};
-
-// ✅ FILE CATEGORY DETECTION
-const getFileCategory = (mimeType, extension) => {
-  const imageTypes = ['image/', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
-  const documentTypes = ['application/pdf', 'application/msword', 'application/vnd.openxml', 'text/', '.pdf', '.doc', '.docx', '.txt'];
-  const datasetTypes = ['.csv', '.json', '.txt', '.jsonl']; // ← ADDED
+  const allAllowedTypes = [...allowedImageTypes, ...allowedDocTypes];
   
-  const isImage = imageTypes.some(type => 
-    type.startsWith('.') ? extension === type : mimeType.includes(type)
-  );
-  
-  const isDocument = documentTypes.some(type => 
-    type.startsWith('.') ? extension === type : mimeType.includes(type)
-  );
-
-  const isDataset = datasetTypes.some(type => extension === type); // ← ADDED
-  
-  if (isImage) return 'image';
-  if (isDocument) return 'document';
-  if (isDataset) return 'dataset'; // ← ADDED
-  return 'unknown';
-};
-
-// ✅ SUPPORTED FILE TYPES
-const supportedTypes = {
-  images: ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', 'image/'],
-  documents: ['.pdf', '.doc', '.docx', '.txt', 'application/pdf', 'application/msword', 'text/'],
-  datasets: ['.csv', '.json', '.txt', '.jsonl'] // ← ADDED
-};
-
-// ✅ CREATE MULTER INSTANCES
-export const uploadChatFile = multer({
-  storage: createStorage('chat'),
-  fileFilter: createFileFilter([
-    ...supportedTypes.images,
-    ...supportedTypes.documents
-  ]),
-  limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB
-    files: 1
+  if (allAllowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error(`Invalid file type. Allowed: Images (JPEG, PNG, GIF, WebP) and Documents (PDF, DOC, DOCX, TXT)`), false);
   }
-});
+};
 
-// ✅ ADD DATASET UPLOAD MIDDLEWARE
-export const uploadDataset = multer({
-  storage: createStorage('datasets'),
-  fileFilter: createFileFilter(supportedTypes.datasets),
-  limits: {
-    fileSize: 100 * 1024 * 1024, // 100MB for datasets
-    files: 1
+// ✅ DATASET FILE FILTER (ADD THIS)
+const datasetFilter = (req, file, cb) => {
+  console.log('📊 [UPLOAD] Dataset filter check:', {
+    originalname: file.originalname,
+    mimetype: file.mimetype,
+    size: file.size
+  });
+
+  const allowedTypes = [
+    'text/plain',
+    'application/json',
+    'text/csv',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  ];
+  
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid dataset type. Allowed: TXT, JSON, CSV, XLS, XLSX'), false);
   }
-});
+};
 
-// ✅ ADD PROFILE PICTURE UPLOAD MIDDLEWARE
+// ✅ PROFILE PICTURE UPLOAD MIDDLEWARE
 export const uploadProfilePic = multer({
-  storage: createStorage('profile'),
-  fileFilter: createFileFilter(supportedTypes.images), // Only images for profile pics
+  storage: profileStorage,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB for profile pictures
+    fileSize: 5 * 1024 * 1024, // 5MB limit
     files: 1
-  }
+  },
+  fileFilter: imageFilter
 });
 
-// ✅ SIMPLE UPLOAD HANDLER WITH BETTER ERROR HANDLING
+// ✅ CHAT FILE UPLOAD MIDDLEWARE
+export const uploadChatFile = multer({
+  storage: chatStorage,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB limit for documents
+    files: 1
+  },
+  fileFilter: chatFileFilter
+});
+
+// ✅ DATASET UPLOAD MIDDLEWARE (ADD THIS EXPORT)
+export const uploadDataset = multer({
+  storage: datasetStorage,
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB limit for datasets
+    files: 1
+  },
+  fileFilter: datasetFilter
+});
+
+// ✅ ADD THE MISSING uploadFileHandler FUNCTION
 export const uploadFileHandler = async (req, res) => {
-  console.log('📤 [UPLOAD] Starting file upload...');
+  console.log('📤 [UPLOAD HANDLER] Starting file upload and text extraction...');
   
   try {
-    // Check if file was uploaded
     if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: 'No file uploaded',
-        code: 'NO_FILE'
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No file uploaded' 
       });
     }
 
-    console.log('📋 [UPLOAD] File received:', {
-      originalName: req.file.originalname,
+    console.log('📋 [UPLOAD HANDLER] File received:', {
+      originalname: req.file.originalname,
       mimetype: req.file.mimetype,
-      size: `${(req.file.size / 1024 / 1024).toFixed(2)}MB`,
+      size: req.file.size,
       path: req.file.path
     });
 
-    // Determine file type
-    const fileExtension = path.extname(req.file.originalname).toLowerCase();
-    const isImage = supportedTypes.images.some(type => 
-      type.startsWith('.') ? fileExtension === type : req.file.mimetype.includes(type.replace('/', ''))
-    );
-    const isDocument = supportedTypes.documents.some(type => 
-      type.startsWith('.') ? fileExtension === type : req.file.mimetype.includes(type.replace('/', ''))
-    );
-
-    const detectedType = isImage ? 'image' : isDocument ? 'document' : 'unknown';
-
-    console.log('🔍 [UPLOAD] File analysis:', {
-      extension: fileExtension,
-      detectedType,
-      isImage,
-      isDocument
-    });
-
-    // ✅ SIMPLE CLOUDINARY UPLOAD (No deduplication for now to avoid errors)
     let uploadResult;
-    
+    let extractedText = null;
+
+    const fileExtension = path.extname(req.file.originalname).toLowerCase();
+    const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'].includes(fileExtension);
+    const isDocument = ['.pdf', '.txt', '.docx', '.doc'].includes(fileExtension);
+
+    // ✅ UPLOAD TO CLOUDINARY
     try {
-      // Import Cloudinary dynamically to handle missing dependency
-      const { uploadToCloudinary } = await import('../config/cloudinary.js');
-      
-      const uploadOptions = {
+      uploadResult = await cloudinary.uploader.upload(req.file.path, {
         folder: 'nexus_chat_files',
-        resource_type: 'auto',
+        resource_type: isImage ? 'image' : 'raw',
         use_filename: true,
         unique_filename: true,
         access_mode: 'public',
-        timeout: 60000,
-        context: {
-          file_type: detectedType,
-          original_name: req.file.originalname,
-          upload_timestamp: new Date().toISOString()
-        }
-      };
+        tags: ['nexus_chat', 'uploaded_file']
+      });
 
-      console.log('☁️ [UPLOAD] Uploading to Cloudinary...');
-      uploadResult = await uploadToCloudinary(req.file.path, uploadOptions);
-      
-      console.log('✅ [UPLOAD] Cloudinary upload successful:', {
+      console.log('☁️ [CLOUDINARY] Upload successful:', {
         public_id: uploadResult.public_id,
-        secure_url: uploadResult.secure_url?.substring(0, 50) + '...'
+        secure_url: uploadResult.secure_url,
+        bytes: uploadResult.bytes
       });
-
     } catch (cloudinaryError) {
-      console.error('❌ [UPLOAD] Cloudinary upload failed:', cloudinaryError.message);
-      
-      // Return error but don't crash
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to upload file to cloud storage',
-        error: cloudinaryError.message,
-        code: 'CLOUDINARY_FAILED'
-      });
+      console.error('❌ [CLOUDINARY] Upload failed:', cloudinaryError);
+      throw new Error(`File upload failed: ${cloudinaryError.message}`);
     }
 
-    // ✅ SIMPLE TEXT EXTRACTION (Only for documents, with error handling)
-    let extractedText = null;
-    let textExtractionError = null;
-
-    // ✅ ENHANCED TEXT EXTRACTION (Add PDF support)
-    if (detectedType === 'document') {
-      console.log('📄 [UPLOAD] Attempting text extraction...');
+    // ✅ TEXT EXTRACTION FOR DOCUMENTS
+    if (isDocument) {
+      const fileBuffer = fs.readFileSync(req.file.path);
       
-      try {
-        if (fileExtension === '.txt') {
-          const textContent = fs.readFileSync(req.file.path, 'utf-8');
-          extractedText = textContent.trim();
-          console.log('✅ [UPLOAD] TXT extraction successful:', extractedText.length, 'characters');
-          
-        } else if (fileExtension === '.pdf') {
-          console.log('📄 [PDF] PDF text extraction will be handled by controller');
-          extractedText = 'PDF_PROCESSING_DEFERRED';
-        } else if (fileExtension === '.docx') {
-          // ✅ ADD DOCX TEXT EXTRACTION
-          try {
-            console.log('📄 [DOCX] Starting DOCX text extraction...');
-            
-            const { extractTextFromDOCX } = await import('../utils/textExtraction.js');
-            extractedText = await extractTextFromDOCX(req.file.path);
-            
-            if (extractedText && extractedText.trim().length > 10) {
-              console.log('✅ [DOCX] Text extraction successful:', extractedText.length, 'characters');
-            } else {
-              throw new Error('DOCX returned no usable text');
-            }
-            
-          } catch (docxError) {
-            console.error('❌ [DOCX] Extraction failed:', docxError.message);
-            extractedText = `❌ DOCX text extraction failed: ${docxError.message}`;
-            textExtractionError = docxError.message;
-          }
-          
-        } else {
-          console.log('⚠️ [UPLOAD] Text extraction not supported for', fileExtension);
-          extractedText = `❌ Text extraction not supported for ${fileExtension} files`;
-          textExtractionError = `Unsupported file type: ${fileExtension}`;
+      if (fileExtension === '.pdf') {
+        try {
+          const { parsePdf } = await import('../utils/pdfParser.js');
+          extractedText = await parsePdf(fileBuffer);
+          console.log('✅ [PDF] Text extraction successful, length:', extractedText?.length || 0);
+        } catch (pdfError) {
+          console.error('❌ [PDF] Text extraction failed:', pdfError);
+          extractedText = `❌ PDF text extraction failed: ${pdfError.message}`;
         }
-        
-      } catch (extractError) {
-        console.error('❌ [UPLOAD] Text extraction failed:', extractError.message);
-        textExtractionError = extractError.message;
-        extractedText = `❌ Text extraction failed: ${extractError.message}`;
+      } else if (fileExtension === '.txt') {
+        try {
+          extractedText = fileBuffer.toString('utf8').trim();
+          console.log('✅ [TXT] Text extraction successful, length:', extractedText.length);
+        } catch (txtError) {
+          console.error('❌ [TXT] Text extraction failed:', txtError);
+          extractedText = `❌ Text file reading failed: ${txtError.message}`;
+        }
+      } else if (fileExtension === '.docx') {
+        try {
+          // Try to import mammoth for DOCX parsing
+          const mammoth = await import('mammoth');
+          const result = await mammoth.extractRawText({ buffer: fileBuffer });
+          extractedText = result.value.trim();
+          console.log('✅ [DOCX] Text extraction successful, length:', extractedText.length);
+        } catch (docxError) {
+          console.warn('⚠️ [DOCX] Mammoth not available or extraction failed:', docxError.message);
+          extractedText = `❌ DOCX text extraction failed: ${docxError.message}`;
+        }
+      } else {
+        extractedText = `❌ Text extraction not supported for ${fileExtension} files`;
       }
     }
 
-    // ✅ CLEANUP TEMP FILE
-    try {
-      if (fs.existsSync(req.file.path)) {
-        fs.unlinkSync(req.file.path);
-        console.log('🧹 [UPLOAD] Cleaned up temp file');
-      }
-    } catch (cleanupError) {
-      console.warn('⚠️ [UPLOAD] Cleanup warning:', cleanupError.message);
-    }
-
-    // ✅ SUCCESS RESPONSE
+    const hasValidText = extractedText && !extractedText.startsWith('❌');
+    
+    // ✅ RESPONSE
     const response = {
       success: true,
-      message: 'File uploaded successfully',
+      message: isImage ? 
+        'Image uploaded successfully. Ready for visual analysis.' : 
+        hasValidText ? 
+          'Document processed successfully with text extraction.' : 
+          'Document uploaded but text extraction failed.',
       fileUrl: uploadResult.secure_url,
-      publicId: uploadResult.public_id,
-      type: detectedType,
-      fileType: req.file.mimetype,
       fileName: req.file.originalname,
-      fileSize: req.file.size,
-      detectedExtension: fileExtension,
-      
-      // Text extraction info
-      extractedText,
-      hasText: !!extractedText && extractedText.length > 0,
-      textLength: extractedText ? extractedText.length : 0,
-      textPreview: extractedText ? extractedText.substring(0, 200) : null,
-      textExtractionError,
-      
-      // Processing hints
-      processingHints: {
-        canAnalyze: true,
-        recommendedProcessor: detectedType === 'image' ? 'BLIP' : 'Llama3',
-        estimatedProcessingTime: detectedType === 'image' ? '2-5 seconds' : '3-8 seconds'
+      fileType: isImage ? 'image' : 'document',
+      detectedType: isImage ? 'image' : 'document',
+      hasText: hasValidText,
+      textLength: hasValidText ? extractedText.length : 0,
+      extractionStatus: isDocument ? 
+        (hasValidText ? 'success' : 'failed') : 
+        'not_applicable',
+      cloudinaryInfo: {
+        public_id: uploadResult.public_id,
+        bytes: uploadResult.bytes,
+        format: uploadResult.format
       }
     };
 
-    console.log('✅ [UPLOAD] Upload completed successfully:', {
-      fileType: detectedType,
+    // Only include extracted text if valid
+    if (hasValidText) {
+      response.extractedText = extractedText;
+    }
+
+    console.log('✅ [UPLOAD HANDLER] Processing complete:', {
+      type: response.fileType,
       hasText: response.hasText,
       textLength: response.textLength
     });
@@ -325,215 +291,107 @@ export const uploadFileHandler = async (req, res) => {
     res.status(200).json(response);
 
   } catch (error) {
-    console.error('❌ [UPLOAD] Unexpected error:', error);
-
-    // Clean up temp file on error
-    try {
-      if (req.file?.path && fs.existsSync(req.file.path)) {
-        fs.unlinkSync(req.file.path);
-      }
-    } catch (cleanupError) {
-      console.warn('⚠️ [UPLOAD] Cleanup error:', cleanupError.message);
-    }
-
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error during file upload',
+    console.error('❌ [UPLOAD HANDLER] Critical error:', error);
+    res.status(500).json({ 
+      success: false, 
       error: error.message,
-      code: 'INTERNAL_ERROR'
+      message: 'File upload and processing failed'
     });
-  }
-};
-
-// ✅ PROFILE PIC UPLOAD HANDLER
-export const uploadProfilePicHandler = async (req, res) => {
-  console.log('👤 [PROFILE] Starting profile picture upload...');
-  
-  try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: 'No profile picture uploaded',
-        code: 'NO_FILE'
-      });
-    }
-
-    console.log('📋 [PROFILE] File received:', {
-      originalName: req.file.originalname,
-      mimetype: req.file.mimetype,
-      size: `${(req.file.size / 1024 / 1024).toFixed(2)}MB`
-    });
-
-    // Validate it's an image
-    if (!req.file.mimetype.startsWith('image/')) {
-      return res.status(400).json({
-        success: false,
-        message: 'Only image files are allowed for profile pictures',
-        code: 'INVALID_FILE_TYPE'
-      });
-    }
-
-    try {
-      // Upload to Cloudinary
-      const { uploadToCloudinary } = await import('../config/cloudinary.js');
-      
-      const uploadOptions = {
-        folder: 'nexus_profile_pics',
-        resource_type: 'image',
-        use_filename: true,
-        unique_filename: true,
-        transformation: [
-          { width: 200, height: 200, crop: 'fill', gravity: 'face' }, // Square crop focused on face
-          { quality: 'auto:good' }
-        ],
-        access_mode: 'public',
-        timeout: 30000
-      };
-
-      const uploadResult = await uploadToCloudinary(req.file.path, uploadOptions);
-      
-      console.log('✅ [PROFILE] Profile picture uploaded successfully');
-
-      // Clean up temp file
-      if (fs.existsSync(req.file.path)) {
-        fs.unlinkSync(req.file.path);
-      }
-
-      res.status(200).json({
-        success: true,
-        message: 'Profile picture uploaded successfully',
-        profilePicUrl: uploadResult.secure_url,
-        publicId: uploadResult.public_id
-      });
-
-    } catch (uploadError) {
-      console.error('❌ [PROFILE] Upload failed:', uploadError.message);
-      
-      // Clean up temp file
-      if (fs.existsSync(req.file.path)) {
-        fs.unlinkSync(req.file.path);
-      }
-      
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to upload profile picture',
-        error: uploadError.message,
-        code: 'UPLOAD_FAILED'
-      });
-    }
-
-  } catch (error) {
-    console.error('❌ [PROFILE] Unexpected error:', error);
-    
-    // Clean up temp file
+  } finally {
+    // ✅ CLEANUP TEMP FILE
     if (req.file?.path && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-    
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error during profile picture upload',
-      error: error.message,
-      code: 'INTERNAL_ERROR'
-    });
-  }
-};
-
-// ✅ ADD DATASET UPLOAD HANDLER
-export const uploadDatasetHandler = async (req, res) => {
-  console.log('📊 [DATASET] Starting dataset upload...');
-  
-  try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: 'No dataset file uploaded',
-        code: 'NO_FILE'
-      });
-    }
-
-    console.log('📋 [DATASET] File received:', {
-      originalName: req.file.originalname,
-      mimetype: req.file.mimetype,
-      size: `${(req.file.size / 1024 / 1024).toFixed(2)}MB`,
-      path: req.file.path
-    });
-
-    res.status(200).json({
-      success: true,
-      message: 'Dataset uploaded successfully',
-      filePath: req.file.path,
-      fileName: req.file.originalname,
-      fileSize: req.file.size,
-      fileType: path.extname(req.file.originalname).toLowerCase(),
-      uploadedAt: new Date()
-    });
-
-  } catch (error) {
-    console.error('❌ [DATASET] Unexpected error:', error);
-    
-    // Clean up temp file on error
-    try {
-      if (req.file?.path && fs.existsSync(req.file.path)) {
+      try {
         fs.unlinkSync(req.file.path);
+        console.log('🗑️ [CLEANUP] Temp file deleted:', req.file.path);
+      } catch (cleanupError) {
+        console.warn('⚠️ [CLEANUP] Failed to delete temp file:', cleanupError.message);
       }
-    } catch (cleanupError) {
-      console.warn('⚠️ [DATASET] Cleanup error:', cleanupError.message);
     }
-
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error during dataset upload',
-      error: error.message,
-      code: 'INTERNAL_ERROR'
-    });
   }
 };
 
-// ✅ ERROR HANDLER MIDDLEWARE
+// ✅ ENHANCED ERROR HANDLER MIDDLEWARE
 export const handleUploadError = (error, req, res, next) => {
-  console.error('❌ [UPLOAD ERROR]:', error.message);
+  console.error('❌ [UPLOAD ERROR]:', {
+    message: error.message,
+    code: error.code,
+    field: error.field,
+    file: req.file ? {
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    } : 'No file'
+  });
 
   if (error instanceof multer.MulterError) {
-    const messages = {
-      LIMIT_FILE_SIZE: 'File too large. Maximum size is 50MB.',
-      LIMIT_FILE_COUNT: 'Too many files. Only one file allowed.',
-      LIMIT_UNEXPECTED_FILE: 'Unexpected field. Use "file" as field name.'
-    };
-
-    return res.status(400).json({
-      success: false,
-      message: messages[error.code] || error.message,
-      code: error.code
-    });
+    switch (error.code) {
+      case 'LIMIT_FILE_SIZE':
+        return res.status(413).json({
+          success: false,
+          message: 'File too large. Please check size limits.',
+          error: 'FILE_TOO_LARGE'
+        });
+      case 'LIMIT_FILE_COUNT':
+        return res.status(400).json({
+          success: false,
+          message: 'Too many files. Only one file allowed.',
+          error: 'TOO_MANY_FILES'
+        });
+      case 'LIMIT_UNEXPECTED_FILE':
+        return res.status(400).json({
+          success: false,
+          message: 'Unexpected file field.',
+          error: 'UNEXPECTED_FILE'
+        });
+      default:
+        return res.status(400).json({
+          success: false,
+          message: `Upload error: ${error.message}`,
+          error: error.code
+        });
+    }
   }
 
-  if (error.code === 'UNSUPPORTED_FILE_TYPE') {
+  if (error.message) {
     return res.status(400).json({
       success: false,
       message: error.message,
-      code: error.code,
-      supportedTypes: supportedTypes
+      error: 'INVALID_FILE'
     });
   }
 
-  // Generic error
-  return res.status(500).json({
-    success: false,
-    message: 'File upload failed',
-    error: error.message,
-    code: 'UPLOAD_FAILED'
-  });
+  next(error);
 };
 
 // ✅ UTILITY FUNCTIONS
-export const getSupportedFileTypes = () => supportedTypes;
+export const getUploadPaths = () => uploadDirs;
 
-export const getFileSizeLimits = () => ({
-  chat: '50MB',
-  image: '10MB', 
-  document: '50MB',
-  dataset: '100MB' // ← ADDED
-});
+export const cleanupTempFiles = (filePaths) => {
+  if (!Array.isArray(filePaths)) {
+    filePaths = [filePaths];
+  }
 
-console.log('✅ [UPLOAD MIDDLEWARE] Initialization complete');
+  filePaths.forEach(filePath => {
+    if (filePath && fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+        console.log(`🗑️ [CLEANUP] Deleted temp file: ${filePath}`);
+      } catch (error) {
+        console.warn(`⚠️ [CLEANUP] Failed to delete temp file: ${filePath}`, error.message);
+      }
+    }
+  });
+};
+
+console.log('✅ [UPLOAD MIDDLEWARE] Successfully initialized all upload configurations with file handler');
+
+// ✅ DEFAULT EXPORT
+export default {
+  uploadProfilePic,
+  uploadChatFile,
+  uploadDataset, // ✅ ADD THIS TO DEFAULT EXPORT
+  uploadFileHandler,
+  handleUploadError,
+  getUploadPaths,
+  cleanupTempFiles
+};
