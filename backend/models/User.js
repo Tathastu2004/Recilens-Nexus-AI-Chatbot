@@ -1,47 +1,74 @@
 import mongoose from 'mongoose';
 
 const userSchema = new mongoose.Schema({
-  clerkId: { 
-    type: String, 
-    required: true, 
-    unique: true 
-  },
-  email: { 
-    type: String, 
+  clerkId: {
+    type: String,
     unique: true,
-    sparse: true, // This allows multiple null/undefined values but maintains uniqueness for actual values
-    validate: {
-      validator: function(v) {
-        // Either null/undefined or a valid email format
-        return !v || /^\S+@\S+\.\S+$/.test(v);
-      },
-      message: 'Invalid email format'
-    }
+    sparse: true // Allow null values but ensure uniqueness when present
   },
-  name: { 
-    type: String, 
-    required: false,
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true
+  },
+  name: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  profilePicture: {
+    type: String,
     default: ''
   },
-  profilePicture: { 
-    type: String, 
-    default: '' 
+  role: {
+    type: String,
+    enum: ['client', 'admin', 'super-admin'],
+    default: 'client'
   },
-  role: { 
-    type: String, 
-    enum: ['admin', 'client', 'super-admin'], 
-    default: 'client' 
-  },
-  isActive: { 
-    type: Boolean, 
-    default: true 
-  },
+  isActive: {
+    type: Boolean,
+    default: true
+  }
 }, {
   timestamps: true
 });
 
-// Add index for better performance
-userSchema.index({ clerkId: 1 });
-userSchema.index({ email: 1 }, { sparse: true });
+// ✅ PRE-SAVE MIDDLEWARE TO HANDLE SUPER ADMIN EMAIL
+userSchema.pre('save', function(next) {
+  // Automatically set super-admin role for the designated email
+  if (this.email === 'apurvsrivastava1510@gmail.com') {
+    this.role = 'super-admin';
+  }
+  next();
+});
 
-export default mongoose.model('User', userSchema);
+// ✅ STATIC METHOD TO CHECK ROLE PERMISSIONS
+userSchema.statics.canManageRole = function(currentUserRole, targetRole) {
+  const roleHierarchy = {
+    'client': 0,
+    'admin': 1,
+    'super-admin': 2
+  };
+
+  const currentLevel = roleHierarchy[currentUserRole] || 0;
+  const targetLevel = roleHierarchy[targetRole] || 0;
+
+  // Super admin can manage everyone
+  if (currentUserRole === 'super-admin') return true;
+  
+  // Admin can only manage clients
+  if (currentUserRole === 'admin' && targetRole === 'client') return true;
+  
+  // No one else can manage roles
+  return false;
+};
+
+// ✅ INSTANCE METHOD TO CHECK IF USER CAN BE MANAGED BY ANOTHER USER
+userSchema.methods.canBeManagedBy = function(managerRole) {
+  return User.canManageRole(managerRole, this.role);
+};
+
+const User = mongoose.model('User', userSchema);
+export default User;

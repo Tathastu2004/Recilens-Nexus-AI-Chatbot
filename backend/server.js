@@ -101,7 +101,7 @@ try {
 try {
   const adminRoutes = await import('./admin/routes/adminRoutes.js');
   app.use('/api/admin', adminRoutes.default);
-  console.log('✅ [SERVER] Admin routes loaded');
+  console.log('✅ [SERVER] Admin routes loaded at /api/admin');
 } catch (error) {
   console.error('❌ [SERVER] Failed to load admin routes:', error.message);
   console.error('❌ [SERVER] Admin functionality will be disabled');

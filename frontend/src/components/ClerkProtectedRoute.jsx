@@ -13,7 +13,10 @@ const ClerkProtectedRoute = ({ children, requiredRole, adminOnly = false, client
     isAuthenticated,
     loading,
     hasDbUser: !!dbUser,
-    userRole: dbUser?.role
+    userRole: dbUser?.role,
+    userEmail: dbUser?.email,
+    adminOnly,
+    clientOnly
   });
 
   // Show loading while Clerk is initializing
@@ -48,6 +51,14 @@ const ClerkProtectedRoute = ({ children, requiredRole, adminOnly = false, client
 
   // Check role-based access if we have user data
   if (dbUser) {
+    console.log('🔍 [CLERK PROTECTED] Checking permissions:', {
+      userRole: dbUser.role,
+      userEmail: dbUser.email,
+      adminOnly,
+      clientOnly,
+      requiredRole
+    });
+
     // Admin-only routes: allow admin and super-admin
     if (adminOnly && !(dbUser.role === 'admin' || dbUser.role === 'super-admin')) {
       console.log('❌ [CLERK PROTECTED] Admin access denied, redirecting to chat');
@@ -55,8 +66,8 @@ const ClerkProtectedRoute = ({ children, requiredRole, adminOnly = false, client
     }
 
     // Client-only routes
-    if (clientOnly && dbUser.role !== 'client') {
-      console.log('❌ [CLERK PROTECTED] Client access denied, redirecting to admin');
+    if (clientOnly && (dbUser.role === 'admin' || dbUser.role === 'super-admin')) {
+      console.log('❌ [CLERK PROTECTED] Client-only route, admin redirecting to admin dashboard');
       return <Navigate to="/admin" replace />;
     }
 

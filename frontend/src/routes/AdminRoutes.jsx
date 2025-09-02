@@ -9,7 +9,7 @@ import Users from "../pages/admin/Users";
 export default function AdminRoutes() {
   return (
     <Routes>
-      <Route path="/admin" element={<AdminLayout />}>
+      <Route path="/" element={<AdminLayout />}>
         <Route index element={<Dashboard />} />
         <Route path="feedback-reply" element={<FeedbackReply />} />
         <Route path="analytics" element={<Analytics />} />

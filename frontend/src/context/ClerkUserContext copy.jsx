@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useUser as useClerkUserHook, useAuth } from '@clerk/clerk-react';
-import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 
 const ClerkUserContext = createContext();
@@ -8,64 +7,12 @@ const ClerkUserContext = createContext();
 export const ClerkUserProvider = ({ children }) => {
   const { user: clerkUser, isLoaded: clerkLoaded } = useClerkUserHook();
   const { getToken, isSignedIn } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
   const [dbUser, setDbUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [syncAttempted, setSyncAttempted] = useState(false);
-  const [hasRedirected, setHasRedirected] = useState(false);
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
-
-  // ✅ ROLE-BASED AUTO REDIRECT FUNCTION
-  const handleRoleBasedRedirect = (userData) => {
-    if (!userData || hasRedirected) return;
-
-    const currentPath = location.pathname;
-    console.log('🔄 [CLERK CONTEXT] Checking role-based redirect:', {
-      role: userData.role,
-      email: userData.email,
-      currentPath,
-      hasRedirected
-    });
-
-    // Don't redirect if already on correct path or on auth pages
-    if (currentPath.includes('/signin') || currentPath.includes('/signup')) {
-      return;
-    }
-
-    // Admin/Super-admin redirect logic
-    if (userData.role === 'admin' || userData.role === 'super-admin') {
-      if (!currentPath.startsWith('/admin')) {
-        console.log('🔄 [CLERK CONTEXT] Redirecting admin/super-admin to /admin');
-        navigate('/admin', { replace: true });
-        setHasRedirected(true);
-        return;
-      }
-    } 
-    // Client redirect logic
-    else if (userData.role === 'client') {
-      if (currentPath === '/' || currentPath.startsWith('/admin')) {
-        console.log('🔄 [CLERK CONTEXT] Redirecting client to /chat');
-        navigate('/chat', { replace: true });
-        setHasRedirected(true);
-        return;
-      }
-    }
-
-    // Root path redirect
-    if (currentPath === '/') {
-      if (userData.role === 'admin' || userData.role === 'super-admin') {
-        console.log('🔄 [CLERK CONTEXT] Root redirect: admin/super-admin to /admin');
-        navigate('/admin', { replace: true });
-      } else {
-        console.log('🔄 [CLERK CONTEXT] Root redirect: client to /chat');
-        navigate('/chat', { replace: true });
-      }
-      setHasRedirected(true);
-    }
-  };
 
   // Sync user data with backend and update localStorage for compatibility
   const syncUserWithBackend = async () => {
@@ -82,7 +29,6 @@ export const ClerkUserProvider = ({ children }) => {
       setIsAuthenticated(false);
       setLoading(false);
       setSyncAttempted(true);
-      setHasRedirected(false);
       
       // Clear localStorage for compatibility with existing components
       localStorage.removeItem('token');
@@ -118,7 +64,7 @@ export const ClerkUserProvider = ({ children }) => {
         console.log('⚠️ [CLERK] Clerk route failed, trying legacy auth route...', clerkError.response?.status);
         
         // ✅ FALLBACK TO LEGACY AUTH ROUTE
-        response = await axios.get(`${backendUrl}/api/auth/getprofile`, {
+        response = await axios.get(`${backendUrl}/api/auth/profile`, {
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json'
@@ -131,12 +77,6 @@ export const ClerkUserProvider = ({ children }) => {
 
       if (response.data.success) {
         const userData = response.data.user;
-        console.log('✅ [CLERK] User data received:', {
-          email: userData.email,
-          role: userData.role,
-          name: userData.name
-        });
-
         setDbUser(userData);
         setIsAuthenticated(true);
         
@@ -155,9 +95,6 @@ export const ClerkUserProvider = ({ children }) => {
         
         localStorage.setItem('user', JSON.stringify(compatibleUserData));
         console.log('💾 [CLERK] User data stored in localStorage:', compatibleUserData);
-
-        // ✅ HANDLE ROLE-BASED REDIRECT AFTER STATE IS SET
-        setTimeout(() => handleRoleBasedRedirect(compatibleUserData), 100);
       } else {
         throw new Error('Backend response indicates failure');
       }
@@ -166,14 +103,13 @@ export const ClerkUserProvider = ({ children }) => {
       
       // ✅ CREATE MINIMAL USER DATA FROM CLERK FOR OFFLINE FUNCTIONALITY
       if (clerkUser) {
-        const email = clerkUser.primaryEmailAddress?.emailAddress || clerkUser.emailAddresses?.[0]?.emailAddress;
         const minimalUserData = {
           _id: clerkUser.id,
           id: clerkUser.id,
           clerkId: clerkUser.id,
-          email: email,
+          email: clerkUser.primaryEmailAddress?.emailAddress || clerkUser.emailAddresses?.[0]?.emailAddress,
           name: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim() || clerkUser.username || 'User',
-          role: email === 'apurvsrivastava1510@gmail.com' ? 'super-admin' : 'client', // ✅ SPECIAL HANDLING
+          role: 'client',
           profilePicture: clerkUser.imageUrl,
           isActive: true,
           isOffline: true // Flag to indicate this is fallback data
@@ -183,9 +119,6 @@ export const ClerkUserProvider = ({ children }) => {
         setDbUser(minimalUserData);
         setIsAuthenticated(true);
         console.log('⚠️ [CLERK] Using minimal user data from Clerk (backend unavailable):', minimalUserData);
-
-        // Handle redirect for offline data too
-        setTimeout(() => handleRoleBasedRedirect(minimalUserData), 100);
       }
     } finally {
       setLoading(false);
@@ -208,7 +141,6 @@ export const ClerkUserProvider = ({ children }) => {
         setIsAuthenticated(false);
         setLoading(false);
         setSyncAttempted(false);
-        setHasRedirected(false);
       }
     }
   }, [clerkUser, isSignedIn, clerkLoaded, syncAttempted]);
@@ -227,20 +159,12 @@ export const ClerkUserProvider = ({ children }) => {
           setDbUser(userData);
           setIsAuthenticated(true);
           setLoading(false);
-
-          // Handle redirect for restored data
-          setTimeout(() => handleRoleBasedRedirect(userData), 100);
         } catch (error) {
           console.error('❌ [CLERK] Failed to parse stored user data:', error);
         }
       }
     }
   }, [clerkLoaded, isSignedIn, clerkUser, dbUser]);
-
-  // ✅ RESET REDIRECT FLAG ON ROUTE CHANGE
-  useEffect(() => {
-    setHasRedirected(false);
-  }, [location.pathname]);
 
   // ✅ ADD UPDATE DB USER FUNCTION
   const updateDbUser = (userData) => {
@@ -261,9 +185,6 @@ export const ClerkUserProvider = ({ children }) => {
       };
       localStorage.setItem('user', JSON.stringify(compatibleUserData));
       console.log('💾 [CLERK CONTEXT] Updated localStorage with new user data');
-
-      // Handle redirect for updated data
-      setTimeout(() => handleRoleBasedRedirect(compatibleUserData), 100);
     }
   };
 
@@ -272,7 +193,7 @@ export const ClerkUserProvider = ({ children }) => {
     dbUser,
     loading: loading || !clerkLoaded,
     isAuthenticated,
-    updateDbUser,
+    updateDbUser, // ✅ Add this
     syncUserWithBackend,
     getAuthToken: getToken
   };
