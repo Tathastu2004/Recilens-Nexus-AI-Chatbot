@@ -1,5 +1,6 @@
 // feedbackRoutes.js
 import express from "express";
+import { requireAuth, attachUser } from "../middleware/clerkAuth.js";
 import {
   createFeedback,
   getUserFeedbacks,
@@ -8,38 +9,41 @@ import {
   markFeedbackCompleted,
   getUserFeedbackStats,
 } from "../controllers/feedbackController.js";
-import { verifyToken, requireAdmin, requireClient } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-/**
- * ===============================
- *  USER ROUTES (CLIENT ONLY)
- * ===============================
- */
+console.log("📋 [FEEDBACK ROUTES] Initializing feedback routes...");
 
-// Create new feedback (client only)
-router.post("/user", verifyToken, requireClient, createFeedback);
+// ✅ Apply Clerk auth middleware to all routes
+router.use(requireAuth);
+router.use(attachUser);
 
-// Get all feedbacks for the logged-in user (client only)
-router.get("/user/:userId", verifyToken, requireClient, getUserFeedbacks);
-router.get("/stats/user/:userId", verifyToken, requireClient, getUserFeedbackStats);
+// ===============================
+//  CLIENT FEEDBACK ROUTES
+// ===============================
 
-/**
- * ===============================
- *  ADMIN ROUTES
- * ===============================
- */
+// Create new feedback (authenticated users)
+router.post("/user", createFeedback);
+
+// Get user's own feedbacks
+router.get("/user/:userId", getUserFeedbacks);
+
+// Get user feedback stats (optional)
+router.get("/stats/user/:userId", getUserFeedbackStats);
+
+// ===============================
+//  ADMIN FEEDBACK ROUTES
+// ===============================
 
 // Get all feedbacks (admin only)
-router.get("/", verifyToken, requireAdmin, getAllFeedbacks);
+router.get("/", getAllFeedbacks);
 
-// Reply to a feedback (admin only)
-router.post("/:feedbackId/reply", verifyToken, requireAdmin, replyToFeedback);
+// Reply to feedback (admin only)
+router.post("/:feedbackId/reply", replyToFeedback);
 
 // Mark feedback as completed (admin only)
-router.put("/:id/complete", verifyToken, requireAdmin, markFeedbackCompleted);
+router.put("/:id/complete", markFeedbackCompleted);
 
-
+console.log("✅ [FEEDBACK ROUTES] Feedback routes initialized successfully");
 
 export default router;

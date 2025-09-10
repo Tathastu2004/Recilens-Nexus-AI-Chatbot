@@ -10,9 +10,17 @@ export const AdminProvider = ({ children }) => {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [usersLoading, setUsersLoading] = useState(false);
   const [healthLoading, setHealthLoading] = useState(false);
+  const [loading, setLoading] = useState(false); // ✅ Add missing loading state
   const [error, setError] = useState(null);
+  const [realTimeData, setRealTimeData] = useState(null);
 
   const baseURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+
+  // ✅ Add missing authHeader function
+  const authHeader = useCallback((token) => ({
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  }), []);
 
   // ✅ CREATE AXIOS INSTANCE WITH CLERK TOKEN
   const createApiClient = useCallback(async () => {
@@ -279,15 +287,115 @@ export const AdminProvider = ({ children }) => {
     }
   }, [createApiClient]);
 
+  // ✅ Get real-time analytics (Fixed)
+  const getRealTimeAnalytics = useCallback(async (token) => {
+    setLoading(true);
+    setError(null);
+    try {
+      console.log('📊 [ADMIN CONTEXT] Fetching real-time analytics...');
+      
+      const res = await fetch(`${baseURL}/api/admin/analytics/realtime`, {
+        headers: authHeader(token),
+        cache: "no-store",
+      });
+      
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      
+      const data = await res.json();
+      console.log('✅ [ADMIN CONTEXT] Real-time analytics received:', data);
+      setRealTimeData(data);
+      return data;
+    } catch (err) {
+      const errorMsg = err.message;
+      console.error('❌ [ADMIN CONTEXT] Real-time analytics error:', errorMsg);
+      setError(errorMsg);
+      
+      // Return fallback data instead of throwing
+      return {
+        success: false,
+        summary: {
+          totalMessages: 0,
+          messages24h: 0,
+          messages7d: 0,
+          totalUsers: 0,
+          activeUsers: 0,
+          newUsers24h: 0,
+          totalSessions: 0,
+          activeSessions: 0,
+          avgResponseTime: 500
+        },
+        intentAnalytics: [],
+        hourlyDistribution: [],
+        userDistribution: [],
+        responseTimeStats: {
+          avgResponseTime: 500,
+          minResponseTime: 100,
+          maxResponseTime: 2000,
+          totalRequests: 0
+        }
+      };
+    } finally {
+      setLoading(false);
+    }
+  }, [baseURL, authHeader]);
+
+  // ✅ Set up Server-Sent Events for live updates (Fixed Authentication)
+  const startAnalyticsStream = useCallback((token, onUpdate) => {
+    try {
+      console.log('🔄 [ADMIN CONTEXT] Starting analytics stream...');
+      
+      // ✅ PASS TOKEN IN URL QUERY PARAMETER (EventSource workaround)
+      const url = `${baseURL}/api/admin/analytics/stream?token=${encodeURIComponent(token)}`;
+      console.log('📡 [ADMIN CONTEXT] Stream URL configured');
+      
+      const eventSource = new EventSource(url);
+
+      eventSource.onopen = () => {
+        console.log('✅ [ADMIN CONTEXT] Stream connection opened');
+      };
+
+      eventSource.onmessage = (event) => {
+        try {
+          console.log('📨 [ADMIN CONTEXT] Stream data received:', event.data);
+          const data = JSON.parse(event.data);
+          onUpdate(data);
+        } catch (error) {
+          console.error('❌ [ADMIN CONTEXT] Stream data parse error:', error);
+        }
+      };
+
+      eventSource.onerror = (error) => {
+        console.error('❌ [ADMIN CONTEXT] Stream connection error:', error);
+        // Log more details about the error
+        console.log('EventSource readyState:', eventSource.readyState);
+        // Don't close automatically, let the component handle reconnection
+      };
+
+      // Return cleanup function
+      return () => {
+        console.log('🔌 [ADMIN CONTEXT] Closing analytics stream');
+        eventSource.close();
+      };
+      
+    } catch (error) {
+      console.error('❌ [ADMIN CONTEXT] Stream setup error:', error);
+      return () => {}; // Return empty cleanup function
+    }
+  }, [baseURL]);
+
   // ✅ MEMOIZE CONTEXT VALUE
   const contextValue = useMemo(() => ({
     // Loading states
-    loading: dashboardLoading || usersLoading || healthLoading,
+    loading: loading || dashboardLoading || usersLoading || healthLoading,
     dashboardLoading,
     analyticsLoading,
     usersLoading,
     healthLoading,
     error,
+    realTimeData,
+    setRealTimeData,
     
     // Functions
     getSystemConfig,
@@ -305,12 +413,16 @@ export const AdminProvider = ({ children }) => {
     deleteUser,
     generateRealAnalytics,
     getSystemHealth,
+    getRealTimeAnalytics,
+    startAnalyticsStream,
   }), [
+    loading,
     dashboardLoading,
     analyticsLoading,
     usersLoading,
     healthLoading,
     error,
+    realTimeData,
     getSystemConfig,
     updateSystemConfig,
     getDashboardStats,
@@ -326,6 +438,8 @@ export const AdminProvider = ({ children }) => {
     deleteUser,
     generateRealAnalytics,
     getSystemHealth,
+    getRealTimeAnalytics,
+    startAnalyticsStream,
   ]);
 
   return (

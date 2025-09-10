@@ -231,27 +231,42 @@ export const uploadFileHandler = async (req, res) => {
   }
 };
 
-// ✅ UPDATED SEND MESSAGE WITH CONTEXT WINDOW
+// ✅ FIXED SEND MESSAGE - CORRECTED SENDER FIELD
 export const sendMessage = async (req, res) => {
   console.log("📨 [SEND MESSAGE] Request received for streaming with context...");
+  
   try {
     const { sessionId, message, type = "text", fileUrl, fileType, fileName, extractedText } = req.body;
     const userId = req.user._id;
 
+    // ✅ VALIDATION
     if (!sessionId || !message) {
-      return res.status(400).json({ success: false, error: "Session ID and message are required" });
+      console.error('❌ [SEND MESSAGE] Missing required fields:', { sessionId: !!sessionId, message: !!message });
+      return res.status(400).json({ 
+        success: false, 
+        error: "Session ID and message are required" 
+      });
     }
 
+    // ✅ VERIFY SESSION ACCESS
     const session = await ChatSession.findById(sessionId);
     if (!session || session.user.toString() !== userId.toString()) {
-      return res.status(403).json({ success: false, error: "Access denied" });
+      console.error('❌ [SEND MESSAGE] Session access denied:', { 
+        sessionFound: !!session, 
+        sessionUser: session?.user?.toString(), 
+        requestUser: userId.toString() 
+      });
+      return res.status(403).json({ 
+        success: false, 
+        error: "Access denied" 
+      });
     }
 
-    // Save user message and add to context
+    // ✅ SAVE USER MESSAGE WITH CORRECT SENDER FORMAT
     const userMessage = new Message({
       session: sessionId,
       message,
-      sender: userId,
+      sender: "user", // ✅ FIXED: Use string enum value, not userId
       type,
       fileUrl: fileUrl || null,
       fileType: fileType || null,
@@ -259,22 +274,33 @@ export const sendMessage = async (req, res) => {
       extractedText: extractedText || null,
       hasTextExtraction: !!(extractedText && !extractedText.startsWith("❌")),
       textLength: extractedText ? extractedText.length : 0,
+      userId: userId, // ✅ ADD SEPARATE FIELD FOR USER ID REFERENCE
     });
     
     const savedUserMessage = await userMessage.save();
-    console.log("✅ User message saved:", savedUserMessage._id);
+    console.log("✅ [SEND MESSAGE] User message saved:", savedUserMessage._id);
 
-    // Add to Redis context
-    await cacheService.addMessageToContext(sessionId, {
-      role: 'user',
-      content: message,
-      _id: savedUserMessage._id
-    }, userId);
+    // ✅ ADD TO REDIS CONTEXT
+    try {
+      await cacheService.addMessageToContext(sessionId, {
+        role: 'user',
+        content: message,
+        _id: savedUserMessage._id
+      }, userId);
+    } catch (contextError) {
+      console.warn('⚠️ [SEND MESSAGE] Context service warning:', contextError.message);
+    }
 
-    // Get context for FastAPI
-    const recentContext = await cacheService.getFormattedContextForLlama(sessionId, userId);
+    // ✅ GET CONTEXT FOR FASTAPI
+    let recentContext = [];
+    try {
+      recentContext = await cacheService.getFormattedContextForLlama(sessionId, userId);
+    } catch (contextError) {
+      console.warn('⚠️ [SEND MESSAGE] Context retrieval warning:', contextError.message);
+      recentContext = [];
+    }
 
-    // ✅ ENHANCED STREAMING HEADERS - CRITICAL FIX
+    // ✅ ENHANCED STREAMING HEADERS
     res.writeHead(200, {
       'Content-Type': 'text/plain; charset=utf-8',
       'Transfer-Encoding': 'chunked',
@@ -283,7 +309,7 @@ export const sendMessage = async (req, res) => {
       'Expires': '0',
       'Connection': 'keep-alive',
       'Access-Control-Allow-Origin': '*',
-      'X-Accel-Buffering': 'no'  // ✅ Disable nginx buffering
+      'X-Accel-Buffering': 'no'
     });
 
     let streamedResponse = "";
@@ -301,84 +327,145 @@ export const sendMessage = async (req, res) => {
         conversationContext: recentContext
       };
 
-      console.log('🦙 [CONTEXT] Sending to FastAPI:', {
+      console.log('🦙 [FASTAPI] Sending to FastAPI:', {
         contextMessages: recentContext.length,
-        type: type
+        type: type,
+        hasExtractedText: !!extractedText,
+        payload: JSON.stringify(fastApiPayload).length + ' bytes'
       });
 
-      // ✅ PROPER AXIOS STREAMING - CRITICAL FIX
+      // ✅ CHECK IF FASTAPI IS AVAILABLE
       const fastApiResponse = await axios.post(`${FASTAPI_BASE_URL}/chat`, fastApiPayload, {
         responseType: 'stream',
         timeout: 120000,
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        validateStatus: (status) => status < 500,
       });
+
+      if (fastApiResponse.status !== 200) {
+        throw new Error(`FastAPI returned status ${fastApiResponse.status}`);
+      }
 
       // ✅ IMPROVED CHUNK HANDLING
       fastApiResponse.data.on('data', (chunk) => {
-        const chunkStr = chunk.toString('utf8');
-        streamedResponse += chunkStr;
-        chunkCount++;
-        
-        console.log(`📦 [CHUNK ${chunkCount}] Size: ${chunk.length} bytes, Content: "${chunkStr}"`);
-        
-        // ✅ IMMEDIATE FORWARD WITH FLUSH
-        res.write(chunkStr);
-        if (res.flush) {
-          res.flush();
+        try {
+          const chunkStr = chunk.toString('utf8');
+          streamedResponse += chunkStr;
+          chunkCount++;
+          
+          console.log(`📦 [CHUNK ${chunkCount}] Size: ${chunk.length} bytes`);
+          
+          res.write(chunkStr);
+          if (res.flush) {
+            res.flush();
+          }
+        } catch (chunkError) {
+          console.error('❌ [CHUNK ERROR]:', chunkError);
         }
       });
 
       fastApiResponse.data.on('end', async () => {
-        console.log("✅ [STREAMING] FastAPI completed");
-        console.log(`📊 Final response length: ${streamedResponse.length} chars`);
-        
-        // Save AI message to database and Redis context
-        const aiMessage = new Message({
+        try {
+          console.log("✅ [STREAMING] FastAPI completed");
+          console.log(`📊 Final response length: ${streamedResponse.length} chars`);
+          
+          // ✅ SAVE AI MESSAGE WITH CORRECT SENDER FORMAT
+          const aiMessage = new Message({
+            session: sessionId,
+            message: streamedResponse,
+            sender: "AI", // ✅ FIXED: Use string enum value
+            type: type,
+            userId: userId, // ✅ ADD USER ID REFERENCE
+            metadata: {
+              streamingCompleted: true,
+              contextUsed: recentContext.length,
+              blipIntegrated: type === 'image',
+              processingPipeline: type === 'image' ? 'BLIP→Context→Llama' : 'Llama'
+            },
+          });
+          
+          const savedAiMessage = await aiMessage.save();
+          
+          // ✅ ADD AI RESPONSE TO REDIS CONTEXT
+          try {
+            await cacheService.addMessageToContext(sessionId, {
+              role: 'assistant',
+              content: streamedResponse,
+              _id: savedAiMessage._id
+            }, userId);
+          } catch (contextError) {
+            console.warn('⚠️ [AI CONTEXT] Warning saving AI response to context:', contextError.message);
+          }
+
+          // ✅ UPDATE SESSION ACTIVITY
+          session.lastActivity = new Date();
+          await session.save();
+          
+          res.end();
+        } catch (endError) {
+          console.error('❌ [STREAMING END] Error:', endError);
+          res.end();
+        }
+      });
+
+      fastApiResponse.data.on('error', (error) => {
+        console.error("❌ [STREAMING] FastAPI stream error:", error);
+        const errorMsg = `❌ Streaming Error: ${error.message}`;
+        if (!res.headersSent) {
+          res.write(errorMsg);
+        }
+        res.end();
+      });
+
+      req.on('close', () => {
+        console.log('🔌 [STREAMING] Client disconnected');
+        if (fastApiResponse.data) {
+          fastApiResponse.data.destroy();
+        }
+      });
+
+    } catch (fastApiError) {
+      console.error("❌ [FASTAPI] Error:", fastApiError);
+      
+      const errorMessage = `❌ AI Service Error: ${fastApiError.message}. Please try again.`;
+      
+      if (!res.headersSent) {
+        res.write(errorMessage);
+      }
+      
+      // ✅ SAVE ERROR MESSAGE WITH CORRECT SENDER FORMAT
+      try {
+        const errorAiMessage = new Message({
           session: sessionId,
-          message: streamedResponse,
-          sender: "AI",
-          type: type,
+          message: errorMessage,
+          sender: "AI", // ✅ FIXED: Use string enum value
+          type: "error",
+          userId: userId, // ✅ ADD USER ID REFERENCE
           metadata: {
-            streamingCompleted: true,
-            contextUsed: recentContext.length,
-            blipIntegrated: type === 'image',
-            processingPipeline: type === 'image' ? 'BLIP→Context→Llama' : 'Llama'
+            error: true,
+            errorType: 'fastapi_error',
+            originalError: fastApiError.message
           },
         });
         
-        const savedAiMessage = await aiMessage.save();
-        
-        // Add AI response to Redis context
-        await cacheService.addMessageToContext(sessionId, {
-          role: 'assistant',
-          content: streamedResponse,
-          _id: savedAiMessage._id
-        }, userId);
-
-        session.lastActivity = new Date();
-        await session.save();
-        
-        res.end();
-      });
-
-      // ✅ IMPROVED ERROR HANDLING
-      fastApiResponse.data.on('error', (error) => {
-        console.error("❌ [STREAMING] Error:", error);
-        const errorMsg = `❌ Streaming Error: ${error.message}`;
-        res.write(errorMsg);
-        res.end();
-      });
-
-    } catch (error) {
-      console.error("❌ [STREAMING] FastAPI Error:", error);
-      res.write(`❌ Failed to process request: ${error.message}`);
+        await errorAiMessage.save();
+      } catch (saveError) {
+        console.error('❌ [ERROR SAVE] Failed to save error message:', saveError);
+      }
+      
       res.end();
     }
 
   } catch (error) {
-    console.error("❌ [SEND MESSAGE] Error:", error);
+    console.error("❌ [SEND MESSAGE] Controller error:", error);
+    
     if (!res.headersSent) {
-      res.status(500).json({ success: false, error: "Failed to send message" });
+      res.status(500).json({ 
+        success: false, 
+        error: "Failed to send message",
+        details: error.message,
+        timestamp: new Date().toISOString()
+      });
     }
   }
 };

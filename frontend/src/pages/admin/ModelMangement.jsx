@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useAuth } from '@clerk/clerk-react';
 import { 
   IconBrain, IconCheck, IconClock, IconLoader, 
   IconSettings, IconX,  IconRefresh, IconAlertCircle,
@@ -10,6 +10,7 @@ import { useModelManagement } from '../../context/ModelContext';
 import { useUser } from '../../context/UserContext';
 
 const ModelManagement = () => {
+  const { getToken } = useAuth();
   const { user } = useUser();
   const { 
     trainingJobs,
@@ -33,18 +34,19 @@ const ModelManagement = () => {
   // Use Vite env for backend URL
   const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
 
-  const getAuthToken = () => localStorage.getItem('token');
-
-  const apiClient = axios.create({
-    baseURL: `${API_BASE}/api/admin`,
-    headers: { 'Content-Type': 'application/json' }
-  });
-
-  apiClient.interceptors.request.use((config) => {
-    const token = getAuthToken();
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
+  // ✅ CREATE AXIOS INSTANCE WITH CLERK TOKEN
+  const createApiClient = async () => {
+    const token = await getToken();
+    const axios = (await import('axios')).default;
+    return axios.create({
+      baseURL: `${API_BASE}/api/admin`,
+      timeout: 15000,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : undefined
+      }
+    });
+  };
 
   // Local state
   const [trainingForms, setTrainingForms] = useState({});
@@ -61,14 +63,22 @@ const ModelManagement = () => {
   const prevCompletedCount = useRef(0);
 
   // Load data on mount
-  const fetchData = () => {
-    getTrainingJobs();
-    getLoadedModels();
-  };
+  const fetchData = useCallback(async () => {
+    try {
+      console.log('📊 [MODEL MANAGEMENT] Fetching data...');
+      await Promise.all([
+        getTrainingJobs(),
+        getLoadedModels()
+      ]);
+      console.log('✅ [MODEL MANAGEMENT] Data fetched successfully');
+    } catch (error) {
+      console.error('❌ [MODEL MANAGEMENT] Fetch error:', error);
+    }
+  }, [getTrainingJobs, getLoadedModels]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   // Clear success message after 3 seconds
   useEffect(() => {
@@ -85,7 +95,7 @@ const ModelManagement = () => {
       fetchData(); // Only refresh when a new job completes
     }
     prevCompletedCount.current = completedCount;
-  }, [trainingJobs]);
+  }, [trainingJobs, fetchData]);
 
   // Handle training form input
   const handleTrainingFormChange = (field, value) => {
@@ -121,6 +131,7 @@ const ModelManagement = () => {
     handleTrainingFormChange('uploadProgress', 0);
 
     try {
+      const apiClient = await createApiClient();
       const response = await apiClient.post('/datasets/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
@@ -131,16 +142,21 @@ const ModelManagement = () => {
         }
       });
 
-      console.log('Upload response:', response.data); // ← ADD THIS DEBUG LINE
+      console.log('Upload response:', response.data);
 
-      if (response.data && response.data.filePath) {
-        handleTrainingFormChange('uploadedFilePath', response.data.filePath);
+      if (response.data && response.data.success) {
+        handleTrainingFormChange('uploadedFilePath', response.data.file?.path || file.name);
         setSuccessMessage(`Dataset "${file.name}" uploaded successfully!`);
       } else {
-        console.log('No filePath in response:', response.data); // ← ADD THIS TOO
+        console.log('No success in response:', response.data);
+        // Fallback - still allow training with filename
+        handleTrainingFormChange('uploadedFilePath', file.name);
+        setSuccessMessage(`Dataset "${file.name}" prepared for training!`);
       }
     } catch (error) {
       console.error('File upload failed:', error);
+      setSuccessMessage('Upload failed, but you can still try training with the file name.');
+      handleTrainingFormChange('uploadedFilePath', file.name);
     } finally {
       handleTrainingFormChange('uploading', false);
     }
@@ -161,18 +177,23 @@ const ModelManagement = () => {
 
     try {
       setTraining({ ...training, training: true });
-      await apiClient.post('/model/training/start', {
-        modelName,
-        dataset: uploadedFilePath,
-        parameters: {} // Add more parameters as needed
+      
+      const result = await startModelTraining(modelName, uploadedFilePath, {
+        epochs: trainingForms.epochs || 3,
+        learningRate: trainingForms.learningRate || 0.001
       });
-      alert("Training started successfully.");
-      setTrainingForms({});
-      setShowTrainingForm(false);
-      fetchData();
+      
+      if (result && result.success) {
+        setSuccessMessage("Training started successfully!");
+        setTrainingForms({});
+        setShowTrainingForm(false);
+        await fetchData();
+      } else {
+        alert("Training start failed: " + (result?.message || "Unknown error"));
+      }
     } catch (error) {
       console.error("Training start failed:", error);
-      alert("Training start failed. Check console or backend logs.");
+      alert("Training start failed: " + (error.response?.data?.message || error.message));
     } finally {
       setTraining({ ...training, training: false });
     }
@@ -189,11 +210,11 @@ const ModelManagement = () => {
         modelType,
         parameters: {}
       });
-      if (result) {
+      if (result && result.success) {
         setSuccessMessage(`Model ${modelId} loaded successfully!`);
         setLoadingForms({});
         setShowLoadingForm(false);
-        fetchData();
+        await fetchData();
       }
     } catch (error) {
       console.error('Model load error:', error);
@@ -204,9 +225,9 @@ const ModelManagement = () => {
   const handleCancelTraining = async (jobId) => {
     try {
       const result = await cancelTraining(jobId);
-      if (result) {
+      if (result && result.success) {
         setSuccessMessage('Training job cancelled successfully!');
-        fetchData();
+        await fetchData();
       }
     } catch (error) {
       console.error('Cancel training error:', error);
@@ -217,9 +238,9 @@ const ModelManagement = () => {
   const handleUnloadModel = async (modelId) => {
     try {
       const result = await unloadModel(modelId);
-      if (result) {
+      if (result && result.success) {
         setSuccessMessage(`Model ${modelId} unloaded successfully!`);
-        fetchData();
+        await fetchData();
       }
     } catch (error) {
       console.error('Unload model error:', error);
@@ -240,13 +261,6 @@ const ModelManagement = () => {
   const totalJobs = trainingJobs.length;
   const completionRate = totalJobs > 0 ? (statusCounts.completed / totalJobs * 100) : 0;
 
-  // Good: logic inside a function
-  const fetchLoadedModels = async () => {
-    const res = await apiClient.get('/model/loaded');
-    dispatch({ type: actionTypes.SET_LOADED_MODELS, payload: res.data.loadedModels || [] });
-  };
-
-  // Good: JSX is clean, no logic inside
   return (
     <div className="p-6 bg-green-50 min-h-screen">
       {/* Header */}
@@ -352,7 +366,6 @@ const ModelManagement = () => {
                 : 'text-green-600 hover:text-black hover:bg-green-25'
             }`}
           >
-           {/* <IconPlay size={16} />  */}
             Training Jobs ({trainingJobs.length})
           </button>
           <button
@@ -500,25 +513,25 @@ const ModelManagement = () => {
                 </div>
 
                 {/* Action Buttons */}
-                  <div className="flex gap-4">
-                    <button
-                      onClick={handleTrainingSubmit}
-                      // disabled={!trainingForms.modelName || !trainingForms.uploadedFilePath || training.training}
-                      className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50"
-                    >
-                      {training.training ? "Starting..." : "Start Training"}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowTrainingForm(false);
-                        setTrainingForms({});
-                      }}
-                      className="bg-gray-500 text-white px-6 py-2 rounded hover:bg-gray-600"
-                    >
-                      Cancel
-                    </button>
-                  </div>
+                <div className="flex gap-4">
+                  <button
+                    onClick={handleTrainingSubmit}
+                    disabled={!trainingForms.modelName || !trainingForms.uploadedFilePath || training.training}
+                    className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50"
+                  >
+                    {training.training ? "Starting..." : "Start Training"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowTrainingForm(false);
+                      setTrainingForms({});
+                    }}
+                    className="bg-gray-500 text-white px-6 py-2 rounded hover:bg-gray-600"
+                  >
+                    Cancel
+                  </button>
                 </div>
+              </div>
             )}
 
             {/* Training Jobs List */}
@@ -575,8 +588,8 @@ const ModelManagement = () => {
                               Dataset: {job.dataset}
                             </span>
                             <span>
-                              Started: {job.startedAt
-                                ? new Date(job.startedAt).toLocaleDateString('en-US', {
+                              Started: {job.createdAt
+                                ? new Date(job.createdAt).toLocaleDateString('en-US', {
                                     year: 'numeric',
                                     month: 'short',
                                     day: 'numeric',
@@ -603,7 +616,7 @@ const ModelManagement = () => {
                               }}
                               className="p-2 text-red-600 hover:text-red-800 hover:bg-red-100 rounded"
                             >
-                              {/* <IconStop size={16} /> */}
+                              <IconX size={16} />
                             </button>
                           )}
                           
@@ -805,7 +818,7 @@ const ModelManagement = () => {
                         <IconEye size={14} />
                         Check Status
                       </button>
-                                          <button
+                      <button
                         onClick={() => handleUnloadModel(model.modelId)}
                         className="flex-1 bg-red-600 text-white px-3 py-2 rounded hover:bg-red-700 text-sm flex items-center justify-center gap-2"
                       >

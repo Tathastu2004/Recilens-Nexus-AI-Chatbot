@@ -2,36 +2,46 @@
 import mongoose from 'mongoose';
 
 const messageSchema = new mongoose.Schema({
+  message: {
+    type: String,
+    required: true
+  },
+  sender: {
+    type: String,
+    required: true,
+    enum: ['user', 'AI'] // ✅ ENUM VALUES SHOULD BE STRINGS
+  },
   session: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'ChatSession',
     required: true
   },
-  sender: {
-    type: mongoose.Schema.Types.Mixed, // ✅ Allow both ObjectId and string
-    required: true,
-    validate: {
-      validator: function(value) {
-        // ✅ Only allows "AI" string or valid ObjectId
-        return value === 'AI' || mongoose.Types.ObjectId.isValid(value);
-      },
-      message: 'Sender must be "AI" or a valid ObjectId'
-    }
-  },
-  message: {
-    type: String,
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true
   },
   type: {
     type: String,
-    enum: ['text', 'image', 'document'],
+    enum: ['text', 'image', 'document', 'error'],
     default: 'text'
   },
-  fileUrl: String,
-  fileType: String,
-  fileName: String,
-  // ✅ ADD TEXT EXTRACTION FIELDS
-  extractedText: String,
+  fileUrl: {
+    type: String,
+    default: null
+  },
+  fileType: {
+    type: String,
+    default: null
+  },
+  fileName: {
+    type: String,
+    default: null
+  },
+  extractedText: {
+    type: String,
+    default: null
+  },
   hasTextExtraction: {
     type: Boolean,
     default: false
@@ -40,25 +50,21 @@ const messageSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-  // ✅ REMOVE extractionStatus OR ADD VALID ENUM VALUES:
-  extractionStatus: {
-    type: String,
-    enum: ['pending', 'processing', 'completed', 'failed', 'not_applicable'], // ✅ Add valid values
-    default: 'not_applicable'
+  responseTimeMs: {
+    type: Number,
+    default: null
   },
-  completedBy: String,
   metadata: {
-    type: Object,
+    type: mongoose.Schema.Types.Mixed,
     default: {}
-  },
-
-  // --- ADDED FIELDS FOR ANALYTICS ---
-  intent: { type: String, required: false },          // The intent recognized in user message
-  isCorrect: { type: Boolean, default: null },        // Whether AI response was accurate (requires labeling)
-  responseTimeMs: { type: Number, default: 0 },       // Response time in milliseconds (AI reply time - user message time)
-
+  }
 }, {
   timestamps: true
 });
+
+// ✅ ADD INDEXES FOR BETTER PERFORMANCE
+messageSchema.index({ session: 1, createdAt: -1 });
+messageSchema.index({ userId: 1, createdAt: -1 });
+messageSchema.index({ sender: 1 });
 
 export default mongoose.model('Message', messageSchema);

@@ -221,7 +221,7 @@ const AdminFeedback = () => {
                       <div className="flex items-center gap-4 text-sm text-green-600 mb-2">
                         <span className="flex items-center gap-1">
                           <IconUser size={14} />
-                          User: {feedback.user?.email || feedback.user?._id}
+                          User: {feedback.userInfo?.email || feedback.user?.email || feedback.email || 'Unknown'}
                         </span>
                         <span>
                           {new Date(feedback.createdAt).toLocaleDateString('en-US', {

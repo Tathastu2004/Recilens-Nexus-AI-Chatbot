@@ -89,22 +89,51 @@ try {
   console.error('❌ [SERVER] Failed to load chat routes:', error.message);
 }
 
+// ✅ FEEDBACK ROUTES
 try {
-  const feedbackRoutes = await import('./routes/feedbackRoute.js');
-  app.use('/api/feedback', feedbackRoutes.default);
-  console.log('✅ [SERVER] Feedback routes loaded');
+  console.log('📋 [SERVER] Loading feedback routes...');
+  const { default: feedbackRoutes } = await import('./routes/feedbackRoute.js');
+  app.use('/api/feedback', feedbackRoutes);
+  console.log('✅ [SERVER] Feedback routes loaded at /api/feedback');
 } catch (error) {
-  console.error('❌ [SERVER] Failed to load feedback routes:', error.message);
+  console.error('❌ [SERVER] Failed to load feedback routes:', error);
 }
 
-// ✅ ADMIN ROUTES WITH SAFER LOADING
+// ✅ ADMIN ROUTES WITH PROPER ERROR HANDLING
 try {
-  const adminRoutes = await import('./admin/routes/adminRoutes.js');
-  app.use('/api/admin', adminRoutes.default);
-  console.log('✅ [SERVER] Admin routes loaded at /api/admin');
+  console.log('🔧 [SERVER] Loading admin routes...');
+  const { default: adminRoutes } = await import('./admin/routes/adminRoutes.js');
+  app.use('/api/admin', adminRoutes);
+  console.log('✅ [SERVER] Admin routes loaded successfully at /api/admin');
+  
+  // Test the route mounting
+  console.log('🧪 [SERVER] Testing admin route mounting...');
+  const routes = [];
+  app._router.stack.forEach((middleware) => {
+    if (middleware.route) {
+      routes.push(middleware.route.path);
+    } else if (middleware.name === 'router') {
+      middleware.handle.stack.forEach((handler) => {
+        if (handler.route) {
+          routes.push(handler.route.path);
+        }
+      });
+    }
+  });
+  console.log('📋 [SERVER] Mounted routes:', routes.filter(r => r?.includes('admin')));
+  
 } catch (error) {
-  console.error('❌ [SERVER] Failed to load admin routes:', error.message);
+  console.error('❌ [SERVER] Failed to load admin routes:', error);
   console.error('❌ [SERVER] Admin functionality will be disabled');
+  
+  // Add a fallback route for debugging
+  app.get('/api/admin/*', (req, res) => {
+    res.status(503).json({
+      success: false,
+      message: 'Admin routes failed to load',
+      error: 'Admin functionality is temporarily unavailable'
+    });
+  });
 }
 
 // ✅ LEGACY AUTH ROUTES (for backward compatibility)
@@ -117,6 +146,17 @@ app.use('/api/auth', async (req, res, next) => {
     res.status(500).json({ success: false, message: 'Auth service unavailable' });
   }
 });
+
+// ✅ DEBUG ROUTES (Development only)
+if (process.env.NODE_ENV === 'development') {
+  try {
+    const { default: debugRoutes } = await import('./routes/debugRoute.js');
+    app.use('/api/debug', debugRoutes);
+    console.log('🐛 [SERVER] Debug routes loaded at /api/debug');
+  } catch (error) {
+    console.error('❌ [SERVER] Failed to load debug routes:', error);
+  }
+}
 
 // ✅ GLOBAL UPLOAD ERROR HANDLER
 app.use(handleUploadError);

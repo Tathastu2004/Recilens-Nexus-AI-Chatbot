@@ -212,7 +212,7 @@ export const ChatProvider = ({ children }) => {
     }
   }, [clearSessionContext, fetchContextStats]);
 
-  // ✅ ENHANCED STREAMING SEND MESSAGE WITH CONTEXT WINDOW (SINGLE DECLARATION)
+  // ✅ ENHANCED STREAMING SEND MESSAGE WITH CONTEXT WINDOW (FIXED SCOPE ISSUE)
   const sendMessage = useCallback(async (messageData) => {
     const { sessionId, message, file, extractedText } = messageData;
 
@@ -230,9 +230,10 @@ export const ChatProvider = ({ children }) => {
     const abortController = new AbortController();
     setActiveStreams(prev => ({ ...prev, [sessionId]: abortController }));
 
-    try {
-      const aiMessageId = `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // ✅ DECLARE aiMessageId OUTSIDE TRY BLOCK TO FIX SCOPE ISSUE
+    const aiMessageId = `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+    try {
       // Add placeholder message
       setMessages(prev => ({
         ...prev,
@@ -265,6 +266,18 @@ export const ChatProvider = ({ children }) => {
       if (!response.ok) {
         if (response.status === 401) {
           throw new Error('Authentication expired. Please sign in again.');
+        }
+        if (response.status === 500) {
+          // ✅ TRY TO GET ERROR DETAILS FROM RESPONSE
+          let errorDetails = 'Internal server error';
+          try {
+            const errorText = await response.text();
+            const errorData = JSON.parse(errorText);
+            errorDetails = errorData.error || errorData.message || errorDetails;
+          } catch {
+            errorDetails = `Server error (${response.status})`;
+          }
+          throw new Error(errorDetails);
         }
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -365,7 +378,7 @@ export const ChatProvider = ({ children }) => {
     } catch (error) {
       console.error('❌ [STREAMING] Error:', error);
       
-      // Update error message  
+      // ✅ NOW aiMessageId IS IN SCOPE - UPDATE ERROR MESSAGE  
       setMessages(prev => ({
         ...prev,
         [sessionId]: (prev[sessionId] || []).map(msg => 
