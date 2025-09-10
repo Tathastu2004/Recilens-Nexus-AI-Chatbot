@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useAuth } from '@clerk/clerk-react';
 
@@ -145,6 +145,7 @@ const ModelManagementContext = createContext();
 export const ModelManagementProvider = ({ children }) => {
   const [state, dispatch] = useReducer(modelManagementReducer, initialState);
   const { getToken } = useAuth();
+  const prevCompletedCount = useRef(0);
 
   // Use Vite env or fallback
   const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
@@ -195,15 +196,16 @@ export const ModelManagementProvider = ({ children }) => {
     try {
       const apiClient = await createApiClient();
       const params = new URLSearchParams(filters);
-      const response = await apiClient.get(`/training?${params}`);
+      const response = await apiClient.get(`/training-jobs?${params}`);
       
-      const jobs = response.data.success ? response.data.jobs : [];
+      // ✅ FIX: Extract jobs correctly from response
+      const jobs = response.data.success ? (response.data.data || []) : [];
       dispatch({ type: actionTypes.SET_TRAINING_JOBS, payload: jobs });
       return jobs;
     } catch (error) {
       const errorMsg = error.response?.data?.message || error.message;
       dispatch({ type: actionTypes.SET_ERROR, payload: errorMsg });
-      dispatch({ type: actionTypes.SET_TRAINING_JOBS, payload: [] });
+      dispatch({ type: actionTypes.SET_TRAINING_JOBS, payload: [] }); // ✅ ENSURE EMPTY ARRAY
       return [];
     } finally {
       dispatch({ type: actionTypes.SET_TRAINING_LOADING, payload: false });
@@ -268,7 +270,8 @@ export const ModelManagementProvider = ({ children }) => {
       
       console.log('📥 [MODEL CONTEXT] Raw response:', response.data);
       
-      const models = response.data.success ? response.data.loadedModels || [] : [];
+      // ✅ FIX: Extract models correctly from response
+      const models = response.data.success ? (response.data.data || []) : [];
       dispatch({ type: actionTypes.SET_LOADED_MODELS, payload: models });
       
       console.log('✅ [MODEL CONTEXT] Loaded models set:', models);
@@ -277,7 +280,7 @@ export const ModelManagementProvider = ({ children }) => {
       console.error('❌ [MODEL CONTEXT] Get loaded models error:', error);
       const errorMsg = error.response?.data?.message || error.message;
       dispatch({ type: actionTypes.SET_ERROR, payload: errorMsg });
-      dispatch({ type: actionTypes.SET_LOADED_MODELS, payload: [] });
+      dispatch({ type: actionTypes.SET_LOADED_MODELS, payload: [] }); // ✅ ENSURE EMPTY ARRAY
       return [];
     } finally {
       dispatch({ type: actionTypes.SET_MODEL_LOADING, payload: false });

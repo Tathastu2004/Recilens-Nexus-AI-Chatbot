@@ -470,6 +470,13 @@ export const UserProvider = ({ children }) => {
   useEffect(() => {
     const checkAuthStatus = async () => {
       try {
+        // ✅ Skip traditional auth check if using Clerk (admin panel)
+        if (window.location.pathname.includes('/admin')) {
+          console.log('🔐 [USER CONTEXT] Skipping traditional auth check for admin panel');
+          setLoading(false);
+          return;
+        }
+
         const token = localStorage.getItem("token");
         const userData = localStorage.getItem("user");
 

@@ -59,6 +59,7 @@ export default function Dashboard() {
   const [systemHealth, setSystemHealth] = useState(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [lastHealthCheck, setLastHealthCheck] = useState(null);
+  const [trainingJobsLocal, setTrainingJobsLocal] = useState([]); // ✅ ADD LOCAL STATE
 
   // Axios instance with interceptors
   const apiClient = axios.create({
@@ -179,51 +180,64 @@ export default function Dashboard() {
     return () => clearInterval(healthInterval);
   }, []);
 
-  // Fetch dashboard data
+  // ✅ FIXED Fetch dashboard data
   useEffect(() => {
-    const fetchDashboardData = async () => {
+    const fetchInitialData = async () => {
       try {
-        console.log('📊 Fetching dashboard data...');
+        console.log('🔄 Fetching initial dashboard data...');
         
-        const [statsRes, analyticsRes, usersRes, feedbackRes] = await Promise.allSettled([
-          safeApiCall(() => getDashboardStats(), {}),
-          safeApiCall(() => getAnalytics(), []),
-          safeApiCall(() => getAllUsers(), { users: [] }),
-          safeApiCall(() => getAllFeedbacks(), { feedbacks: [] })
-        ]);
-
-        setDashboardStats(statsRes.status === 'fulfilled' ? statsRes.value : {});
-        setAnalytics(analyticsRes.status === 'fulfilled' ? (analyticsRes.value || []) : []);
-        setUsers(usersRes.status === 'fulfilled' ? (usersRes.value?.users || []) : []);
-        setFeedbacks(feedbackRes.status === 'fulfilled' ? (feedbackRes.value?.feedbacks || []) : []);
-
-        console.log('✅ Dashboard data loaded');
-        safeApiCall(() => getLoadedModels());
-
+        // Fetch dashboard stats
+        const statsData = await getDashboardStats();
+        console.log('📊 Stats data:', statsData);
+        
+        if (statsData?.data) {
+          setDashboardStats(statsData.data);
+        } else if (statsData?.success && statsData) {
+          // Handle case where data is at root level
+          setDashboardStats(statsData);
+        }
+        
+        // Fetch analytics
+        const analyticsData = await getAnalytics();
+        console.log('📈 Analytics data:', analyticsData);
+        setAnalytics(analyticsData?.data || []);
+        
+        // Fetch users
+        const usersData = await getAllUsers();
+        console.log('👥 Users data:', usersData);
+        setUsers(usersData?.data || []);
+        
+        // ✅ FIX: Use local state instead of context setTrainingJobs
+        const trainingData = await getTrainingJobs();
+        console.log('🚂 Training data:', trainingData);
+        setTrainingJobsLocal(trainingData?.data || []); // ✅ FIXED
+        
       } catch (error) {
-        console.error('❌ Dashboard data fetch error:', error);
+        console.error('❌ Error fetching initial data:', error);
       }
     };
 
-    fetchDashboardData();
-  }, []);
+    fetchInitialData();
+  }, [getDashboardStats, getAnalytics, getAllUsers, getTrainingJobs]);
 
   // Process analytics for charts
   const processAnalyticsForCharts = () => {
     if (!analytics.length) return { conversationsOverTime: [], topIntents: [] };
 
-    const conversationsOverTime = analytics.slice(-7).map((item) => ({
+    const conversationsOverTime = analytics.slice(-7).map((item, index) => ({ // ✅ ADD INDEX
       date: new Date(item.generatedAt).toLocaleDateString('en-US', { 
         month: 'short', 
         day: 'numeric' 
       }),
       conversations: item.totalQueries,
-      accuracy: item.accuracy
+      accuracy: item.accuracy,
+      id: `conversation-${index}` // ✅ ADD UNIQUE ID
     }));
 
-    const topIntents = analytics.slice(0, 5).map(item => ({
+    const topIntents = analytics.slice(0, 5).map((item, index) => ({ // ✅ ADD INDEX
       intent: item.intent.replace(/^the intent is:\s*/i, '').trim() || 'General',
-      count: item.totalQueries
+      count: item.totalQueries,
+      id: `intent-${index}` // ✅ ADD UNIQUE ID
     }));
 
     return { conversationsOverTime, topIntents };
@@ -235,21 +249,25 @@ export default function Dashboard() {
       acc[feedback.status] = (acc[feedback.status] || 0) + 1;
       return acc;
     }, {});
-    return Object.entries(stats).map(([status, count]) => ({
+    return Object.entries(stats).map(([status, count], index) => ({ // ✅ ADD INDEX
       status: status.charAt(0).toUpperCase() + status.slice(1),
-      count
+      count,
+      id: `feedback-${index}` // ✅ ADD UNIQUE ID
     }));
   };
 
   const processTrainingStats = () => {
-    if (!trainingJobs.length) return [];
-    const stats = trainingJobs.reduce((acc, job) => {
+    // ✅ USE LOCAL STATE OR CONTEXT STATE
+    const jobsToProcess = trainingJobsLocal.length > 0 ? trainingJobsLocal : trainingJobs;
+    if (!jobsToProcess.length) return [];
+    const stats = jobsToProcess.reduce((acc, job) => {
       acc[job.status] = (acc[job.status] || 0) + 1;
       return acc;
     }, {});
-    return Object.entries(stats).map(([status, count]) => ({
+    return Object.entries(stats).map(([status, count], index) => ({ // ✅ ADD INDEX
       status: status.charAt(0).toUpperCase() + status.slice(1),
-      count
+      count,
+      id: `training-${index}` // ✅ ADD UNIQUE ID
     }));
   };
 
@@ -259,9 +277,10 @@ export default function Dashboard() {
       acc[user.role] = (acc[user.role] || 0) + 1;
       return acc;
     }, {});
-    return Object.entries(stats).map(([role, count]) => ({
+    return Object.entries(stats).map(([role, count], index) => ({ // ✅ ADD INDEX
       role: role.charAt(0).toUpperCase() + role.slice(1),
-      count
+      count,
+      id: `role-${index}` // ✅ ADD UNIQUE ID
     }));
   };
 
@@ -271,10 +290,11 @@ export default function Dashboard() {
     .slice(0, 5);
 
   const tableHeaders = ["Name", "Email", "Role"];
-  const tableRows = recentUsers.map(user => [
+  const tableRows = recentUsers.map((user, index) => [ // ✅ ADD UNIQUE KEYS
     user.username || user.name || 'Unknown',
     user.email,
-    user.role
+    user.role,
+    `user-row-${user._id || index}` // ✅ ADD UNIQUE KEY
   ]);
 
   // Loading state
@@ -318,9 +338,9 @@ export default function Dashboard() {
       {/* Notifications */}
       {notifications.length > 0 && (
         <div className="mb-6 space-y-2">
-          {notifications.slice(0, 3).map(notification => (
+          {notifications.slice(0, 3).map((notification, index) => ( // ✅ ADD UNIQUE KEYS
             <div
-              key={notification.id}
+              key={`notification-${notification.id || index}`} // ✅ UNIQUE KEY
               className={`p-3 rounded-lg text-sm ${
                 notification.type === 'error' 
                   ? 'bg-red-100 border border-red-300 text-red-800'
@@ -359,7 +379,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
         <StatCard 
           title="Training Jobs" 
-          value={trainingJobs.length || 0}
+          value={trainingJobsLocal.length || trainingJobs.length || 0}
         />
         <StatCard 
           title="Loaded Models" 
@@ -425,7 +445,7 @@ export default function Dashboard() {
                   label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                 >
                   {userRoleStats.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    <Cell key={`role-cell-${entry.id || index}`} fill={COLORS[index % COLORS.length]} /> // ✅ UNIQUE KEY
                   ))}
                 </Pie>
                 <Tooltip />
@@ -490,7 +510,7 @@ export default function Dashboard() {
                   paddingAngle={5}
                 >
                   {feedbackStats.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    <Cell key={`feedback-cell-${entry.id || index}`} fill={COLORS[index % COLORS.length]} /> // ✅ UNIQUE KEY
                   ))}
                 </Pie>
                 <Tooltip />
@@ -542,7 +562,7 @@ export default function Dashboard() {
               className="w-full text-left text-green-600 hover:text-green-800 py-2 px-3 rounded hover:bg-green-50 transition-colors"
               onClick={() => navigate('/admin/models')}
             >
-              → Manage Training Jobs ({trainingJobs.length})
+              → Manage Training Jobs ({trainingJobsLocal.length || trainingJobs.length})
             </button>
             <button
               className="w-full text-left text-green-600 hover:text-green-800 py-2 px-3 rounded hover:bg-green-50 transition-colors"
@@ -727,60 +747,6 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
-
-              {/* System Resources */}
-              {systemHealth.system && (
-                <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                  <h5 className="font-medium text-gray-700 mb-3">System Resources</h5>
-                  <div className="grid grid-cols-3 gap-4">
-                    {systemHealth.system.cpu_percent !== undefined && (
-                      <div className="text-center">
-                        <div className="text-lg font-semibold text-gray-800">{systemHealth.system.cpu_percent}%</div>
-                        <div className="text-xs text-gray-500">CPU Usage</div>
-                        <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
-                          <div 
-                            className={`h-2 rounded-full ${
-                              systemHealth.system.cpu_percent > 80 ? 'bg-red-500' :
-                              systemHealth.system.cpu_percent > 60 ? 'bg-yellow-500' : 'bg-green-500'
-                            }`}
-                            style={{ width: `${Math.min(systemHealth.system.cpu_percent, 100)}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    )}
-                    {systemHealth.system.memory_percent !== undefined && (
-                      <div className="text-center">
-                        <div className="text-lg font-semibold text-gray-800">{systemHealth.system.memory_percent}%</div>
-                        <div className="text-xs text-gray-500">Memory Usage</div>
-                        <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
-                          <div 
-                            className={`h-2 rounded-full ${
-                              systemHealth.system.memory_percent > 80 ? 'bg-red-500' :
-                              systemHealth.system.memory_percent > 60 ? 'bg-yellow-500' : 'bg-green-500'
-                            }`}
-                            style={{ width: `${Math.min(systemHealth.system.memory_percent, 100)}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    )}
-                    {systemHealth.system.disk_percent !== undefined && (
-                      <div className="text-center">
-                        <div className="text-lg font-semibold text-gray-800">{systemHealth.system.disk_percent}%</div>
-                        <div className="text-xs text-gray-500">Disk Usage</div>
-                        <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
-                          <div 
-                            className={`h-2 rounded-full ${
-                              systemHealth.system.disk_percent > 80 ? 'bg-red-500' :
-                              systemHealth.system.disk_percent > 60 ? 'bg-yellow-500' : 'bg-green-500'
-                            }`}
-                            style={{ width: `${Math.min(systemHealth.system.disk_percent, 100)}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
 
               {/* Summary */}
               {systemHealth.summary && (

@@ -544,11 +544,11 @@ const ModelManagement = () => {
               </div>
             ) : (
               <div className="divide-y divide-green-100">
-                {filteredTrainingJobs.map((job) => {
+                {filteredTrainingJobs.map((job, index) => {
                   const isExpanded = expandedTraining === job._id;
                   
                   return (
-                    <div key={job._id} className="py-6 hover:bg-green-25">
+                    <div key={`training-job-${job._id || index}-${job.createdAt || Date.now()}`} className="py-6 hover:bg-green-25"> {/* ✅ UNIQUE KEY */}
                       {/* Job Header */}
                       <div 
                         className="flex items-start justify-between cursor-pointer"
@@ -784,8 +784,8 @@ const ModelManagement = () => {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {Array.isArray(loadedModels) && loadedModels.map(model => (
-                  <div key={model.modelId} className="bg-white p-6 rounded-lg shadow hover:shadow-lg transition-shadow">
+                {Array.isArray(loadedModels) && loadedModels.map((model, index) => (
+                  <div key={`loaded-model-${model.modelId || index}-${model.loadTime || Date.now()}`} className="bg-white p-6 rounded-lg shadow hover:shadow-lg transition-shadow"> {/* ✅ UNIQUE KEY */}
                     <div className="flex items-start justify-between mb-4">
                       <div>
                         <h4 className="font-semibold text-green-900 text-lg flex items-center gap-2">
