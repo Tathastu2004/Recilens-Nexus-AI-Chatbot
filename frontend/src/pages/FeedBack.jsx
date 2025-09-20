@@ -3,23 +3,27 @@ import { useNavigate } from 'react-router-dom';
 import { 
   IconSend, IconMessageCircle, IconCheck, IconClock, IconMail, 
   IconUser, IconX, IconPlus, IconRefresh, IconAlertCircle,
-  IconFilter, IconChevronDown, IconEdit , IconArrowLeft
+  IconFilter, IconChevronDown, IconEdit, IconArrowLeft
 } from '@tabler/icons-react';
-import { useFeedback } from '../context/FeedbackContext'; // ✅ Fixed path (contexts not context)
+import { useFeedback } from '../context/feedbackContext'; // ✅ Correct path
 import { useTheme } from '../context/ThemeContext';
-import { useUser } from '../context/UserContext';
+// ✅ FIXED: Use ClerkUserContext instead of UserContext
+import { useClerkUser } from '../context/ClerkUserContext'; // Use ClerkUserContext
 
 const FeedBack = () => {
   const navigate = useNavigate();
   const { isDark } = useTheme();
-  const { user, isAuthenticated } = useUser();
+  
+  // ✅ FIXED: Use ClerkUserContext for authentication
+  const { dbUser: user, isAuthenticated, loading: userLoading } = useClerkUser();
+  
   const { 
     feedbacks, 
     loading, 
     error, 
     createFeedback, 
     getUserFeedbacks,
-    getUserFeedbackStats, // ✅ Make sure this exists in your FeedbackContext
+    getUserFeedbackStats,
     clearError 
   } = useFeedback();
 
@@ -57,53 +61,84 @@ const FeedBack = () => {
 
   // ✅ Enhanced load function with better error handling
   const loadUserData = async () => {
-    if (!userId) return;
+    if (!userId) {
+      console.log('⚠️ [FEEDBACK] No userId available');
+      return;
+    }
 
     try {
       console.log('🔍 [FEEDBACK] Loading data for user:', userId);
       
       // Load feedbacks
-      await getUserFeedbacks(userId);
+      const feedbackResult = await getUserFeedbacks(userId);
+      
+      if (feedbackResult?.success) {
+        console.log('✅ [FEEDBACK] Feedbacks loaded successfully');
+      }
       
       // Load stats if function exists
       if (getUserFeedbackStats) {
-        const statsResult = await getUserFeedbackStats(userId);
-        if (statsResult?.success && statsResult?.stats) {
-          setStats(statsResult.stats);
-          console.log('📊 [FEEDBACK] Stats loaded:', statsResult.stats);
+        try {
+          const statsResult = await getUserFeedbackStats(userId);
+          if (statsResult?.success && statsResult?.stats) {
+            setStats(statsResult.stats);
+            console.log('📊 [FEEDBACK] Stats loaded:', statsResult.stats);
+          } else {
+            // Fallback: Calculate stats from feedbacks array
+            calculateStatsFromFeedbacks();
+          }
+        } catch (statsError) {
+          console.warn('⚠️ [FEEDBACK] Stats loading failed, calculating from feedbacks:', statsError);
+          calculateStatsFromFeedbacks();
         }
       } else {
-        // Fallback: Calculate stats from feedbacks array
-        const statusCounts = feedbacks.reduce((acc, feedback) => {
-          acc[feedback.status] = (acc[feedback.status] || 0) + 1;
-          return acc;
-        }, { pending: 0, processed: 0, completed: 0 });
-        
-        const repliedCount = feedbacks.filter(f => f.reply && f.reply.trim()).length;
-        const total = feedbacks.length;
-        
-        setStats({
-          total,
-          ...statusCounts,
-          replied: repliedCount,
-          unreplied: total - repliedCount,
-          percentages: {
-            pending: total > 0 ? Math.round((statusCounts.pending / total) * 100) : 0,
-            processed: total > 0 ? Math.round((statusCounts.processed / total) * 100) : 0,
-            completed: total > 0 ? Math.round((statusCounts.completed / total) * 100) : 0,
-            replied: total > 0 ? Math.round((repliedCount / total) * 100) : 0
-          }
-        });
+        calculateStatsFromFeedbacks();
       }
     } catch (error) {
       console.error('❌ [FEEDBACK] Error loading data:', error);
     }
   };
 
-  // Load user feedbacks and stats when user is available
+  // ✅ Helper function to calculate stats from feedbacks
+  const calculateStatsFromFeedbacks = () => {
+    if (feedbacks.length === 0) return;
+
+    const statusCounts = feedbacks.reduce((acc, feedback) => {
+      acc[feedback.status] = (acc[feedback.status] || 0) + 1;
+      return acc;
+    }, { pending: 0, processed: 0, completed: 0 });
+    
+    const repliedCount = feedbacks.filter(f => f.reply && f.reply.trim()).length;
+    const total = feedbacks.length;
+    
+    setStats({
+      total,
+      ...statusCounts,
+      replied: repliedCount,
+      unreplied: total - repliedCount,
+      percentages: {
+        pending: total > 0 ? Math.round((statusCounts.pending / total) * 100) : 0,
+        processed: total > 0 ? Math.round((statusCounts.processed / total) * 100) : 0,
+        completed: total > 0 ? Math.round((statusCounts.completed / total) * 100) : 0,
+        replied: total > 0 ? Math.round((repliedCount / total) * 100) : 0
+      }
+    });
+  };
+
+  // ✅ Load user feedbacks and stats when user is available
   useEffect(() => {
-    loadUserData();
-  }, [userId, feedbacks.length]); // ✅ Added feedbacks.length as dependency
+    if (isAuthenticated && userId && !userLoading) {
+      console.log('🔄 [FEEDBACK] User authenticated, loading data...');
+      loadUserData();
+    }
+  }, [isAuthenticated, userId, userLoading]);
+
+  // ✅ Recalculate stats when feedbacks change
+  useEffect(() => {
+    if (feedbacks.length > 0) {
+      calculateStatsFromFeedbacks();
+    }
+  }, [feedbacks]);
 
   // Clear success message after 3 seconds
   useEffect(() => {
@@ -149,6 +184,8 @@ const FeedBack = () => {
         await loadUserData();
         
         console.log('✅ [FEEDBACK] Feedback submitted successfully');
+      } else {
+        console.error('❌ [FEEDBACK] Submit failed:', result.message);
       }
     } catch (error) {
       console.error('❌ [FEEDBACK] Submit error:', error);
@@ -221,6 +258,29 @@ const FeedBack = () => {
     statusFilter === 'all' || feedback.status === statusFilter
   );
 
+  // ✅ FIXED: Better loading and authentication checks
+  if (userLoading) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center transition-all duration-300 ${
+        isDark 
+          ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900' 
+          : 'bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50'
+      }`}>
+        <div className="text-center space-y-4 p-8">
+          <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto shadow-xl">
+            <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200">
+            Loading...
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400 max-w-md">
+            Please wait while we load your feedback system.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthenticated || !user) {
     return (
       <div className={`min-h-screen flex items-center justify-center transition-all duration-300 ${
@@ -238,6 +298,20 @@ const FeedBack = () => {
           <p className="text-gray-600 dark:text-gray-400 max-w-md">
             Please log in to access the feedback system and view your submitted feedback.
           </p>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={() => navigate('/signin')}
+              className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg transform hover:scale-105"
+            >
+              Sign In
+            </button>
+            <button
+              onClick={() => navigate('/chat')}
+              className="px-6 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-all"
+            >
+              Back to Chat
+            </button>
+          </div>
         </div>
       </div>
     );
