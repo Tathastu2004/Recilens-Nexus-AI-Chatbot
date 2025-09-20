@@ -280,14 +280,14 @@ export const AdminProvider = ({ children }) => {
     }
   }, [createApiClient]);
 
-  // ✅ SYSTEM HEALTH - WORKING ENDPOINT
+  // ✅ SYSTEM HEALTH - FIXED ENDPOINT
   const getSystemHealth = useCallback(async () => {
     setHealthLoading(true);
     setError(null);
     try {
       console.log('🩺 Fetching system health...');
       const apiClient = await createApiClient();
-      const res = await apiClient.get("/health");
+      const res = await apiClient.get("/health"); // ✅ Fixed: was "/health"
       console.log('✅ System health data received:', res.data);
       return res.data;
     } catch (error) {

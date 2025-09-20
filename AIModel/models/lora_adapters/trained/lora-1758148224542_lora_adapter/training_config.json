@@ -1,0 +1,35 @@
+{
+  "base_model_name": "meta-llama/Llama-2-7b-hf",
+  "lora_config": {
+    "alpha": 32,
+    "auto_mapping": null,
+    "base_model_name_or_path": "meta-llama/Llama-2-7b-hf",
+    "bias": "none",
+    "fan_in_fan_out": false,
+    "inference_mode": true,
+    "init_lora_weights": true,
+    "layers_pattern": null,
+    "layers_to_transform": null,
+    "lora_dropout": 0.1,
+    "modules_to_save": null,
+    "peft_type": "LORA",
+    "r": 16,
+    "revision": null,
+    "target_modules": [
+      "q_proj",
+      "v_proj",
+      "k_proj",
+      "o_proj"
+    ],
+    "task_type": "CAUSAL_LM"
+  },
+  "training_config": {
+    "learning_rate": 0.0002,
+    "epochs": 3,
+    "batch_size": 4
+  },
+  "train_loss": 0.45,
+  "train_runtime": 180.0,
+  "train_samples_per_second": 1.2,
+  "trained_at": "2025-09-18T04:00:40.267673"
+}

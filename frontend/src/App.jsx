@@ -27,7 +27,7 @@ import FeedBack from './pages/FeedBack';
 import AdminRoutes from './routes/AdminRoutes';
 
 // Debugging Component
-import DebugUser from './components/DebugUser';
+// import DebugUser from './components/DebugUser';
 
 // ✅ Enhanced ErrorBoundary
 class ErrorBoundary extends React.Component {
@@ -105,7 +105,7 @@ function App() {
               <FeedbackProvider>
                 
                   <div className="App min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300">
-                    <DebugUser /> {/* Add this temporarily */}
+                    {/* <DebugUser /> Add this temporarily */}
                     <Routes>
                       {/* ✅ PRIMARY CLERK AUTHENTICATION ROUTES */}
                       <Route path="/signin" element={<ClerkSignIn />} />

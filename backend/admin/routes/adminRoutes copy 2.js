@@ -1,6 +1,5 @@
 import express from 'express';
 import * as adminController from '../controllers/adminController.js';
-import modelManagementRoutes from './modelManagementRoutes.js'
 
 const router = express.Router();
 
@@ -26,8 +25,14 @@ try {
   router.put('/users/:id/role', adminController.updateUserRole);
   router.delete('/users/:id', adminController.deleteUser);
 
- //model management 
-   router.use('/model', modelManagementRoutes);
+  // ✅ TRAINING JOBS
+  router.get('/training-jobs', adminController.getTrainingJobs);
+  router.post('/training-jobs', adminController.createTrainingJob);
+  router.put('/training-jobs/:id', adminController.updateTrainingJob);
+
+  // ✅ MODEL MANAGEMENT
+  router.get('/model/loaded', adminController.getLoadedModels);
+  router.get('/training', adminController.getTrainingJobs); // Alternative route
 
   console.log('✅ [ADMIN ROUTES] All admin routes initialized successfully');
 

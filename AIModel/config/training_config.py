@@ -2,41 +2,56 @@ import os
 from pathlib import Path
 
 class TrainingConfig:
+    # Base directories
+    BASE_DIR = Path(__file__).parent.parent
+    MODELS_DIR = BASE_DIR / "models"
+    DATASETS_DIR = BASE_DIR / "datasets"
+    
+    # LoRA specific paths
+    LORA_ADAPTERS_PATH = MODELS_DIR / "lora_adapters"
+    LORA_TRAINED_PATH = LORA_ADAPTERS_PATH / "trained"
+    LORA_CHECKPOINTS_PATH = LORA_ADAPTERS_PATH / "checkpoints"
+    
     # Node.js backend URL
     NODE_BACKEND_URL = os.getenv("NODE_BACKEND_URL", "http://localhost:3000")
     
     # Ollama configuration
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+    LLAMA_URL = os.getenv("LLAMA_URL", "http://127.0.0.1:11434")
     
-    # BLIP server configuration
-    BLIP_HOST = os.getenv("BLIP_HOST", "http://127.0.0.1:5001")
-    
-    # Model storage paths
-    MODELS_BASE_PATH = Path(os.getenv("MODELS_PATH", "./models"))
-    LLAMA_MODELS_PATH = MODELS_BASE_PATH / "llama"
-    BLIP_MODELS_PATH = MODELS_BASE_PATH / "blip"
-    
-    # Training parameters
-    DEFAULT_TRAINING_PARAMS = {
-        "llama": {
-            "max_epochs": 3,
-            "learning_rate": 1e-5,
-            "batch_size": 4,
-            "max_seq_length": 2048
-        },
-        "blip": {
-            "max_epochs": 5,
-            "learning_rate": 2e-5,
-            "batch_size": 8,
-            "image_size": 384
-        }
+    # Default LoRA parameters
+    DEFAULT_LORA_CONFIG = {
+        "r": 16,
+        "lora_alpha": 32,
+        "lora_dropout": 0.1,
+        "target_modules": ["q_proj", "v_proj", "k_proj", "o_proj"],
+        "bias": "none"
     }
     
-    # Logging configuration
-    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+    # Default training parameters
+    DEFAULT_TRAINING_CONFIG = {
+        "learning_rate": 2e-4,
+        "num_train_epochs": 3,
+        "per_device_train_batch_size": 4,
+        "gradient_accumulation_steps": 4,
+        "warmup_steps": 100,
+        "logging_steps": 10,
+        "save_steps": 500,
+        "max_grad_norm": 0.3,
+        "weight_decay": 0.001
+    }
     
     @classmethod
     def ensure_model_directories(cls):
-        """Create model directories if they don't exist"""
-        cls.LLAMA_MODELS_PATH.mkdir(parents=True, exist_ok=True)
-        cls.BLIP_MODELS_PATH.mkdir(parents=True, exist_ok=True)
+        """Ensure all necessary directories exist"""
+        directories = [
+            cls.MODELS_DIR,
+            cls.DATASETS_DIR,
+            cls.LORA_ADAPTERS_PATH,
+            cls.LORA_TRAINED_PATH,
+            cls.LORA_CHECKPOINTS_PATH
+        ]
+        
+        for directory in directories:
+            directory.mkdir(parents=True, exist_ok=True)
+            print(f"📁 Created directory: {directory}")

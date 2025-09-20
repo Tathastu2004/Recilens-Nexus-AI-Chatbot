@@ -1114,3 +1114,133 @@ export const deleteUser = async (req, res) => {
   }
 };
 
+/**
+ * ===============================
+ *  TRAINING JOBS
+ * ===============================
+ */
+export const getTrainingJobs = async (req, res) => {
+  try {
+    const jobs = await ModelTraining.find({}).sort({ createdAt: -1 });
+    res.json({
+      success: true,
+      data: jobs,
+      count: jobs.length
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch training jobs',
+      error: error.message
+    });
+  }
+};
+
+export const createTrainingJob = async (req, res) => {
+  try {
+    const { name, modelType, dataset, parameters } = req.body;
+    
+    const newJob = new ModelTraining({
+      name,
+      modelType,
+      dataset,
+      parameters,
+      status: 'pending',
+      createdBy: req.user?._id
+    });
+    
+    await newJob.save();
+    
+    res.json({
+      success: true,
+      message: 'Training job created successfully',
+      data: newJob
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create training job',
+      error: error.message
+    });
+  }
+};
+
+export const updateTrainingJob = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    
+    const updatedJob = await ModelTraining.findByIdAndUpdate(
+      id,
+      updates,
+      { new: true }
+    );
+    
+    if (!updatedJob) {
+      return res.status(404).json({
+        success: false,
+        message: 'Training job not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Training job updated successfully',
+      data: updatedJob
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update training job',
+      error: error.message
+    });
+  }
+};
+
+// ✅ ADD these missing functions to adminController.js
+
+// filepath: /Users/apurv79/F/NexusChatBot copy/Recilens-Nexus-AI-Chatbot/backend/admin/controllers/adminController.js
+
+// Add this function if missing:
+export const getLoadedModels = async (req, res) => {
+  try {
+    console.log('🤖 [LOADED MODELS] Fetching loaded models...');
+    
+    // Mock loaded models data for now
+    const loadedModels = [
+      {
+        modelId: 'llama3-base',
+        type: 'llama',
+        loadTime: new Date().toISOString(),
+        status: 'loaded',
+        memory_usage: '2.5GB',
+        version: '3.0'
+      },
+      {
+        modelId: 'blip-vit-base',
+        type: 'blip',
+        loadTime: new Date().toISOString(),
+        status: 'loaded',
+        memory_usage: '1.2GB',
+        version: '2.0'
+      }
+    ];
+
+    console.log('✅ [LOADED MODELS] Models data prepared');
+    
+    res.json({
+      success: true,
+      data: loadedModels,
+      count: loadedModels.length
+    });
+
+  } catch (error) {
+    console.error('❌ [LOADED MODELS] Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch loaded models',
+      error: error.message
+    });
+  }
+};
+

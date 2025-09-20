@@ -236,8 +236,29 @@ export const sendMessage = async (req, res) => {
   console.log("📨 [SEND MESSAGE] Request received for streaming with context...");
   
   try {
-    const { sessionId, message, type = "text", fileUrl, fileType, fileName, extractedText } = req.body;
+    const { 
+      sessionId, 
+      message, 
+      type = "text", 
+      fileUrl, 
+      fileType, 
+      fileName, 
+      extractedText,
+      textLength = 0,
+      documentType,
+      contextEnabled = false,
+      contextInstruction
+    } = req.body;
     const userId = req.user._id;
+
+    console.log('📋 [SEND MESSAGE] Received payload:', {
+      sessionId: sessionId?.substring(0, 8) + '...',
+      type,
+      hasExtractedText: !!extractedText,
+      extractedTextLength: extractedText?.length || 0,
+      fileName,
+      hasContextInstruction: !!contextInstruction
+    });
 
     // ✅ VALIDATION
     if (!sessionId || !message) {
@@ -262,11 +283,11 @@ export const sendMessage = async (req, res) => {
       });
     }
 
-    // ✅ SAVE USER MESSAGE WITH CORRECT SENDER FORMAT
+    // ✅ SAVE USER MESSAGE WITH BETTER METADATA
     const userMessage = new Message({
       session: sessionId,
       message,
-      sender: "user", // ✅ FIXED: Use string enum value, not userId
+      sender: "user",
       type,
       fileUrl: fileUrl || null,
       fileType: fileType || null,
@@ -274,11 +295,21 @@ export const sendMessage = async (req, res) => {
       extractedText: extractedText || null,
       hasTextExtraction: !!(extractedText && !extractedText.startsWith("❌")),
       textLength: extractedText ? extractedText.length : 0,
-      userId: userId, // ✅ ADD SEPARATE FIELD FOR USER ID REFERENCE
+      userId: userId,
+      metadata: {
+        contextEnabled,
+        documentType: documentType || null,
+        hasContextInstruction: !!contextInstruction
+      }
     });
     
     const savedUserMessage = await userMessage.save();
-    console.log("✅ [SEND MESSAGE] User message saved:", savedUserMessage._id);
+    console.log("✅ [SEND MESSAGE] User message saved:", {
+      id: savedUserMessage._id,
+      type: savedUserMessage.type,
+      hasText: savedUserMessage.hasTextExtraction,
+      textLength: savedUserMessage.textLength
+    });
 
     // ✅ ADD TO REDIS CONTEXT
     try {
@@ -316,25 +347,39 @@ export const sendMessage = async (req, res) => {
     let chunkCount = 0;
 
     try {
+      // ✅ ENHANCED FASTAPI PAYLOAD FOR DOCUMENT PROCESSING
       const fastApiPayload = {
-        message,
-        extractedText,
-        type,
-        fileUrl,
-        fileType,
-        fileName,
         sessionId,
-        conversationContext: recentContext
+        message,
+        type,
+        conversation_context: recentContext.map(ctx => ({
+          role: ctx.role,
+          content: ctx.content
+        })),
+        adapter_id: null,
+        // ✅ ADD DOCUMENT CONTEXT FIELDS
+        extractedText: extractedText || null,
+        fileUrl: fileUrl || null,
+        fileName: fileName || null,
+        fileType: fileType || null,
+        textLength: extractedText ? extractedText.length : 0,
+        documentType: documentType || (fileName ? fileName.split('.').pop().toLowerCase() : null),
+        contextEnabled: contextEnabled || !!extractedText,
+        contextInstruction: contextInstruction || null
       };
 
-      console.log('🦙 [FASTAPI] Sending to FastAPI:', {
-        contextMessages: recentContext.length,
-        type: type,
-        hasExtractedText: !!extractedText,
-        payload: JSON.stringify(fastApiPayload).length + ' bytes'
+      console.log('🦙 [FASTAPI] Enhanced payload for document processing:', {
+        type: fastApiPayload.type,
+        hasExtractedText: !!fastApiPayload.extractedText,
+        extractedTextLength: fastApiPayload.extractedText?.length || 0,
+        fileName: fastApiPayload.fileName,
+        contextMessages: fastApiPayload.conversation_context.length,
+        hasContextInstruction: !!fastApiPayload.contextInstruction,
+        documentType: fastApiPayload.documentType,
+        contextEnabled: fastApiPayload.contextEnabled
       });
 
-      // ✅ CHECK IF FASTAPI IS AVAILABLE
+      // ✅ SEND TO ENHANCED FASTAPI ENDPOINT
       const fastApiResponse = await axios.post(`${FASTAPI_BASE_URL}/chat`, fastApiPayload, {
         responseType: 'stream',
         timeout: 120000,
@@ -353,7 +398,9 @@ export const sendMessage = async (req, res) => {
           streamedResponse += chunkStr;
           chunkCount++;
           
-          console.log(`📦 [CHUNK ${chunkCount}] Size: ${chunk.length} bytes`);
+          if (chunkCount % 20 === 0) {  // Log every 20th chunk for documents
+            console.log(`📦 [CHUNK ${chunkCount}] Total response: ${streamedResponse.length} chars`);
+          }
           
           res.write(chunkStr);
           if (res.flush) {
@@ -367,20 +414,23 @@ export const sendMessage = async (req, res) => {
       fastApiResponse.data.on('end', async () => {
         try {
           console.log("✅ [STREAMING] FastAPI completed");
-          console.log(`📊 Final response length: ${streamedResponse.length} chars`);
+          console.log(`📊 Final response: ${streamedResponse.length} chars, ${chunkCount} chunks`);
           
-          // ✅ SAVE AI MESSAGE WITH CORRECT SENDER FORMAT
+          // ✅ SAVE AI MESSAGE WITH ENHANCED METADATA
           const aiMessage = new Message({
             session: sessionId,
             message: streamedResponse,
-            sender: "AI", // ✅ FIXED: Use string enum value
+            sender: "AI",
             type: type,
-            userId: userId, // ✅ ADD USER ID REFERENCE
+            userId: userId,
             metadata: {
               streamingCompleted: true,
               contextUsed: recentContext.length,
-              blipIntegrated: type === 'image',
-              processingPipeline: type === 'image' ? 'BLIP→Context→Llama' : 'Llama'
+              documentAnalyzed: type === 'document',
+              extractedTextLength: extractedText?.length || 0,
+              processingPipeline: type === 'document' ? 'Document→Context→Llama' : 'Llama',
+              responseLength: streamedResponse.length,
+              chunkCount
             },
           });
           
@@ -433,18 +483,20 @@ export const sendMessage = async (req, res) => {
         res.write(errorMessage);
       }
       
-      // ✅ SAVE ERROR MESSAGE WITH CORRECT SENDER FORMAT
+      // ✅ SAVE ERROR MESSAGE WITH CONTEXT INFO
       try {
         const errorAiMessage = new Message({
           session: sessionId,
           message: errorMessage,
-          sender: "AI", // ✅ FIXED: Use string enum value
+          sender: "AI",
           type: "error",
-          userId: userId, // ✅ ADD USER ID REFERENCE
+          userId: userId,
           metadata: {
             error: true,
             errorType: 'fastapi_error',
-            originalError: fastApiError.message
+            originalError: fastApiError.message,
+            hadDocumentContext: !!extractedText,
+            documentLength: extractedText?.length || 0
           },
         });
         
