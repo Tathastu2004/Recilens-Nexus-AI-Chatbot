@@ -15,17 +15,21 @@ const ModelManagement = () => {
   const { 
     trainingJobs,
     loadedModels,
+    // ✅ NEW STATES & FUNCTIONS
+    availableAdapters,
     modelStatus,
     trainingLoading,
     modelLoading,
     error,
     notifications,
     startModelTraining,
+    startLoRATraining,      // ✅ NEW
     getTrainingJobs,
     cancelTraining,
-    loadModel,
+    loadLoRAAdapter,        // ✅ NEW
     unloadModel,
     getLoadedModels,
+    getAvailableAdapters,   // ✅ NEW
     getModelStatus,
     clearError,
     removeNotification
@@ -59,6 +63,7 @@ const ModelManagement = () => {
   const [showLoadingForm, setShowLoadingForm] = useState(false);
   const [activeTab, setActiveTab] = useState('training'); // 'training' or 'models'
   const [training, setTraining] = useState({ training: false });
+  const [selectedBaseModel, setSelectedBaseModel] = useState('llama3'); // ✅ NEW STATE
 
   const prevCompletedCount = useRef(0);
 
@@ -68,13 +73,14 @@ const ModelManagement = () => {
       console.log('📊 [MODEL MANAGEMENT] Fetching data...');
       await Promise.all([
         getTrainingJobs(),
-        getLoadedModels()
+        getLoadedModels(),
+        getAvailableAdapters() // ✅ NEW
       ]);
       console.log('✅ [MODEL MANAGEMENT] Data fetched successfully');
     } catch (error) {
       console.error('❌ [MODEL MANAGEMENT] Fetch error:', error);
     }
-  }, [getTrainingJobs, getLoadedModels]);
+  }, [getTrainingJobs, getLoadedModels, getAvailableAdapters]); // ✅ NEW DEPENDENCY
 
   useEffect(() => {
     fetchData();
@@ -113,74 +119,134 @@ const ModelManagement = () => {
     }));
   };
 
-  // Handle file selection
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      handleTrainingFormChange('selectedFile', file);
-      uploadDatasetFile(file);
-    }
-  };
-
-  // Upload file to server
-  const uploadDatasetFile = async (file) => {
-    const formData = new FormData();
-    formData.append('dataset', file);
-
-    handleTrainingFormChange('uploading', true);
-    handleTrainingFormChange('uploadProgress', 0);
-
+  // ✅ FIXED: Handle LoRA training submission
+  const handleLoRATraining = async (jobId) => {
     try {
-      const apiClient = await createApiClient();
-      const response = await apiClient.post('/datasets/upload', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        },
-        onUploadProgress: (progressEvent) => {
-          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          handleTrainingFormChange('uploadProgress', progress);
-        }
-      });
-
-      console.log('Upload response:', response.data);
-
-      if (response.data && response.data.success) {
-        handleTrainingFormChange('uploadedFilePath', response.data.file?.path || file.name);
-        setSuccessMessage(`Dataset "${file.name}" uploaded successfully!`);
-      } else {
-        console.log('No success in response:', response.data);
-        // Fallback - still allow training with filename
-        handleTrainingFormChange('uploadedFilePath', file.name);
-        setSuccessMessage(`Dataset "${file.name}" prepared for training!`);
-      }
-    } catch (error) {
-      console.error('File upload failed:', error);
-      setSuccessMessage('Upload failed, but you can still try training with the file name.');
-      handleTrainingFormChange('uploadedFilePath', file.name);
-    } finally {
-      handleTrainingFormChange('uploading', false);
-    }
-  };
-
-  // Submit new training
-  const handleTrainingSubmit = async () => {
-    const { modelName, uploadedFilePath } = trainingForms;
-
-    if (!modelName) {
-      alert("Please select a model to train.");
-      return;
-    }
-    if (!uploadedFilePath) {
-      alert("Please upload a dataset file first.");
-      return;
-    }
-
-    try {
-      setTraining({ ...training, training: true });
+      // ✅ FIX: Check both global and per-job form data
+      const formData = trainingForms[jobId] || trainingForms;
+      const datasetFile = formData?.datasetFile || formData?.selectedFile;
       
-      const result = await startModelTraining(modelName, uploadedFilePath, {
+      console.log('🔍 [DEBUG] Form data check:', {
+        jobId,
+        hasJobSpecificForm: !!trainingForms[jobId],
+        hasGlobalForm: !!trainingForms.selectedFile,
+        formData,
+        datasetFile: datasetFile?.name || 'none'
+      });
+      
+      if (!datasetFile) {
+        console.error('❌ [DEBUG] No dataset file found:', {
+          trainingForms,
+          jobId,
+          formDataKeys: Object.keys(trainingForms)
+        });
+        alert('❌ Please select a dataset file first.');
+        return;
+      }
+
+      console.log('🚀 [FRONTEND] Starting LoRA training for:', jobId);
+      setStartingTraining(jobId);
+
+      // ✅ Pass data as object (not FormData)
+      const trainingData = {
+        jobId: jobId,
+        datasetFile: datasetFile, // ✅ Use the found dataset file
+        base_model: formData.base_model || selectedBaseModel || 'llama3',
+        parameters: {
+          epochs: formData.epochs || trainingForms.epochs || 3,
+          learningRate: formData.learningRate || trainingForms.learningRate || 0.0002,
+          loraRank: formData.loraRank || trainingForms.loraRank || 16,
+          loraAlpha: formData.loraAlpha || trainingForms.loraAlpha || 32,
+          ...formData.parameters
+        }
+      };
+
+      console.log('📋 [FRONTEND] Training data:', trainingData);
+
+      const result = await startLoRATraining(trainingData);
+
+      if (result.success) {
+        alert('✅ LoRA training started successfully!');
+        // Clear both forms
+        setTrainingForms(prev => ({
+          ...prev,
+          [jobId]: {}, // Clear job-specific form
+          selectedFile: null, // Clear global form
+          modelType: '',
+          epochs: '',
+          learningRate: '',
+          loraRank: '',
+          loraAlpha: ''
+        }));
+      } else {
+        alert(`❌ Failed to start training: ${result.message}`);
+      }
+
+    } catch (error) {
+      console.error('❌ [FRONTEND] LoRA training start failed:', error);
+      
+      let errorMessage = 'Failed to start LoRA training';
+      if (error.response?.status === 401) {
+        errorMessage = '🔐 Authentication failed. Please sign out and sign in again.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      alert(`❌ ${errorMessage}`);
+    } finally {
+      setStartingTraining(null);
+    }
+  };
+
+  // ✅ UPDATED: Handle training submission for all types
+  const handleTrainingSubmit = async () => {
+    const { modelType, selectedFile } = trainingForms;
+
+    if (!modelType || !selectedFile) {
+      alert("Please select a model type and upload a dataset file.");
+      return;
+    }
+
+    if (modelType === 'lora') {
+      // ✅ For LoRA, generate a job ID and call LoRA handler
+      const jobId = `lora-${Date.now()}`;
+      
+      // ✅ Store the file in the job-specific form data
+      setTrainingForms(prev => ({
+        ...prev,
+        [jobId]: {
+          datasetFile: selectedFile, // ✅ Store in job-specific location
+          base_model: selectedBaseModel,
+          epochs: prev.epochs,
+          learningRate: prev.learningRate,
+          loraRank: prev.loraRank,
+          loraAlpha: prev.loraAlpha,
+          parameters: {
+            epochs: prev.epochs || 3,
+            learningRate: prev.learningRate || 0.0002,
+            loraRank: prev.loraRank || 16,
+            loraAlpha: prev.loraAlpha || 32
+          }
+        }
+      }));
+      
+      // ✅ Wait a moment for state to update, then call LoRA handler
+      setTimeout(() => {
+        handleLoRATraining(jobId);
+      }, 100);
+      
+      return;
+    }
+
+    try {
+      setStartingTraining(true);
+      
+      const jobName = `${modelType}-${Date.now()}`;
+
+      const result = await startModelTraining(jobName, selectedFile, modelType, {
         epochs: trainingForms.epochs || 3,
-        learningRate: trainingForms.learningRate || 0.001
+        learningRate: trainingForms.learningRate || 0.001,
+        base_model: selectedBaseModel
       });
       
       if (result && result.success) {
@@ -195,7 +261,7 @@ const ModelManagement = () => {
       console.error("Training start failed:", error);
       alert("Training start failed: " + (error.response?.data?.message || error.message));
     } finally {
-      setTraining({ ...training, training: false });
+      setStartingTraining(false);
     }
   };
 
@@ -237,13 +303,50 @@ const ModelManagement = () => {
   // Unload model
   const handleUnloadModel = async (modelId) => {
     try {
+      console.log('🗑️ [FRONTEND] Unloading model:', modelId);
+      
       const result = await unloadModel(modelId);
+      
+      // ✅ Handle different response types
+      if (result.success) {
+        alert(`✅ Model "${modelId}" unloaded successfully!`);
+        // Refresh the models list
+        await getLoadedModels();
+      } else {
+        // Handle specific error types
+        switch (result.error_type) {
+          case 'base_model_unload':
+            alert(`ℹ️ Base models cannot be unloaded.\n\n${result.message}`);
+            break;
+          case 'model_not_found':
+            alert(`⚠️ Model not found.\n\n${result.message}\n\nRefreshing models list...`);
+            // Refresh the models list since it might be out of sync
+            await getLoadedModels();
+            break;
+          case 'unload_error':
+            alert(`❌ Error unloading model.\n\n${result.message}`);
+            break;
+          default:
+            alert(`❌ Failed to unload model.\n\n${result.message || 'Unknown error'}`);
+        }
+      }
+    } catch (error) {
+      console.error('❌ [FRONTEND] Unload error:', error);
+      alert(`❌ Failed to unload model: ${error.message}`);
+    }
+  };
+
+  // ✅ NEW: Handle LoRA adapter loading
+  const handleLoadLoRAAdapter = async (adapterPath, adapterName) => {
+    try {
+      const result = await loadLoRAAdapter(adapterPath, selectedBaseModel);
       if (result && result.success) {
-        setSuccessMessage(`Model ${modelId} unloaded successfully!`);
+        setSuccessMessage(`LoRA adapter "${adapterName}" loaded successfully!`);
         await fetchData();
       }
     } catch (error) {
-      console.error('Unload model error:', error);
+      console.error('Load LoRA adapter error:', error);
+      alert("Failed to load LoRA adapter: " + (error.response?.data?.message || error.message));
     }
   };
 
@@ -309,9 +412,9 @@ const ModelManagement = () => {
       )}
 
       {/* Notifications */}
-      {notifications.map(notification => (
+      {notifications.map((notification, index) => (
         <div
-          key={notification.id}
+          key={`${notification.id}-${index}`} // ✅ More unique key
           className={`p-4 rounded-lg mb-4 flex justify-between items-center ${
             notification.type === 'error' 
               ? 'bg-red-100 border border-red-300 text-red-800'
@@ -366,6 +469,7 @@ const ModelManagement = () => {
                 : 'text-green-600 hover:text-black hover:bg-green-25'
             }`}
           >
+            <IconBrain size={16} />
             Training Jobs ({trainingJobs.length})
           </button>
           <button
@@ -377,7 +481,7 @@ const ModelManagement = () => {
             }`}
           >
             <IconRobot size={16} />
-            Loaded Models ({loadedModels.length})
+            LoRA Models ({loadedModels.length})
           </button>
         </div>
 
@@ -422,7 +526,7 @@ const ModelManagement = () => {
                       type="file"
                       id="datasetFile"
                       accept=".csv,.json,.txt,.jsonl"
-                      onChange={handleFileChange}
+                      onChange={(e) => handleTrainingFormChange('selectedFile', e.target.files[0])} // ✅ UPDATED
                       className="hidden"
                     />
                     
@@ -455,50 +559,53 @@ const ModelManagement = () => {
                       </div>
                     )}
                   </div>
-                  
-                  {/* Upload Progress */}
-                  {trainingForms.uploading && (
-                    <div className="mt-4">
-                      <div className="bg-green-200 rounded-full h-2">
-                        <div 
-                          className="bg-green-600 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${trainingForms.uploadProgress || 0}%` }}
-                        />
-                      </div>
-                      <p className="text-black text-sm mt-2 text-center">
-                        Uploading... {trainingForms.uploadProgress || 0}%
-                      </p>
-                    </div>
-                  )}
                 </div>
 
                 {/* Model Configuration */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                   <div>
-                    <label className="block text-black font-medium mb-2">Model Name</label>
+                    <label className="block text-black font-medium mb-2">Model Type</label>
                     <select
-                      value={trainingForms.modelName || ''}
-                      onChange={(e) => handleTrainingFormChange('modelName', e.target.value)}
+                      value={trainingForms.modelType || ''}
+                      onChange={(e) => handleTrainingFormChange('modelType', e.target.value)}
                       className="w-full px-3 py-2 border text-black border-green-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
                     >
                       <option value="">Select Model Type</option>
-                      <option value="llama3">Llama 3</option>
+                      <option value="lora">LoRA Fine-tuning</option>
+                      <option value="llama">Llama</option>
                       <option value="blip">BLIP</option>
-                      <option value="llama-custom">Custom Llama</option>
                     </select>
                   </div>
+                  
+                  {trainingForms.modelType === 'lora' && ( // ✅ NEW CONDITIONAL FIELD
+                    <div>
+                      <label className="block text-black font-medium mb-2">Base Model</label>
+                      <select
+                        value={selectedBaseModel}
+                        onChange={(e) => setSelectedBaseModel(e.target.value)}
+                        className="w-full px-3 py-2 border text-black border-green-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+                      >
+                        <option value="llama3">Llama3</option>
+                        <option value="llama2">Llama2</option>
+                        <option value="codellama">CodeLlama</option>
+                        <option value="mistral">Mistral</option>
+                      </select>
+                    </div>
+                  )}
+                  
                   <div>
                     <label className="block text-black font-medium mb-2">Epochs</label>
                     <input
                       type="number"
                       value={trainingForms.epochs || ''}
                       onChange={(e) => handleTrainingFormChange('epochs', e.target.value)}
-                      placeholder="3"
+                      placeholder={trainingForms.modelType === 'lora' ? '3' : '3'}
                       min="1"
                       max="100"
                       className="w-full px-3 py-2 border border-green-300 rounded text-black focus:outline-none focus:ring-2 focus:ring-green-500"
                     />
                   </div>
+                  
                   <div>
                     <label className="block text-black font-medium mb-2">Learning Rate</label>
                     <input
@@ -506,20 +613,60 @@ const ModelManagement = () => {
                       step="0.0001"
                       value={trainingForms.learningRate || ''}
                       onChange={(e) => handleTrainingFormChange('learningRate', e.target.value)}
-                      placeholder="0.001"
+                      placeholder={trainingForms.modelType === 'lora' ? '0.0002' : '0.001'}
                       className="w-full px-3 py-2 border text-black border-green-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
                     />
                   </div>
+                  
+                  {/* ✅ NEW: LoRA specific parameters */}
+                  {trainingForms.modelType === 'lora' && (
+                    <>
+                      <div>
+                        <label className="block text-black font-medium mb-2">LoRA Rank (r)</label>
+                        <input
+                          type="number"
+                          value={trainingForms.loraRank || ''}
+                          onChange={(e) => handleTrainingFormChange('loraRank', e.target.value)}
+                          placeholder="16"
+                          min="1"
+                          max="64"
+                          className="w-full px-3 py-2 border border-green-300 rounded text-black focus:outline-none focus:ring-2 focus:ring-green-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-black font-medium mb-2">LoRA Alpha</label>
+                        <input
+                          type="number"
+                          value={trainingForms.loraAlpha || ''}
+                          onChange={(e) => handleTrainingFormChange('loraAlpha', e.target.value)}
+                          placeholder="32"
+                          min="1"
+                          max="128"
+                          className="w-full px-3 py-2 border border-green-300 rounded text-black focus:outline-none focus:ring-2 focus:ring-green-500"
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Action Buttons */}
                 <div className="flex gap-4">
                   <button
                     onClick={handleTrainingSubmit}
-                    disabled={!trainingForms.modelName || !trainingForms.uploadedFilePath || training.training}
-                    className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50"
+                    disabled={!trainingForms.modelType || !trainingForms.selectedFile || startingTraining}
+                    className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50 flex items-center gap-2"
                   >
-                    {training.training ? "Starting..." : "Start Training"}
+                    {startingTraining ? (
+                      <>
+                        <IconLoader size={16} className="animate-spin" />
+                        Starting...
+                      </>
+                    ) : (
+                      <>
+                        <IconPlus size={16} />
+                        Start {trainingForms.modelType === 'lora' ? 'LoRA' : ''} Training
+                      </>
+                    )}
                   </button>
                   <button
                     onClick={() => {
@@ -548,7 +695,7 @@ const ModelManagement = () => {
                   const isExpanded = expandedTraining === job._id;
                   
                   return (
-                    <div key={`training-job-${job._id || index}-${job.createdAt || Date.now()}`} className="py-6 hover:bg-green-25"> {/* ✅ UNIQUE KEY */}
+                    <div key={`job-${job._id}-${job.createdAt}-${index}`} className="py-6 hover:bg-green-25">
                       {/* Job Header */}
                       <div 
                         className="flex items-start justify-between cursor-pointer"
@@ -556,7 +703,14 @@ const ModelManagement = () => {
                       >
                         <div className="flex-1">
                           <div className="flex items-center gap-3 mb-2">
-                            <h4 className="font-bold text-gray-900 text-lg">{job.modelName}</h4>
+                            <h4 className="font-bold text-gray-900 text-lg">{job.name || job.modelName}</h4>
+                            
+                            {/* ✅ NEW: LoRA badge */}
+                            {job.modelType === 'lora' && (
+                              <span className="px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800 border border-purple-300">
+                                LoRA
+                              </span>
+                            )}
                             
                             {/* Status Badge */}
                             <span className={`px-3 py-1 text-sm font-bold rounded-full ${
@@ -585,8 +739,11 @@ const ModelManagement = () => {
                           <div className="flex items-center gap-4 text-sm text-gray-700 mb-2 font-medium">
                             <span className="flex items-center gap-1">
                               <IconDatabase size={14} />
-                              Dataset: {job.dataset}
+                              Dataset: {job.dataset?.filename || job.dataset}
                             </span>
+                            {job.modelType === 'lora' && job.baseModel && (
+                              <span>Base: {job.baseModel}</span>
+                            )}
                             <span>
                               Started: {job.createdAt
                                 ? new Date(job.createdAt).toLocaleDateString('en-US', {
@@ -600,9 +757,9 @@ const ModelManagement = () => {
                             </span>
                           </div>
                           
-                          {!isExpanded && job.logs && job.logs.length > 0 && (
+                          {!isExpanded && job.log && (
                             <p className="text-green-800 text-sm">
-                              Latest: {job.logs[job.logs.length - 1]}
+                              Latest: {job.log}
                             </p>
                           )}
                         </div>
@@ -647,33 +804,37 @@ const ModelManagement = () => {
                             </div>
                           )}
 
-                          {/* Training Logs */}
-                          {job.logs && job.logs.length > 0 && (
+                          {/* Training Log */}
+                          {job.log && (
                             <div>
                               <h5 className="font-medium text-green-800 mb-2 flex items-center gap-2">
                                 <IconEye size={16} />
-                                Training Logs:
+                                Training Log:
                               </h5>
                               <div className="bg-gray-900 text-green-400 p-4 rounded-lg border max-h-64 overflow-y-auto font-mono text-sm">
-                                {job.logs.map((log, index) => (
-                                  <div key={index} className="mb-1">
-                                    <span className="text-green-500 mr-2">[{index + 1}]</span>
-                                    {log}
-                                  </div>
-                                ))}
+                                {job.log}
                               </div>
                             </div>
                           )}
-
-                          {/* Actions */}
+                          
+                          {/* ✅ NEW: Action Buttons for completed LoRA jobs */}
                           <div className="flex gap-4 pt-4 border-t border-green-100">
+                            {job.status === 'completed' && job.modelType === 'lora' && job.model_path && (
+                              <button
+                                onClick={() => handleLoadLoRAAdapter(job.model_path, job.name)}
+                                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex items-center gap-2"
+                              >
+                                <IconUpload size={16} />
+                                Load LoRA Adapter
+                              </button>
+                            )}
                             {job.status === 'completed' && (
                               <button
                                 onClick={() => {/* Implement export functionality */}}
-                                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex items-center gap-2"
+                                className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 flex items-center gap-2"
                               >
                                 <IconDownload size={16} />
-                                Export Logs
+                                Export Model
                               </button>
                             )}
                             {job.status === 'failed' && (
@@ -696,138 +857,200 @@ const ModelManagement = () => {
           </div>
         )}
 
-        {/* Models Tab Content */}
+        {/* ✅ UPDATED: Models Tab Content */}
         {activeTab === 'models' && (
           <div className="p-6">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-green-800 font-semibold text-lg">Model Management</h3>
-              <button
-                onClick={() => setShowLoadingForm(!showLoadingForm)}
-                className="bg-green-700 text-white px-4 py-2 rounded hover:bg-green-800 flex items-center gap-2"
-              >
-                <IconUpload size={16} />
-                Load New Model
-              </button>
+              <h3 className="text-green-800 font-semibold text-lg">LoRA Adapter Management</h3>
+              <div className="flex gap-4 items-center">
+                <select
+                  value={selectedBaseModel}
+                  onChange={(e) => setSelectedBaseModel(e.target.value)}
+                  className="bg-white border border-green-300 text-green-800 px-3 py-2 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
+                >
+                  <option value="llama3">Llama3 Base</option>
+                  <option value="llama2">Llama2 Base</option>
+                  <option value="codellama">CodeLlama Base</option>
+                  <option value="mistral">Mistral Base</option>
+                </select>
+                <button
+                  onClick={getAvailableAdapters}
+                  className="bg-green-700 text-white px-4 py-2 rounded hover:bg-green-800 flex items-center gap-2"
+                >
+                  <IconRefresh size={16} />
+                  Refresh Adapters
+                </button>
+              </div>
             </div>
 
-            {/* Model Loading Form */}
-            {showLoadingForm && (
-              <div className="bg-green-50 p-6 rounded-lg border border-green-200 mb-6">
-                <h4 className="font-medium text-green-800 mb-4">Load New Model</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                  <div>
-                    <label className="block text-black font-medium mb-2">Model ID</label>
-                    <input
-                      type="text"
-                      value={loadingForms.modelId || ''}
-                      onChange={(e) => handleLoadingFormChange('modelId', e.target.value)}
-                      placeholder="e.g., llama3, blip-base"
-                      className="w-full px-3 py-2 border border-green-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-black font-medium mb-2">Model Path</label>
-                    <input
-                      type="text"
-                      value={loadingForms.modelPath || ''}
-                      onChange={(e) => handleLoadingFormChange('modelPath', e.target.value)}
-                      placeholder="./models/llama3"
-                      className="w-full px-3 py-2 border border-green-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-black font-medium mb-2">Model Type</label>
-                    <select
-                      value={loadingForms.modelType || ''}
-                      onChange={(e) => handleLoadingFormChange('modelType', e.target.value)}
-                      className="w-full px-3 py-2 border border-green-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+            {/* ✅ NEW: Available Adapters List */}
+            {availableAdapters.length === 0 ? (
+              <div className="bg-white p-6 rounded-lg shadow text-center mb-6">
+                <IconDatabase size={48} className="mx-auto text-green-300 mb-4" />
+                <p className="text-green-800 text-lg">No LoRA adapters found on disk.</p>
+                <p className="text-green-600 text-sm mt-2">Complete a LoRA training job to create adapters.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                {availableAdapters.map((adapter, index) => (
+                  <div key={`adapter-${adapter.name}-${adapter.created}-${index}`} className="bg-green-50 p-4 rounded-lg border border-green-200 shadow">
+                    <div className="flex items-start justify-between mb-2">
+                      <h4 className="font-semibold text-green-900 text-base">{adapter.name}</h4>
+                      {adapter.is_loaded && (
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800 border border-blue-300">
+                          Loaded
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-green-600 text-sm">Size: {adapter.size}</p>
+                    <p className="text-green-600 text-sm">
+                      Created: {new Date(adapter.created).toLocaleDateString()}
+                    </p>
+                    <button
+                      onClick={() => handleLoadLoRAAdapter(adapter.path, adapter.name)}
+                      disabled={adapter.is_loaded || modelLoading}
+                      className="mt-3 w-full bg-green-700 text-white px-4 py-2 rounded hover:bg-green-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
-                      <option value="">Select Type</option>
-                      <option value="llama">Llama</option>
-                      <option value="blip">BLIP</option>
-                    </select>
+                      {modelLoading ? (
+                        <>
+                          <IconLoader size={16} className="animate-spin" />
+                          Loading...
+                        </>
+                      ) : adapter.is_loaded ? (
+                        <>
+                          <IconCheck size={16} />
+                          Adapter Loaded
+                        </>
+                      ) : (
+                        <>
+                          <IconUpload size={16} />
+                          Load with {selectedBaseModel}
+                        </>
+                      )}
+                    </button>
                   </div>
-                </div>
-                <div className="flex gap-4">
-                  <button
-                    onClick={handleModelLoad}
-                    disabled={!loadingForms.modelId || !loadingForms.modelPath || !loadingForms.modelType || modelLoading}
-                    className="bg-green-700 text-white px-6 py-2 rounded hover:bg-green-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  >
-                    {modelLoading ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        Loading Model...
-                      </>
-                    ) : (
-                      <>
-                        <IconUpload size={16} />
-                        Load Model
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setShowLoadingForm(false)}
-                    className="bg-gray-500 text-white px-6 py-2 rounded hover:bg-gray-600"
-                  >
-                    Cancel
-                  </button>
-                </div>
+                ))}
               </div>
             )}
-
+            
+            <div className="flex justify-between items-center mb-6 border-t pt-6">
+              <h3 className="text-green-800 font-semibold text-lg">Currently Loaded Models</h3>
+            </div>
+            
             {/* Loaded Models List */}
             {loadedModels.length === 0 ? (
               <div className="bg-white p-8 rounded-lg shadow text-center">
                 <IconRobot size={64} className="mx-auto text-green-300 mb-4" />
                 <p className="text-green-800 text-lg">No models loaded currently.</p>
+                <p className="text-green-600 text-sm mt-2">Load a LoRA adapter to see it here.</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {Array.isArray(loadedModels) && loadedModels.map((model, index) => (
-                  <div key={`loaded-model-${model.modelId || index}-${model.loadTime || Date.now()}`} className="bg-white p-6 rounded-lg shadow hover:shadow-lg transition-shadow"> {/* ✅ UNIQUE KEY */}
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <h4 className="font-semibold text-green-900 text-lg flex items-center gap-2">
-                          <IconRobot size={20} />
-                          {model.modelId}
-                        </h4>
-                        <p className="text-green-600 text-sm">{model.type} model</p>
+                {loadedModels.map((model, index) => {
+                  // ✅ FIX: Better model ID detection
+                  const modelId = model.id || model.modelId || model.model_id || model.name;
+                  const modelType = model.type || 'unknown';
+                  const modelName = model.name || modelId || 'Unknown Model';
+                  
+                  console.log('🔍 [FRONTEND] Model data:', { model, modelId, modelType, modelName });
+                  
+                  return (
+                    <div key={`model-${modelId}-${model.loaded_at || index}`} className="bg-white p-6 rounded-lg shadow hover:shadow-lg transition-shadow">
+                      <div className="flex items-start justify-between mb-4">
+                        <div>
+                          <h4 className="font-semibold text-green-900 text-lg flex items-center gap-2">
+                            <IconRobot size={20} />
+                            {modelName}
+                          </h4>
+                          <p className="text-green-600 text-sm">
+                            {modelType} model 
+                            {modelType === 'lora' && model.base_model && ` on ${model.base_model}`}
+                          </p>
+                          {(model.adapter_size || model.size) && (
+                            <p className="text-green-500 text-xs mt-1">
+                              Size: {model.adapter_size || model.size}
+                            </p>
+                          )}
+                          {/* ✅ NEW: Show model path for debugging */}
+                          {model.adapter_path && (
+                            <p className="text-green-400 text-xs mt-1 truncate" title={model.adapter_path}>
+                              Path: .../{model.adapter_path.split('/').pop()}
+                            </p>
+                          )}
+                        </div>
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800 border border-green-300">
+                          {model.status || 'Active'}
+                        </span>
                       </div>
-                      <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800 border border-green-300">
-                        Loaded
-                      </span>
+                      
+                      {(model.loaded_at || model.load_time) && (
+                        <p className="text-green-600 text-sm mb-4">
+                          Loaded: {new Date(model.loaded_at || model.load_time).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </p>
+                      )}
+                      
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            // ✅ FIX: Validate modelId before calling
+                            if (modelId && modelId !== 'undefined') {
+                              getModelStatus(modelId);
+                            } else {
+                              alert('Invalid model ID. Cannot get status.');
+                              console.error('❌ Invalid modelId:', { model, modelId });
+                            }
+                          }}
+                          disabled={!modelId || modelId === 'undefined'}
+                          className="flex-1 bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
+                        >
+                          <IconEye size={14} />
+                          Status
+                        </button>
+                        <button
+                          onClick={() => {
+                            // ✅ FIX: Validate modelId before calling
+                            if (modelId && modelId !== 'undefined') {
+                              // ✅ Check if model can be unloaded
+                              if (model.can_unload === false) {
+                                alert(`ℹ️ ${modelName} is a base model and cannot be unloaded.\n\nBase models are always available through Ollama.`);
+                                return;
+                              }
+                              handleUnloadModel(modelId);
+                            } else {
+                              alert('Invalid model ID. Cannot unload.');
+                              console.error('❌ Invalid modelId:', { model, modelId });
+                            }
+                          }}
+                          disabled={!modelId || modelId === 'undefined' || model.can_unload === false}
+                          className={`flex-1 px-3 py-2 rounded text-sm flex items-center justify-center gap-2 ${
+                            model.can_unload === false 
+                              ? 'bg-gray-400 text-white cursor-not-allowed opacity-50' 
+                              : 'bg-red-600 text-white hover:bg-red-700'
+                          }`}
+                          title={model.can_unload === false ? 'Base models cannot be unloaded' : 'Unload this model'}
+                        >
+                          <IconTrash size={14} />
+                          {model.can_unload === false ? 'Base Model' : 'Unload'}
+                        </button>
+                      </div>
+                      
+                      {/* ✅ NEW: Debug info for development */}
+                      {process.env.NODE_ENV === 'development' && (
+                        <details className="mt-4 text-xs">
+                          <summary className="cursor-pointer text-gray-500">Debug Info</summary>
+                          <pre className="bg-gray-100 p-2 rounded mt-2 overflow-auto">
+                            {JSON.stringify(model, null, 2)}
+                          </pre>
+                        </details>
+                      )}
                     </div>
-                    
-                    {model.loadTime && (
-                      <p className="text-green-600 text-sm mb-4">
-                        Loaded: {new Date(model.loadTime).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </p>
-                    )}
-                    
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => getModelStatus(model.modelId)}
-                        className="flex-1 bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700 text-sm flex items-center justify-center gap-2"
-                      >
-                        <IconEye size={14} />
-                        Check Status
-                      </button>
-                      <button
-                        onClick={() => handleUnloadModel(model.modelId)}
-                        className="flex-1 bg-red-600 text-white px-3 py-2 rounded hover:bg-red-700 text-sm flex items-center justify-center gap-2"
-                      >
-                        <IconTrash size={14} />
-                        Unload
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

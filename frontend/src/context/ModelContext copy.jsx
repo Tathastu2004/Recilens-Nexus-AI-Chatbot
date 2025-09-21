@@ -4,17 +4,13 @@ import { useAuth } from '@clerk/clerk-react';
 
 // Initial State
 const initialState = {
-  // Training Jobs
   trainingJobs: [],
   activeTraining: null,
   trainingLoading: false,
-  
-  // Model Management
   loadedModels: [],
+  availableAdapters: [],
   modelStatus: {},
   modelLoading: false,
-  
-  // Global States
   error: null,
   notifications: [],
   isConnected: true
@@ -38,6 +34,7 @@ const actionTypes = {
   
   // Model Actions
   SET_LOADED_MODELS: 'SET_LOADED_MODELS',
+  SET_AVAILABLE_ADAPTERS: 'SET_AVAILABLE_ADAPTERS',
   SET_MODEL_STATUS: 'SET_MODEL_STATUS',
   ADD_LOADED_MODEL: 'ADD_LOADED_MODEL',
   REMOVE_LOADED_MODEL: 'REMOVE_LOADED_MODEL'
@@ -48,10 +45,8 @@ const modelManagementReducer = (state, action) => {
   switch (action.type) {
     case actionTypes.SET_TRAINING_LOADING:
       return { ...state, trainingLoading: action.payload };
-    
     case actionTypes.SET_MODEL_LOADING:
       return { ...state, modelLoading: action.payload };
-    
     case actionTypes.SET_ERROR:
       return {
         ...state,
@@ -63,10 +58,8 @@ const modelManagementReducer = (state, action) => {
           timestamp: new Date()
         }]
       };
-    
     case actionTypes.CLEAR_ERROR:
       return { ...state, error: null };
-    
     case actionTypes.ADD_NOTIFICATION:
       return {
         ...state,
@@ -76,7 +69,6 @@ const modelManagementReducer = (state, action) => {
           timestamp: new Date()
         }]
       };
-    
     case actionTypes.REMOVE_NOTIFICATION:
       return {
         ...state,
@@ -86,34 +78,34 @@ const modelManagementReducer = (state, action) => {
     // Training Actions
     case actionTypes.SET_TRAINING_JOBS:
       return { ...state, trainingJobs: action.payload };
-    
     case actionTypes.ADD_TRAINING_JOB:
       return {
         ...state,
         trainingJobs: [action.payload, ...state.trainingJobs]
       };
-    
     case actionTypes.UPDATE_TRAINING_JOB:
       return {
         ...state,
         trainingJobs: state.trainingJobs.map(job =>
-          job._id === action.payload._id ? { ...job, ...action.payload } : job
+          job._id === action.payload._id || job.jobId === action.payload.jobId ? 
+            { ...job, ...action.payload } : job
         )
       };
-    
     case actionTypes.SET_ACTIVE_TRAINING:
       return { ...state, activeTraining: action.payload };
-    
     case actionTypes.REMOVE_TRAINING_JOB:
       return {
         ...state,
-        trainingJobs: state.trainingJobs.filter(job => job._id !== action.payload)
+        trainingJobs: state.trainingJobs.filter(job => 
+          job._id !== action.payload && job.jobId !== action.payload
+        )
       };
     
     // Model Actions
     case actionTypes.SET_LOADED_MODELS:
       return { ...state, loadedModels: action.payload };
-    
+    case actionTypes.SET_AVAILABLE_ADAPTERS:
+      return { ...state, availableAdapters: action.payload };
     case actionTypes.SET_MODEL_STATUS:
       return {
         ...state,
@@ -122,17 +114,17 @@ const modelManagementReducer = (state, action) => {
           [action.payload.modelId]: action.payload.status
         }
       };
-    
     case actionTypes.ADD_LOADED_MODEL:
       return {
         ...state,
         loadedModels: [...state.loadedModels, action.payload]
       };
-    
     case actionTypes.REMOVE_LOADED_MODEL:
       return {
         ...state,
-        loadedModels: state.loadedModels.filter(model => model.modelId !== action.payload)
+        loadedModels: state.loadedModels.filter(model => 
+          model.modelId !== action.payload && model.id !== action.payload
+        )
       };
     
     default:
@@ -147,38 +139,85 @@ export const ModelManagementProvider = ({ children }) => {
   const { getToken } = useAuth();
   const prevCompletedCount = useRef(0);
 
-  // Use Vite env or fallback
   const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
 
-  // ✅ CREATE AXIOS INSTANCE WITH CLERK TOKEN
   const createApiClient = useCallback(async () => {
-    const token = await getToken();
-    return axios.create({
-      baseURL: `${API_BASE}/api/admin`,
-      timeout: 15000,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : undefined
+    try {
+      const token = await getToken();
+      
+      if (!token) {
+        throw new Error('Authentication token not available. Please sign in again.');
       }
-    });
+      
+      const baseURL = `${API_BASE}/api/admin`;
+      
+      const client = axios.create({
+        baseURL: baseURL,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 60000,
+      });
+      
+      client.interceptors.request.use(
+        (request) => {
+          if (request.data instanceof FormData) {
+            delete request.headers['Content-Type']; 
+          }
+          return request;
+        },
+        (error) => Promise.reject(error)
+      );
+      
+      return client;
+      
+    } catch (error) {
+      console.error('❌ [MODEL CONTEXT] Failed to create API client:', error);
+      throw error;
+    }
   }, [getToken, API_BASE]);
 
   // **TRAINING MANAGEMENT FUNCTIONS**
-  const startModelTraining = useCallback(async (modelName, dataset, parameters = {}) => {
+  const getTrainingJobs = useCallback(async (filters = {}) => {
     dispatch({ type: actionTypes.SET_TRAINING_LOADING, payload: true });
     try {
       const apiClient = await createApiClient();
-      const response = await apiClient.post('/training/start', {
-        modelName,
-        dataset,
-        parameters
-      });
+      const params = new URLSearchParams(filters);
+      const response = await apiClient.get(`/model/training-jobs?${params}`);
+      
+      const jobs = response.data.success ? (response.data.data || []) : [];
+      dispatch({ type: actionTypes.SET_TRAINING_JOBS, payload: jobs });
+      return jobs;
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || error.message;
+      dispatch({ type: actionTypes.SET_ERROR, payload: errorMsg });
+      dispatch({ type: actionTypes.SET_TRAINING_JOBS, payload: [] });
+      return [];
+    } finally {
+      dispatch({ type: actionTypes.SET_TRAINING_LOADING, payload: false });
+    }
+  }, [createApiClient]);
+
+  const startModelTraining = useCallback(async (jobName, datasetFile, modelType, parameters = {}, baseModel) => {
+    dispatch({ type: actionTypes.SET_TRAINING_LOADING, payload: true });
+    try {
+      const apiClient = await createApiClient();
+      
+      const formData = new FormData();
+      formData.append('name', jobName);
+      formData.append('modelType', modelType);
+      formData.append('datasetFile', datasetFile);
+      formData.append('parameters', JSON.stringify(parameters));
+      formData.append('baseModel', baseModel);
+      
+      const response = await apiClient.post('/model/training-jobs', formData);
       
       if (response.data.success) {
-        dispatch({ type: actionTypes.ADD_TRAINING_JOB, payload: response.data.training });
+        dispatch({ type: actionTypes.ADD_TRAINING_JOB, payload: response.data.data });
         dispatch({
           type: actionTypes.ADD_NOTIFICATION,
-          payload: { type: 'success', message: `Training started for ${modelName}` }
+          payload: { type: 'success', message: `Training job "${jobName}" started successfully.` }
         });
       }
       return response.data;
@@ -191,22 +230,43 @@ export const ModelManagementProvider = ({ children }) => {
     }
   }, [createApiClient]);
 
-  const getTrainingJobs = useCallback(async (filters = {}) => {
+  const startLoRATraining = useCallback(async (trainingData) => {
     dispatch({ type: actionTypes.SET_TRAINING_LOADING, payload: true });
     try {
-      const apiClient = await createApiClient();
-      const params = new URLSearchParams(filters);
-      const response = await apiClient.get(`/training-jobs?${params}`);
+      console.log('🚀 [MODEL CONTEXT] Starting LoRA training:', trainingData);
       
-      // ✅ FIX: Extract jobs correctly from response
-      const jobs = response.data.success ? (response.data.data || []) : [];
-      dispatch({ type: actionTypes.SET_TRAINING_JOBS, payload: jobs });
-      return jobs;
+      const apiClient = await createApiClient();
+      
+      const formData = new FormData();
+      formData.append('name', `LoRA-${trainingData.jobId || Date.now()}`);
+      formData.append('modelType', 'lora');
+      formData.append('datasetFile', trainingData.datasetFile);
+      formData.append('baseModel', trainingData.base_model || 'llama3');
+      formData.append('parameters', JSON.stringify(trainingData.parameters || {}));
+      
+      console.log('📤 [MODEL CONTEXT] Sending LoRA training request...');
+      
+      const response = await apiClient.post('/model/training-jobs', formData);
+      
+      console.log('✅ [MODEL CONTEXT] LoRA training response:', response.data);
+      
+      if (response.data.success) {
+        dispatch({ type: actionTypes.ADD_TRAINING_JOB, payload: response.data.data });
+        dispatch({
+          type: actionTypes.ADD_NOTIFICATION,
+          payload: { 
+            type: 'success', 
+            message: `LoRA training job started successfully.` 
+          }
+        });
+      }
+      
+      return response.data;
     } catch (error) {
+      console.error('❌ [MODEL CONTEXT] Start LoRA training error:', error);
       const errorMsg = error.response?.data?.message || error.message;
       dispatch({ type: actionTypes.SET_ERROR, payload: errorMsg });
-      dispatch({ type: actionTypes.SET_TRAINING_JOBS, payload: [] }); // ✅ ENSURE EMPTY ARRAY
-      return [];
+      throw error;
     } finally {
       dispatch({ type: actionTypes.SET_TRAINING_LOADING, payload: false });
     }
@@ -215,7 +275,7 @@ export const ModelManagementProvider = ({ children }) => {
   const getTrainingDetails = useCallback(async (jobId) => {
     try {
       const apiClient = await createApiClient();
-      const response = await apiClient.get(`/training/${jobId}`);
+      const response = await apiClient.get(`/model/training/${jobId}`);
       return response.data;
     } catch (error) {
       const errorMsg = error.response?.data?.message || error.message;
@@ -227,12 +287,12 @@ export const ModelManagementProvider = ({ children }) => {
   const cancelTraining = useCallback(async (jobId) => {
     try {
       const apiClient = await createApiClient();
-      const response = await apiClient.post(`/training/${jobId}/cancel`);
+      const response = await apiClient.post(`/model/training/${jobId}/cancel`);
       
       if (response.data.success) {
         dispatch({
           type: actionTypes.UPDATE_TRAINING_JOB,
-          payload: { _id: jobId, status: 'failed' }
+          payload: { _id: jobId, status: 'cancelled' }
         });
         dispatch({
           type: actionTypes.ADD_NOTIFICATION,
@@ -250,7 +310,7 @@ export const ModelManagementProvider = ({ children }) => {
   const deleteTrainingJob = useCallback(async (jobId) => {
     try {
       const apiClient = await createApiClient();
-      await apiClient.delete(`/training/${jobId}`);
+      await apiClient.delete(`/model/training-jobs/${jobId}`);
       dispatch({ type: actionTypes.REMOVE_TRAINING_JOB, payload: jobId });
       return { success: true };
     } catch (error) {
@@ -260,37 +320,77 @@ export const ModelManagementProvider = ({ children }) => {
     }
   }, [createApiClient]);
 
-  // **MODEL MANAGEMENT FUNCTIONS** (✅ FIXED PATHS)
+  // **MODEL MANAGEMENT FUNCTIONS**
   const getLoadedModels = useCallback(async () => {
     dispatch({ type: actionTypes.SET_MODEL_LOADING, payload: true });
     try {
-      console.log('🤖 [MODEL CONTEXT] Fetching loaded models...');
       const apiClient = await createApiClient();
       const response = await apiClient.get('/model/loaded');
       
-      console.log('📥 [MODEL CONTEXT] Raw response:', response.data);
-      
-      // ✅ FIX: Extract models correctly from response
       const models = response.data.success ? (response.data.data || []) : [];
       dispatch({ type: actionTypes.SET_LOADED_MODELS, payload: models });
       
-      console.log('✅ [MODEL CONTEXT] Loaded models set:', models);
       return models;
     } catch (error) {
-      console.error('❌ [MODEL CONTEXT] Get loaded models error:', error);
       const errorMsg = error.response?.data?.message || error.message;
       dispatch({ type: actionTypes.SET_ERROR, payload: errorMsg });
-      dispatch({ type: actionTypes.SET_LOADED_MODELS, payload: [] }); // ✅ ENSURE EMPTY ARRAY
+      dispatch({ type: actionTypes.SET_LOADED_MODELS, payload: [] });
       return [];
     } finally {
       dispatch({ type: actionTypes.SET_MODEL_LOADING, payload: false });
     }
   }, [createApiClient]);
 
+  const getAvailableAdapters = useCallback(async () => {
+    dispatch({ type: actionTypes.SET_MODEL_LOADING, payload: true });
+    try {
+      const apiClient = await createApiClient();
+      const response = await apiClient.get('/model/available-adapters');
+      
+      const adapters = response.data.success ? (response.data.data || []) : [];
+      dispatch({ type: actionTypes.SET_AVAILABLE_ADAPTERS, payload: adapters }); 
+      
+      return adapters;
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || error.message;
+      dispatch({ type: actionTypes.SET_ERROR, payload: errorMsg });
+      dispatch({ type: actionTypes.SET_AVAILABLE_ADAPTERS, payload: [] });
+      return [];
+    } finally {
+      dispatch({ type: actionTypes.SET_MODEL_LOADING, payload: false });
+    }
+  }, [createApiClient]);
+
+  const loadLoRAAdapter = useCallback(async (adapterPath, baseModel = 'llama3') => {
+    dispatch({ type: actionTypes.SET_MODEL_LOADING, payload: true });
+    try {
+      const apiClient = await createApiClient();
+      const response = await apiClient.post('/model/load-lora', {
+        adapter_path: adapterPath,
+        base_model: baseModel
+      });
+      
+      if (response.data.success) {
+        dispatch({ 
+          type: actionTypes.ADD_NOTIFICATION, 
+          payload: { type: 'success', message: `LoRA adapter loaded successfully` } 
+        });
+        await getLoadedModels();
+      }
+      return response.data;
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || error.message;
+      dispatch({ type: actionTypes.SET_ERROR, payload: errorMsg });
+      throw error;
+    } finally {
+      dispatch({ type: actionTypes.SET_MODEL_LOADING, payload: false });
+    }
+  }, [createApiClient, getLoadedModels]);
+
   const getModelStatus = useCallback(async (modelId) => {
     try {
       const apiClient = await createApiClient();
-      const response = await apiClient.get(`/model/${modelId}/status`);
+      const response = await apiClient.get(`/model/status/${modelId}`);
       
       if (response.data.success) {
         dispatch({
@@ -306,41 +406,15 @@ export const ModelManagementProvider = ({ children }) => {
     }
   }, [createApiClient]);
 
-  const loadModel = useCallback(async (modelId, modelData) => {
-    dispatch({ type: actionTypes.SET_MODEL_LOADING, payload: true });
-    try {
-      const apiClient = await createApiClient();
-      const response = await apiClient.post(`/model/${modelId}/load`, modelData);
-      
-      if (response.data.success) {
-        dispatch({ type: actionTypes.ADD_LOADED_MODEL, payload: response.data });
-        dispatch({
-          type: actionTypes.ADD_NOTIFICATION,
-          payload: { type: 'success', message: `Model ${modelId} loaded successfully` }
-        });
-      }
-      return response.data;
-    } catch (error) {
-      const errorMsg = error.response?.data?.message || error.message;
-      dispatch({ type: actionTypes.SET_ERROR, payload: errorMsg });
-      throw error;
-    } finally {
-      dispatch({ type: actionTypes.SET_MODEL_LOADING, payload: false });
-    }
-  }, [createApiClient]);
-
   const unloadModel = useCallback(async (modelId) => {
     dispatch({ type: actionTypes.SET_MODEL_LOADING, payload: true });
     try {
       const apiClient = await createApiClient();
-      const response = await apiClient.post(`/model/${modelId}/unload`);
+      const response = await apiClient.delete(`/model/unload/${modelId}`);
       
       if (response.data.success) {
-        dispatch({ type: actionTypes.REMOVE_LOADED_MODEL, payload: modelId });
-        dispatch({
-          type: actionTypes.ADD_NOTIFICATION,
-          payload: { type: 'info', message: `Model ${modelId} unloaded` }
-        });
+        dispatch({ type: actionTypes.ADD_NOTIFICATION, payload: { type: 'success', message: `Model ${modelId} unloaded successfully` } });
+        await getLoadedModels();
       }
       return response.data;
     } catch (error) {
@@ -350,7 +424,7 @@ export const ModelManagementProvider = ({ children }) => {
     } finally {
       dispatch({ type: actionTypes.SET_MODEL_LOADING, payload: false });
     }
-  }, [createApiClient]);
+  }, [createApiClient, getLoadedModels]);
 
   // **UTILITY FUNCTIONS**
   const clearError = useCallback(() => {
@@ -361,24 +435,52 @@ export const ModelManagementProvider = ({ children }) => {
     dispatch({ type: actionTypes.REMOVE_NOTIFICATION, payload: notificationId });
   }, []);
 
-  const contextValue = {
-    // State
-    ...state,
+  // **AUTO-REFRESH FOR ACTIVE TRAININGS**
+  useEffect(() => {
+    let refreshInterval;
     
-    // Training Functions
+    const refreshData = async () => {
+      try {
+        const activeTrainings = state.trainingJobs.filter(job => 
+          ['running', 'pending'].includes(job.status)
+        );
+        
+        if (activeTrainings.length > 0) {
+          await getTrainingJobs();
+        }
+      } catch (error) {
+        console.warn('⚠️ [MODEL CONTEXT] Auto-refresh failed:', error.message);
+      }
+    };
+    
+    const hasActiveTrainings = state.trainingJobs.some(job => 
+      ['running', 'pending'].includes(job.status)
+    );
+    
+    if (hasActiveTrainings) {
+      refreshInterval = setInterval(refreshData, 5000);
+    }
+    
+    return () => {
+      if (refreshInterval) {
+        clearInterval(refreshInterval);
+      }
+    };
+  }, [state.trainingJobs, getTrainingJobs]);
+
+  const contextValue = {
+    ...state,
     startModelTraining,
+    startLoRATraining,
     getTrainingJobs,
     getTrainingDetails,
     cancelTraining,
     deleteTrainingJob,
-    
-    // Model Management Functions
     getLoadedModels,
+    getAvailableAdapters,
+    loadLoRAAdapter,
     getModelStatus,
-    loadModel,
     unloadModel,
-    
-    // Utility Functions
     clearError,
     removeNotification
   };

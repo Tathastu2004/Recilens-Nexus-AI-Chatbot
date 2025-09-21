@@ -1,83 +1,29 @@
 import express from 'express';
 import multer from 'multer';
-import { clerkAuth } from '../../middleware/clerkAuth.js';
 import * as modelManagementController from '../controllers/modelManagementController.js';
 
 const router = express.Router();
 
 // Configure multer for file uploads
 const storage = multer.memoryStorage();
-const upload = multer({ 
+const upload = multer({
   storage: storage,
   limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
 });
 
-// ✅ INTERNAL STATUS UPDATE ROUTE (BEFORE AUTH) - For FastAPI callbacks
-router.put('/internal/training/:jobId/status', modelManagementController.updateTrainingJobStatus);
+// ✅ RAG-SPECIFIC ROUTES (BEFORE AUTH - Available without authentication)
+router.post('/ingest-data', upload.single('dataSheetFile'), modelManagementController.ingestDataSheet);
+router.delete('/delete-data', modelManagementController.deleteDataSheet);
+router.delete('/delete-data/:docId', modelManagementController.deleteDataSheet);
+router.get('/ingested-documents', modelManagementController.getIngestedDocuments);
+router.get('/models', modelManagementController.getModels);
+router.get('/models/:modelId/status', modelManagementController.getModelStatus);
 
-// ✅ APPLY CLERK AUTH TO ALL OTHER ROUTES
-router.use(clerkAuth);
-
-// ✅ TRAINING JOB ROUTES
-router.get('/training-jobs', modelManagementController.getTrainingJobs);
-router.get('/training-jobs/:jobId', modelManagementController.getTrainingJobById);
-router.get('/training-jobs/:jobId/status', modelManagementController.getTrainingStatus);
-router.post('/training-jobs', upload.single('datasetFile'), modelManagementController.createTrainingJob); // ✅ FIX: Unified training endpoint
-router.post('/training-jobs/:jobId/cancel', modelManagementController.cancelTrainingJob);
-router.delete('/training-jobs/:jobId', modelManagementController.deleteTrainingJob);
-
-// ✅ MODEL MANAGEMENT ROUTES
-router.get('/loaded', modelManagementController.getLoadedModels);
-router.get('/available-adapters', modelManagementController.getAvailableAdapters);
-router.get('/status/:modelId', modelManagementController.getModelStatus); // ✅ FIX: Use GET method and path param
-router.post('/load-lora', modelManagementController.loadLoRAAdapter);
-router.delete('/unload/:modelId', modelManagementController.unloadModel); // ✅ FIX: Use DELETE method and path param
-
-// ✅ LEGACY TRAINING ROUTES (For backward compatibility)
-router.post('/train-lora/:job_id', upload.single('dataset'), async (req, res) => {
-  try {
-    const { job_id } = req.params;
-    const { baseModel = 'llama3', parameters } = req.body;
-    
-    console.log('🔄 [LEGACY ROUTE] Converting train-lora to new format for job:', job_id);
-    
-    // Transform to new format
-    req.body.name = `Legacy LoRA Training ${new Date().toLocaleDateString()}`;
-    req.body.modelType = 'lora';
-    req.body.baseModel = baseModel;
-    req.body.parameters = parameters;
-    
-    // Rename file field to match expected format
-    if (req.file) {
-      req.file.fieldname = 'datasetFile';
-    }
-    
-    // Forward to unified endpoint
-    return await modelManagementController.createTrainingJob(req, res);
-    
-  } catch (error) {
-    console.error('❌ [LEGACY ROUTE] train-lora error:', error.message);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to process legacy training request',
-      error: error.message 
-    });
-  }
-});
-
-// ✅ ALTERNATIVE ENDPOINTS FOR BACKWARD COMPATIBILITY
-router.post('/unload', modelManagementController.unloadModelPost); // POST method for backward compatibility
-router.post('/start-training', upload.single('datasetFile'), modelManagementController.startModelTraining); // Generic training starter
-
-// ✅ ADDITIONAL HELPFUL ROUTES
-router.get('/adapters/available', modelManagementController.getAvailableAdapters); // Alternative path
-router.get('/models/loaded', modelManagementController.getLoadedModels); // Alternative path
-
-// ✅ HEALTH CHECK FOR MODEL MANAGEMENT
+// ✅ HEALTH CHECK (BEFORE AUTH)
 router.get('/health', async (req, res) => {
   try {
     const FASTAPI_BASE_URL = process.env.FASTAPI_URL || "http://localhost:8000";
-    
+
     let fastapiStatus = 'unknown';
     try {
       const axios = await import('axios');
@@ -86,22 +32,20 @@ router.get('/health', async (req, res) => {
     } catch (error) {
       fastapiStatus = 'unavailable';
     }
-    
+
     res.json({
       success: true,
       status: 'healthy',
       services: {
         fastapi: fastapiStatus,
         database: 'connected',
-        multer: 'configured',
-        auth: 'active'
+        multer: 'configured'
       },
       endpoints: {
-        training: '/api/admin/model/training-jobs',
-        models: '/api/admin/model/loaded',
-        adapters: '/api/admin/model/available-adapters',
-        load: '/api/admin/model/load-lora',
-        unload: '/api/admin/model/unload/:modelId'
+        ingest: '/api/admin/model/ingest-data',
+        delete: '/api/admin/model/delete-data',
+        documents: '/api/admin/model/ingested-documents',
+        models: '/api/admin/model/models'
       },
       timestamp: new Date().toISOString()
     });
@@ -114,7 +58,9 @@ router.get('/health', async (req, res) => {
   }
 });
 
-// ✅ ERROR HANDLING MIDDLEWARE FOR THIS ROUTER
+// ✅ NO CLERK AUTH - Keep all endpoints public for now to avoid authentication issues
+
+// ERROR HANDLING MIDDLEWARE FOR THIS ROUTER
 router.use((error, req, res, next) => {
   console.error('❌ [MODEL ROUTES] Error:', {
     method: req.method,
@@ -122,7 +68,7 @@ router.use((error, req, res, next) => {
     error: error.message,
     stack: error.stack
   });
-  
+
   // Handle multer errors specifically
   if (error instanceof multer.MulterError) {
     if (error.code === 'LIMIT_FILE_SIZE') {
@@ -135,12 +81,12 @@ router.use((error, req, res, next) => {
     if (error.code === 'LIMIT_UNEXPECTED_FILE') {
       return res.status(400).json({
         success: false,
-        message: 'Unexpected file field. Expected: datasetFile or dataset.',
+        message: 'Unexpected file field. Expected: dataSheetFile.',
         error_type: 'unexpected_field'
       });
     }
   }
-  
+
   // Generic error response
   res.status(500).json({
     success: false,

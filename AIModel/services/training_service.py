@@ -5,7 +5,13 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
+from langchain_community.document_loaders import UnstructuredFileLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_chroma import Chroma
+from langchain_ollama import OllamaEmbeddings
+from langchain.schema import Document
+from langchain_community.vectorstores.utils import filter_complex_metadata
 
 # ✅ FIX: Import the real LoRA trainer and config
 try:
@@ -21,6 +27,7 @@ except ImportError as e:
         def ensure_model_directories(cls):
             cls.LORA_TRAINED_PATH.mkdir(parents=True, exist_ok=True)
 
+# Initialize a logger
 logger = logging.getLogger(__name__)
 
 class TrainingService:
@@ -331,3 +338,140 @@ This adapter can be loaded with the Nexus AI system for inference.
         except Exception as e:
             logger.error(f"❌ Failed to update status for {job_id}: {e}")
             return False
+
+class IngestionService:
+    """
+    Handles the ingestion of documents into the RAG vector store.
+    """
+    def __init__(self, embedding_function):
+        self.embedding_function = embedding_function
+        self.vectorstore = Chroma(
+            collection_name="company_data",
+            embedding_function=self.embedding_function,
+            persist_directory="./chroma_db"
+        )
+        logger.info("✅ IngestionService initialized with ChromaDB")
+
+    async def ingest_document(self, file_path: str, doc_id: str):
+        """
+        Loads, splits, and embeds a document, then adds it to the vector store.
+        """
+        logger.info(f"🚀 Starting ingestion for file: {file_path}")
+        
+        try:
+            # ✅ SIMPLE APPROACH: Read file content directly
+            try:
+                # Try PDF extraction first
+                import PyPDF2
+                with open(file_path, 'rb') as file:
+                    pdf_reader = PyPDF2.PdfReader(file)
+                    text_content = ""
+                    for page in pdf_reader.pages:
+                        text_content += page.extract_text() + "\n"
+            except Exception as pdf_error:
+                logger.warning(f"PDF extraction failed, trying UnstructuredLoader: {pdf_error}")
+                # Fallback to UnstructuredLoader
+                loader = UnstructuredFileLoader(file_path)
+                raw_docs = loader.load()
+                
+                # Extract text content
+                text_content = ""
+                for item in raw_docs:
+                    if hasattr(item, 'page_content'):
+                        text_content += item.page_content + "\n"
+                    elif isinstance(item, str):
+                        text_content += item + "\n"
+                    else:
+                        text_content += str(item) + "\n"
+        
+            if not text_content.strip():
+                raise ValueError(f"No text content could be extracted from {file_path}")
+            
+            logger.info(f"📄 Extracted {len(text_content)} characters from document")
+            
+            # ✅ Create Document object
+            from langchain.schema import Document
+            document = Document(
+                page_content=text_content,
+                metadata={
+                    "doc_id": str(doc_id),
+                    "source_file": str(os.path.basename(file_path)),
+                    "ingested_at": datetime.now().isoformat()
+                }
+            )
+            
+            # ✅ Split into chunks
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200,
+                length_function=len,
+                separators=["\n\n", "\n", " ", ""]
+            )
+            texts = text_splitter.split_documents([document])
+            
+            logger.info(f"✂️ Split document into {len(texts)} chunks.")
+            
+            # ✅ Add to vector store
+            count_before = self.vectorstore._collection.count()
+            self.vectorstore.add_documents(texts)
+            count_after = self.vectorstore._collection.count()
+            
+            logger.info(f"✅ Added {count_after - count_before} chunks to vector store")
+            
+        except Exception as e:
+            logger.error(f"❌ Document ingestion failed for {file_path}: {e}")
+            raise
+
+    def delete_document_by_id(self, doc_id: str) -> bool:
+        """Delete a document from the vector store by its ID"""
+        try:
+            # Get documents with the specified doc_id
+            collection = self.vectorstore._collection
+            results = collection.get(where={"doc_id": doc_id})
+            
+            if not results or not results['ids']:
+                logger.warning(f"⚠️ No documents found with doc_id: {doc_id}")
+                return False
+            
+            # Delete all chunks with this doc_id
+            collection.delete(where={"doc_id": doc_id})
+            
+            logger.info(f"✅ Deleted {len(results['ids'])} chunks for doc_id: {doc_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to delete document {doc_id}: {e}")
+            return False
+
+    def get_document_count(self) -> int:
+        """Get the total number of documents in the vector store"""
+        try:
+            return self.vectorstore._collection.count()
+        except Exception as e:
+            logger.error(f"❌ Failed to get document count: {e}")
+            return 0
+
+    def list_documents(self) -> List[Dict[str, Any]]:
+        """List all documents in the vector store"""
+        try:
+            collection = self.vectorstore._collection
+            results = collection.get(include=['metadatas'])
+            
+            # Group by doc_id to get unique documents
+            doc_info = {}
+            for metadata in results.get('metadatas', []):
+                doc_id = metadata.get('doc_id', 'unknown')
+                if doc_id not in doc_info:
+                    doc_info[doc_id] = {
+                        'doc_id': doc_id,
+                        'source_file': metadata.get('source_file', 'unknown'),
+                        'ingested_at': metadata.get('ingested_at', 'unknown'),
+                        'chunk_count': 0
+                    }
+                doc_info[doc_id]['chunk_count'] += 1
+            
+            return list(doc_info.values())
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to list documents: {e}")
+            return []

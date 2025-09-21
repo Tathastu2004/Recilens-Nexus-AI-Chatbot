@@ -6,6 +6,11 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 import asyncio
 
+from langchain_ollama import OllamaEmbeddings, OllamaLLM
+from langchain_chroma import Chroma
+from langchain.prompts import PromptTemplate
+from langchain.chains import RetrievalQA
+
 # ✅ FIX: Import with fallbacks for ML dependencies
 try:
     from services.inference_service import LoRAInferenceService
@@ -24,10 +29,62 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 class ModelManager:
-    def __init__(self):
-        self.loaded_models: Dict[str, Dict[str, Any]] = {}
-        TrainingConfig.ensure_model_directories()
-        logger.info("✅ ModelManager initialized")
+    """
+    Manages the Ollama model and the Retrieval-Augmented Generation (RAG) pipeline.
+    This class orchestrates document retrieval and context-aware response generation.
+    """
+    def __init__(self, ollama_model="llama3"):
+        self.ollama_model_name = ollama_model
+        
+        # 1. Initialize the embedding model for creating vectors from text
+        self.embeddings = OllamaEmbeddings(model=self.ollama_model_name)
+        logger.info(f"✅ OllamaEmbeddings model initialized: {self.ollama_model_name}")
+
+        # 2. Initialize the vector store (ChromaDB) to retrieve relevant document chunks
+        self.vectorstore = Chroma(
+            collection_name="company_data",
+            embedding_function=self.embeddings,
+            persist_directory="./chroma_db"
+        )
+        logger.info("✅ ChromaDB vector store initialized")
+
+        # 3. Initialize the Ollama LLM for generating responses
+        self.llm = OllamaLLM(model=self.ollama_model_name)
+        logger.info(f"✅ Ollama LLM initialized: {self.ollama_model_name}")
+
+        # 4. Create the RetrievalQA chain
+        self.qa_chain = self._initialize_qa_chain()
+
+    def _initialize_qa_chain(self):
+        """
+        Creates and returns the RetrievalQA chain. This chain handles the end-to-end
+        RAG process: retrieval and generation.
+        """
+        prompt_template = """
+        Based on the following context, analyze the user's question and provide a comprehensive answer.
+        If the context does not contain enough information, state that you don't know rather than making up an answer.
+
+        Context:
+        {context}
+
+        Question: {question}
+
+        Helpful Answer:
+        """
+        QA_PROMPT = PromptTemplate(
+            template=prompt_template, input_variables=["context", "question"]
+        )
+
+        # The chain combines the retriever and the LLM
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=self.llm,
+            chain_type="stuff",
+            retriever=self.vectorstore.as_retriever(search_kwargs={"k": 5}), # Retrieve top 5 documents
+            chain_type_kwargs={"prompt": QA_PROMPT},
+            return_source_documents=True
+        )
+        logger.info("✅ RetrievalQA chain initialized")
+        return qa_chain
 
     async def get_all_loaded_models(self) -> List[Dict[str, Any]]:
         """Return all currently loaded models with consistent structure"""
@@ -215,3 +272,152 @@ class ModelManager:
         stats["total_disk_usage"] = f"{total_size / (1024 * 1024):.1f} MB"
         
         return stats
+
+    def get_embedding_model(self) -> OllamaEmbeddings:
+        """
+        Returns the embedding model instance. Used by the IngestionService
+        to ensure consistency between embedding documents and queries.
+        """
+        return self.embeddings
+
+    def should_use_rag(self, query: str) -> bool:
+        """Determine if a query should use RAG based on content"""
+        # ✅ ENHANCED RAG DETECTION - Much more comprehensive
+        rag_indicators = [
+            # Document-related keywords
+            "document", "pdf", "file", "data sheet", "company data", "uploaded", "ingested",
+            
+            # Question patterns that benefit from RAG
+            "what", "how", "why", "when", "where", "who", "which", "explain", "describe",
+            "tell me about", "information about", "details about", "show me", "find",
+            "search", "look for", "according to", "based on", "from the", "in the",
+            
+            # Analysis keywords
+            "analyze", "summarize", "compare", "review", "evaluate", "assess", "examine",
+            
+            # Specific content queries
+            "price", "cost", "specification", "feature", "procedure", "process", "step",
+            "requirement", "guideline", "policy", "rule", "instruction", "method",
+            
+            # Business/technical terms that are likely in documents
+            "technical", "specification", "manual", "guide", "report", "analysis",
+            "data", "statistics", "number", "figure", "table", "chart", "graph"
+        ]
+        
+        query_lower = query.lower()
+        
+        # ✅ Check for any RAG indicators
+        has_indicators = any(indicator in query_lower for indicator in rag_indicators)
+        
+        # ✅ Additional checks for question patterns
+        question_patterns = ["what is", "what are", "how to", "how do", "tell me", "show me"]
+        has_question_pattern = any(pattern in query_lower for pattern in question_patterns)
+        
+        # ✅ If it's a greeting or very short, don't use RAG
+        greeting_patterns = ["hi", "hello", "hey", "good morning", "good afternoon", "thanks", "thank you"]
+        is_greeting = any(greeting in query_lower for greeting in greeting_patterns) and len(query.split()) < 5
+        
+        if is_greeting:
+            return False
+        
+        # ✅ Use RAG if query has indicators OR is a question pattern with some length
+        should_rag = has_indicators or (has_question_pattern and len(query.split()) > 3)
+        
+        logger.info(f"🤖 [RAG DETECTION] Query: '{query[:50]}...' -> Use RAG: {should_rag}")
+        logger.info(f"    Indicators: {has_indicators}, Questions: {has_question_pattern}, Greeting: {is_greeting}")
+        
+        return should_rag
+
+    def get_rag_response(self, prompt: str, conversation_context: List[Any]) -> str:
+        """Enhanced RAG response with better error handling and document verification"""
+        try:
+            logger.info(f"🔍 [RAG] Processing query: {prompt[:100]}...")
+            
+            # ✅ STEP 1: Check if we have any documents in the vector store
+            try:
+                # Get collection info to check document count
+                collection = self.vectorstore._collection
+                collection_count = collection.count()
+                
+                logger.info(f"📊 [RAG] Vector store has {collection_count} documents")
+                
+                if collection_count == 0:
+                    logger.warning("⚠️ [RAG] No documents found in vector store")
+                    return """I don't have any documents in my knowledge base yet. 
+
+To use RAG features:
+1. Go to Admin → Model Management 
+2. Upload documents in the "Data Sheets" tab
+3. Wait for successful ingestion
+4. Then ask questions about your documents
+
+For now, I'll provide a general response to your question."""
+                
+            except Exception as e:
+                logger.error(f"❌ [RAG] Vector store access failed: {e}")
+                return "I'm having trouble accessing the document database. Please try again later."
+            
+            # ✅ STEP 2: Perform retrieval to get relevant documents
+            try:
+                logger.info(f"🔍 [RAG] Searching for relevant documents...")
+                retriever = self.vectorstore.as_retriever(search_kwargs={"k": 5})
+                relevant_docs = retriever.get_relevant_documents(prompt)
+                
+                logger.info(f"📄 [RAG] Found {len(relevant_docs)} potentially relevant documents")
+                
+                if not relevant_docs:
+                    logger.warning("⚠️ [RAG] No relevant documents found for this query")
+                    return f"""I searched through your uploaded documents but couldn't find information specifically related to your question: "{prompt}"
+
+This might be because:
+- The information isn't in your uploaded documents
+- The question needs to be more specific
+- The documents need better indexing
+
+I can provide a general answer, or you can try rephrasing your question to be more specific."""
+                
+                # Log what documents were found (for debugging)
+                for i, doc in enumerate(relevant_docs):
+                    doc_id = doc.metadata.get('doc_id', 'unknown')
+                    content_preview = doc.page_content[:100].replace('\n', ' ')
+                    logger.info(f"  📄 Doc {i+1}: ID={doc_id}, Content='{content_preview}...'")
+                
+            except Exception as e:
+                logger.error(f"❌ [RAG] Document retrieval failed: {e}")
+                return f"I encountered an error while searching through your documents: {str(e)}"
+            
+            # ✅ STEP 3: Generate response using the QA chain
+            try:
+                logger.info(f"🤖 [RAG] Generating response using {len(relevant_docs)} documents...")
+                
+                result = self.qa_chain.invoke({"query": prompt})
+                answer = result["result"]
+                
+                # ✅ STEP 4: Enhance the response with metadata
+                source_docs = result.get("source_documents", relevant_docs)
+                
+                if source_docs:
+                    # Get unique document IDs
+                    doc_ids = list(set(doc.metadata.get('doc_id', 'unknown') for doc in source_docs))
+                    doc_ids = [doc_id for doc_id in doc_ids if doc_id != 'unknown']
+                    
+                    logger.info(f"✅ [RAG] Response generated using documents: {doc_ids}")
+                    
+                    # Add source information
+                    if doc_ids:
+                        answer += f"\n\n📚 *Based on information from your uploaded documents (IDs: {', '.join(doc_ids)}).*"
+                    else:
+                        answer += f"\n\n📚 *Based on {len(source_docs)} document sections from your knowledge base.*"
+                else:
+                    logger.warning("⚠️ [RAG] No source documents in result")
+                    answer += "\n\n*Note: I provided this answer using general knowledge as I couldn't find specific information in your documents.*"
+                
+                return answer
+                
+            except Exception as e:
+                logger.error(f"❌ [RAG] Response generation failed: {e}")
+                return f"I found relevant documents but encountered an error while generating the response: {str(e)}. Please try rephrasing your question."
+                
+        except Exception as e:
+            logger.error(f"❌ [RAG] Overall RAG process failed: {e}")
+            return f"I'm sorry, I encountered an unexpected error while processing your question: {str(e)}. Please try again."

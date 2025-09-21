@@ -37,14 +37,13 @@ export default function Dashboard() {
     error: feedbackError
   } = useFeedback();
 
-  // Model Management Context
+  // ✅ FIXED: Model Management Context - only use available properties
   const {
-    trainingJobs,
-    loadedModels,
-    notifications,
-    getTrainingJobs, // ✅ Use this from ModelContext
-    getLoadedModels,
-    trainingLoading,
+    ingestedDocuments = [], // ✅ Default to empty array
+    notifications = [], // ✅ Default to empty array
+    getIngestedDocuments,
+    getModels,
+    ingestionLoading,
     modelLoading,
     error: modelError
   } = useModelManagement();
@@ -54,6 +53,7 @@ export default function Dashboard() {
   const [analytics, setAnalytics] = useState([]);
   const [users, setUsers] = useState([]);
   const [feedbacks, setFeedbacks] = useState([]);
+  const [models, setModels] = useState([]); // ✅ New state for models
   const [systemHealth, setSystemHealth] = useState(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [lastHealthCheck, setLastHealthCheck] = useState(null);
@@ -107,7 +107,7 @@ export default function Dashboard() {
     try {
       console.log('🩺 Fetching system health...');
       
-      const response = await apiClient.get('/api/admin/health'); // ✅ Fixed endpoint
+      const response = await apiClient.get('/api/admin/health');
       
       console.log('✅ Health data received:', response.data);
       setSystemHealth(response.data);
@@ -137,7 +137,7 @@ export default function Dashboard() {
           database: { status: 'unknown', error: errorMessage },
           fastapi: { status: 'unknown', error: errorMessage },
           llama: { status: 'unknown', error: errorMessage },
-          blip: { status: 'unknown', error: errorMessage }
+          rag: { status: 'unknown', error: errorMessage }
         },
         summary: {
           online_services: 0,
@@ -165,15 +165,15 @@ export default function Dashboard() {
           analyticsResult,
           usersResult,
           feedbacksResult,
-          trainingJobsResult,
+          documentsResult,
           modelsResult
         ] = await Promise.allSettled([
           getDashboardStats(),
           getAnalytics(),
           getAllUsers(),
           getAllFeedbacks(),
-          getTrainingJobs(), // ✅ Use ModelContext function
-          getLoadedModels()
+          getIngestedDocuments(), // ✅ Use RAG document function
+          getModels() // ✅ Use RAG models function
         ]);
 
         // Process dashboard stats
@@ -203,11 +203,14 @@ export default function Dashboard() {
           setFeedbacks(feedbacksResult.value.data);
         }
 
-        // Training jobs are handled by ModelContext automatically
-        console.log('🚂 Training jobs from context:', trainingJobs.length);
+        // ✅ Process models
+        if (modelsResult.status === 'fulfilled' && modelsResult.value) {
+          console.log('🤖 Models data:', modelsResult.value);
+          setModels(Array.isArray(modelsResult.value) ? modelsResult.value : []);
+        }
 
-        // Models are handled by ModelContext automatically  
-        console.log('🤖 Loaded models from context:', loadedModels.length);
+        // Ingested documents are handled by ModelContext automatically
+        console.log('📄 Ingested documents from context:', ingestedDocuments.length);
 
         // Initial health check
         await fetchSystemHealth();
@@ -220,25 +223,25 @@ export default function Dashboard() {
     };
 
     fetchInitialData();
-  }, [getDashboardStats, getAnalytics, getAllUsers, getAllFeedbacks, getTrainingJobs, getLoadedModels]); // ✅ Fixed dependencies
+  }, [getDashboardStats, getAnalytics, getAllUsers, getAllFeedbacks, getIngestedDocuments, getModels]); // ✅ Fixed dependencies
 
   // ✅ FIXED: Calculate real stats from actual data
   const calculateStats = () => {
-    const totalUsers = users.length || dashboardStats?.totalUsers || 0;
+    const totalUsers = Array.isArray(users) ? users.length : (dashboardStats?.totalUsers || 0);
     const totalSessions = dashboardStats?.totalSessions || 0;
     const totalMessages = dashboardStats?.totalMessages || 0;
-    const feedbackCount = feedbacks.length || 0;
-    const trainingJobsCount = trainingJobs.length || 0;
-    const loadedModelsCount = loadedModels.length || 0;
+    const feedbackCount = Array.isArray(feedbacks) ? feedbacks.length : 0;
+    const ingestedDocumentsCount = Array.isArray(ingestedDocuments) ? ingestedDocuments.length : 0; // ✅ RAG documents
+    const loadedModelsCount = Array.isArray(models) ? models.length : 0; // ✅ RAG models
     const aiResponsesCount = totalMessages;
-    const analyticsReportsCount = analytics.length || 0;
+    const analyticsReportsCount = Array.isArray(analytics) ? analytics.length : 0;
 
     const stats = {
       totalUsers,
       totalSessions,
       totalMessages,
       feedbackCount,
-      trainingJobsCount,
+      ingestedDocumentsCount, // ✅ Changed from trainingJobsCount
       loadedModelsCount,
       aiResponsesCount,
       analyticsReportsCount
@@ -252,7 +255,7 @@ export default function Dashboard() {
 
   // ✅ FIXED: Process analytics for charts
   const processAnalyticsForCharts = () => {
-    if (!analytics.length) {
+    if (!Array.isArray(analytics) || !analytics.length) {
       // Create mock data when no analytics available
       const mockDates = Array.from({ length: 7 }, (_, i) => {
         const date = new Date();
@@ -296,7 +299,7 @@ export default function Dashboard() {
   };
 
   const processFeedbackStats = () => {
-    if (!feedbacks.length) return [
+    if (!Array.isArray(feedbacks) || !feedbacks.length) return [
       { status: 'Pending', count: 0, id: 'pending' },
       { status: 'Processed', count: 0, id: 'processed' },
       { status: 'Completed', count: 0, id: 'completed' }
@@ -315,28 +318,24 @@ export default function Dashboard() {
     }));
   };
 
-  const processTrainingStats = () => {
-    if (!trainingJobs.length) return [
-      { status: 'Completed', count: 0, id: 'completed' },
-      { status: 'Running', count: 0, id: 'running' },
-      { status: 'Failed', count: 0, id: 'failed' }
+  // ✅ NEW: Process ingested documents stats (replaces training stats)
+  const processDocumentStats = () => {
+    if (!Array.isArray(ingestedDocuments) || !ingestedDocuments.length) return [
+      { status: 'Active', count: 0, id: 'active' },
+      { status: 'Processing', count: 0, id: 'processing' },
+      { status: 'Error', count: 0, id: 'error' }
     ];
 
-    const stats = trainingJobs.reduce((acc, job) => {
-      const status = job.status || 'pending';
-      acc[status] = (acc[status] || 0) + 1;
-      return acc;
-    }, {});
-
-    return Object.entries(stats).map(([status, count], index) => ({
-      status: status.charAt(0).toUpperCase() + status.slice(1),
-      count,
-      id: `training-${index}`
-    }));
+    // For now, assume all documents are active since we don't have status
+    return [
+      { status: 'Active', count: ingestedDocuments.length, id: 'active' },
+      { status: 'Processing', count: 0, id: 'processing' },
+      { status: 'Error', count: 0, id: 'error' }
+    ];
   };
 
   const processUserRoleStats = () => {
-    if (!users.length) return [
+    if (!Array.isArray(users) || !users.length) return [
       { role: 'Client', count: 0, id: 'client' },
       { role: 'Admin', count: 0, id: 'admin' }
     ];
@@ -355,9 +354,9 @@ export default function Dashboard() {
   };
 
   // Recent users for table
-  const recentUsers = users
+  const recentUsers = Array.isArray(users) ? users
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .slice(0, 5);
+    .slice(0, 5) : [];
 
   const tableHeaders = ["Name", "Email", "Role"];
   const tableRows = recentUsers.map((user, index) => [
@@ -380,7 +379,7 @@ export default function Dashboard() {
   // ✅ Process chart data
   const { conversationsOverTime, topIntents } = processAnalyticsForCharts();
   const feedbackStats = processFeedbackStats();
-  const trainingStats = processTrainingStats();
+  const documentStats = processDocumentStats(); // ✅ Changed from trainingStats
   const userRoleStats = processUserRoleStats();
 
   return (
@@ -404,7 +403,7 @@ export default function Dashboard() {
       </div>
 
       {/* Notifications */}
-      {notifications.length > 0 && (
+      {Array.isArray(notifications) && notifications.length > 0 && (
         <div className="mb-6 space-y-2">
           {notifications.slice(0, 3).map((notification, index) => (
             <div
@@ -433,8 +432,8 @@ export default function Dashboard() {
 
       {/* ✅ FIXED: Secondary Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-        <StatCard title="Training Jobs" value={stats.trainingJobsCount} />
-        <StatCard title="Loaded Models" value={stats.loadedModelsCount} />
+        <StatCard title="Data Sheets" value={stats.ingestedDocumentsCount} /> {/* ✅ Changed from Training Jobs */}
+        <StatCard title="AI Models" value={stats.loadedModelsCount} />
         <StatCard title="AI Responses" value={stats.aiResponsesCount} />
         <StatCard title="Analytics Reports" value={stats.analyticsReportsCount} />
       </div>
@@ -529,11 +528,11 @@ export default function Dashboard() {
           )}
         </ChartCard>
 
-        {/* ✅ FIXED: Model Training Status */}
-        <ChartCard title="Model Training Status">
-          {trainingStats.length > 0 && trainingJobs.length > 0 ? (
+        {/* ✅ FIXED: RAG Data Sheets Status (replaces Model Training Status) */}
+        <ChartCard title="Data Sheets Status">
+          {documentStats.length > 0 && ingestedDocuments.length > 0 ? (
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={trainingStats}>
+              <BarChart data={documentStats}>
                 <XAxis dataKey="status" />
                 <YAxis />
                 <Tooltip />
@@ -543,8 +542,8 @@ export default function Dashboard() {
           ) : (
             <div className="flex items-center justify-center h-64 text-gray-500">
               <div className="text-center">
-                <p className="mb-2">No training data available</p>
-                <p className="text-sm">Training jobs: {stats.trainingJobsCount}</p>
+                <p className="mb-2">No data sheets available</p>
+                <p className="text-sm">Ingested documents: {stats.ingestedDocumentsCount}</p>
               </div>
             </div>
           )}
@@ -621,7 +620,7 @@ export default function Dashboard() {
               className="w-full text-left text-green-600 hover:text-green-800 py-2 px-3 rounded hover:bg-green-50 transition-colors"
               onClick={() => navigate('/admin/models')}
             >
-              → Manage Models ({stats.loadedModelsCount} loaded)
+              → Manage Data Sheets ({stats.ingestedDocumentsCount} ingested) {/* ✅ Changed text */}
             </button>
             <button
               className="w-full text-left text-green-600 hover:text-green-800 py-2 px-3 rounded hover:bg-green-50 transition-colors"
@@ -632,7 +631,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* System Health Monitor - keeping your existing implementation */}
+        {/* System Health Monitor */}
         <div className="bg-white p-6 rounded-lg shadow hover:shadow-lg transition-shadow md:col-span-2">
           <div className="flex justify-between items-center mb-6">
             <h4 className="font-semibold text-green-800 text-lg">System Health Monitor</h4>
@@ -658,7 +657,6 @@ export default function Dashboard() {
             </div>
           </div>
           
-          {/* Your existing system health implementation */}
           {systemHealth ? (
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
