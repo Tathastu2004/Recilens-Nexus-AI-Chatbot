@@ -791,7 +791,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     };
     if (addMessageToSession) addMessageToSession(activeSessionId, optimisticUserMsg);
 
-    // ENHANCED: Build message data with context info
+    // ENHANCED: Build message data with PERSISTENT context info
     const messageData = {
       sessionId: activeSessionId,
       message: finalInput,
@@ -800,15 +800,36 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       fileName: fileContext?.fileName || null,
       fileType: messageType,
       extractedText: messageType === 'document' ? fileContext?.extractedText : null,
-      contextEnabled: true
+      contextEnabled: true,
+      // ✅ ADD THESE MISSING FIELDS FOR IMAGE CONTEXT:
+      hasActiveContext: !!activeFileContext,
+      contextType: activeFileContext?.fileType || null,
+      imageAnalysis: activeFileContext?.imageAnalysis || null,
+      // ✅ CRITICAL: Ensure image URL is passed for follow-up messages
+      contextFileUrl: activeFileContext?.fileUrl || null,
+      contextFileName: activeFileContext?.fileName || null,
+      isFollowUpMessage: !!activeFileContext && !fileContext?.fileUrl // This is a follow-up to existing context
     };
 
-    console.log('🔍 [FRONTEND] Sending message with context support:', {
+    console.log('🖼️ [FRONTEND DEBUG] Sending message with image context:', {
       type: messageData.type,
-      hasFile: !!messageData.fileUrl,
-      hasExtractedText: !!messageData.extractedText,
-      fileName: messageData.fileName,
-      contextEnabled: messageData.contextEnabled
+      hasActiveContext: messageData.hasActiveContext,
+      contextType: messageData.contextType,
+      hasContextFileUrl: !!messageData.contextFileUrl,
+      isFollowUp: messageData.isFollowUpMessage
+    });
+
+    // Debugging: Log the complete message payload
+    console.log('🔍 [DEBUG] Complete message payload being sent:', {
+      sessionId: messageData.sessionId,
+      message: messageData.message,
+      type: messageData.type,
+      fileUrl: messageData.fileUrl,
+      contextFileUrl: messageData.contextFileUrl,
+      hasActiveContext: messageData.hasActiveContext,
+      contextType: messageData.contextType,
+      isFollowUpMessage: messageData.isFollowUpMessage,
+      activeFileContext: activeFileContext
     });
 
     setIsAIStreaming(true);
@@ -1030,24 +1051,15 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           </div>
         ) : (
           <div className="max-w-4xl mx-auto">
-            {actualMessages.map((msg, index) => (
-              msg.sender === 'AI' ? (
-                <AiMessage
-                  key={`${msg._id}-${msg.renderKey || 0}`}
-                  message={msg.message}
-                  timestamp={msg.timestamp}
-                  fileUrl={msg.fileUrl}
-                  fileType={msg.fileType}
-                  type={msg.type}
-                  isStreaming={msg.isStreaming}
-                  processingInfo={msg.processingInfo}
-                  completedBy={msg.completedBy}
-                  metadata={msg.metadata}
-                />
+            {actualMessages.map((msg, index) => {
+              const normalizedSender = (msg.sender || '').toLowerCase();
+              const isAI = normalizedSender === 'ai' || normalizedSender === 'assistant' || normalizedSender === 'system';
+              return isAI ? (
+                <AiMessage key={msg._id || index} {...msg} />
               ) : (
                 <UserMessage key={msg._id || index} {...msg} />
-              )
-            ))}
+              );
+            })}
             <div ref={messagesEndRef} />
           </div>
         )}

@@ -7,6 +7,7 @@ class CacheService {
     this.isConnected = false;
     this.CONTEXT_SIZE = 15;
     this.CONTEXT_EXPIRY = 24 * 60 * 60; // 24 hours
+    this.CONTEXT_TTL = 60 * 60 * 24; // 24 hours in seconds
     this.init();
   }
 
@@ -110,8 +111,7 @@ class CacheService {
         
         console.log('✅ [CONTEXT] Retrieved context for session:', {
           sessionId: sessionId.substring(0, 8) + '...',
-          messageCount: contextMessages.length,
-          oldestMessage: contextMessages[0]?.timestamp ? new Date(contextMessages[0].timestamp).toLocaleTimeString() : 'N/A',
+          messageCount: contextMessages.length, // ✅ FIXED: Added proper property name and value
           newestMessage: contextMessages[contextMessages.length - 1]?.timestamp ? new Date(contextMessages[contextMessages.length - 1].timestamp).toLocaleTimeString() : 'N/A'
         });
         
@@ -395,6 +395,46 @@ class CacheService {
         contextSize: this.CONTEXT_SIZE
       };
     }
+  }
+
+  // ✅ NEW: IMAGE CONTEXT MANAGEMENT
+  async addImageContext(sessionId, imageData, userId) {
+    try {
+      const contextKey = `context:${userId}:${sessionId}:image`;
+      
+      await this.client.setEx(contextKey, this.CONTEXT_TTL, JSON.stringify({
+        fileName: imageData.fileName,
+        fileUrl: imageData.fileUrl,
+        fileType: imageData.fileType,
+        uploadedAt: new Date().toISOString(),
+        analysisComplete: false
+      }));
+      
+      console.log(`✅ [CACHE] Image context stored for session: ${sessionId}`);
+    } catch (error) {
+      console.error('❌ [CACHE] Failed to store image context:', error);
+    }
+  }
+
+  async getImageContext(sessionId, userId) {
+    try {
+      const contextKey = `context:${userId}:${sessionId}:image`;
+      const context = await this.client.get(contextKey);
+      
+      return context ? JSON.parse(context) : null;
+    } catch (error) {
+      console.error('❌ [CACHE] Failed to get image context:', error);
+      return null;
+    }
+  }
+
+  async addMessage(sessionId, userId, message) {
+    return this.addMessageToContext(sessionId, {
+      role: message.sender || 'AI',
+      content: message.message,
+      _id: message._id,
+      type: message.type || 'text'
+    }, userId);
   }
 }
 

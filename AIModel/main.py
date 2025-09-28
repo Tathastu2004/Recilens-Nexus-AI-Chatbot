@@ -13,6 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from ollama import AsyncClient
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
+import httpx
+import tempfile
 
 # ✅ FIXED: Add proper error handling for optional RAG services
 try:
@@ -98,6 +100,15 @@ class EnhancedChatRequest(BaseModel):
     documentType: Optional[str] = None
     contextEnabled: Optional[bool] = False
     contextInstruction: Optional[str] = None
+    # ✅ ADD THESE IMAGE CONTEXT FIELDS:
+    hasActiveContext: Optional[bool] = False
+    contextType: Optional[str] = None
+    imageAnalysis: Optional[str] = None
+    contextFileUrl: Optional[str] = None
+    contextFileName: Optional[str] = None
+    isFollowUpMessage: Optional[bool] = False
+    hasImageContext: Optional[bool] = False
+    imageUrl: Optional[str] = None
 
 class IntentRequest(BaseModel):
     message: str
@@ -191,8 +202,248 @@ async def vector_health_check():
 @app.post("/chat")
 async def enhanced_chat_endpoint(request: EnhancedChatRequest):
     try:
-        logger.info(f"💬 Chat request - Type: {request.type}, Session: {request.sessionId}, RAG enabled: {request.contextEnabled}")
+        logger.info(f"💬 Chat request - Type: {request.type}, Session: {request.sessionId}")
         
+        # ✅ ENHANCED IMAGE CONTEXT DETECTION
+        has_image_context = False
+        image_url = None
+        image_name = None
+        
+        # Debug all request fields
+        logger.info(f"🔍 [DEBUG] Request fields:")
+        logger.info(f"  - type: {request.type}")
+        logger.info(f"  - fileUrl: {request.fileUrl}")
+        logger.info(f"  - contextFileUrl: {request.contextFileUrl}")
+        logger.info(f"  - hasImageContext: {request.hasImageContext}")
+        logger.info(f"  - hasActiveContext: {request.hasActiveContext}")
+        logger.info(f"  - contextType: {request.contextType}")
+        logger.info(f"  - imageUrl: {request.imageUrl}")
+        
+        # Check for direct image upload
+        if request.type == "image" and request.fileUrl:
+            has_image_context = True
+            image_url = request.fileUrl
+            image_name = request.fileName or "Uploaded Image"
+            logger.info(f"🖼️ [IMAGE] Direct image upload detected: {image_name}")
+            logger.info(f"🖼️ [IMAGE] Image URL: {image_url}")
+            
+        # ✅ CHECK FOR IMAGE CONTEXT FROM FRONTEND
+        elif request.contextFileUrl and request.contextType == "image":
+            has_image_context = True
+            image_url = request.contextFileUrl
+            image_name = request.contextFileName or "Context Image"
+            logger.info(f"🖼️ [IMAGE CONTEXT] Context image detected: {image_name}")
+            logger.info(f"🖼️ [IMAGE CONTEXT] Context URL: {image_url}")
+            
+        # ✅ CHECK hasImageContext FLAG
+        elif request.hasImageContext and request.imageUrl:
+            has_image_context = True
+            image_url = request.imageUrl
+            image_name = request.contextFileName or request.fileName or "Previous Image"
+            logger.info(f"🖼️ [IMAGE CONTEXT] hasImageContext flag detected: {image_name}")
+            
+        # ✅ FALLBACK: Check if ANY image URL exists
+        elif request.fileUrl and (request.type == "image" or 
+             (request.fileName and request.fileName.lower().match(r'\.(jpg|jpeg|png|gif|bmp|webp)$'))):
+            has_image_context = True
+            image_url = request.fileUrl
+            image_name = request.fileName or "Image File"
+            logger.info(f"🖼️ [IMAGE FALLBACK] Fallback image detection: {image_name}")
+        
+        # ✅ FINAL CHECK: Look for any Cloudinary image URL
+        urls_to_check = [request.fileUrl, request.contextFileUrl, request.imageUrl]
+        for url in urls_to_check:
+            if url and 'cloudinary.com' in url and any(ext in url.lower() for ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']):
+                has_image_context = True
+                image_url = url
+                image_name = request.fileName or request.contextFileName or "Cloudinary Image"
+                logger.info(f"🖼️ [IMAGE CLOUDINARY] Cloudinary image detected: {image_name}")
+                break
+        
+        # ✅ HANDLE IMAGE CONTEXT WITH LLAMA VISION (FIXED)
+        if has_image_context and image_url:
+            logger.info(f"✅ [VISION] Processing image with Llama Vision")
+            logger.info(f"  - Image URL: {image_url}")
+            logger.info(f"  - Image Name: {image_name}")
+            logger.info(f"  - Message: {request.message}")
+            
+            try:
+                # ✅ STEP 1: Download image to temporary file
+                logger.info("📥 [VISION] Downloading image to local file...")
+                
+                async with httpx.AsyncClient(timeout=30.0) as http_client:
+                    image_response = await http_client.get(image_url)
+                    
+                    if image_response.status_code != 200:
+                        logger.error(f"❌ [VISION] Failed to download image: HTTP {image_response.status_code}")
+                        return StreamingResponse(
+                            iter([f"❌ Could not download image from URL. HTTP status: {image_response.status_code}"]),
+                            media_type="text/plain"
+                        )
+                    
+                    # Create temporary file with appropriate extension
+                    file_extension = image_url.split('.')[-1].split('?')[0] or 'jpg'
+                    if file_extension not in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']:
+                        file_extension = 'jpg'
+                    
+                    # Save to temporary file
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_extension}') as temp_file:
+                        temp_file.write(image_response.content)
+                        temp_image_path = temp_file.name
+                    
+                    logger.info(f"✅ [VISION] Image downloaded to: {temp_image_path}")
+                    logger.info(f"📊 [VISION] Image size: {len(image_response.content)} bytes")
+                
+                # ✅ STEP 2: Prepare messages for vision model
+                vision_messages = []
+                
+                # Add conversation context if available
+                if request.conversation_context and len(request.conversation_context) > 0:
+                    for msg in request.conversation_context[-2:]:  # Last 2 messages for context
+                        if hasattr(msg, 'role') and hasattr(msg, 'content'):
+                            vision_messages.append({"role": msg.role, "content": msg.content})
+                
+                # Add the current user message with local image path
+                vision_messages.append({
+                    "role": "user", 
+                    "content": f"Please analyze this image and answer my question: {request.message}",
+                    "images": [temp_image_path]  # ✅ Use local file path instead of URL
+                })
+                
+                logger.info(f"🦙 [VISION] Sending to vision model with {len(vision_messages)} messages")
+                
+                # ✅ STEP 3: Try different vision models
+                vision_models = ["llava:13b", "llava:7b", "llama3.2-vision", "bakllava"]
+                selected_model = None
+                
+                client = AsyncClient(host=LLAMA_URL)
+                
+                # Find available vision model
+                try:
+                    available_models = await client.list()
+                    model_names = [model.model for model in available_models.models] if hasattr(available_models, 'models') else []
+                    
+                    for model in vision_models:
+                        if any(model in available_model for available_model in model_names):
+                            selected_model = model
+                            logger.info(f"🎯 [VISION] Using model: {selected_model}")
+                            break
+                    
+                    if not selected_model:
+                        # Try partial matches
+                        for model_info in model_names:
+                            if any(keyword in model_info.lower() for keyword in ['llava', 'vision', 'bakllava']):
+                                selected_model = model_info
+                                logger.info(f"🎯 [VISION] Using detected vision model: {selected_model}")
+                                break
+                    
+                    if not selected_model:
+                        logger.error("❌ [VISION] No vision model available")
+                        # Clean up temp file
+                        try:
+                            os.unlink(temp_image_path)
+                        except:
+                            pass
+                        return StreamingResponse(
+                            iter([f"❌ No vision-capable model is available. Please install one using:\n\nollama pull llava:7b\n\nThen restart this service."]),
+                            media_type="text/plain"
+                        )
+                
+                except Exception as model_check_error:
+                    logger.error(f"❌ [VISION] Error checking models: {model_check_error}")
+                    # Clean up temp file
+                    try:
+                        os.unlink(temp_image_path)
+                    except:
+                        pass
+                    return StreamingResponse(
+                        iter([f"❌ Error checking available models: {str(model_check_error)}"]),
+                        media_type="text/plain"
+                    )
+                
+                # ✅ STEP 4: Call Ollama with vision capability
+                try:
+                    vision_response = await client.chat(
+                        model=selected_model,
+                        messages=vision_messages,
+                        stream=True,
+                        options={
+                            "temperature": 0.7,
+                            "top_p": 0.9,
+                            "num_predict": 1000
+                        }
+                    )
+                    
+                    # Stream the response back
+                    async def stream_vision_response():
+                        try:
+                            logger.info("🌊 [VISION] Starting vision model response stream")
+                            chunk_count = 0
+                            total_content = ""
+                            
+                            async for chunk in vision_response:
+                                if chunk and 'message' in chunk:
+                                    content = chunk['message'].get('content', '')
+                                    if content:
+                                        total_content += content
+                                        chunk_count += 1
+                                        yield content
+                            
+                            logger.info(f"✅ [VISION] Completed - {chunk_count} chunks, {len(total_content)} characters")
+                            
+                        except Exception as stream_error:
+                            logger.error(f"❌ [VISION] Stream error: {stream_error}")
+                            yield f"\n\n❌ Vision processing error: {str(stream_error)}"
+                        finally:
+                            # ✅ Clean up temporary file
+                            try:
+                                os.unlink(temp_image_path)
+                                logger.info("🗑️ [VISION] Cleaned up temporary image file")
+                            except Exception as cleanup_error:
+                                logger.warning(f"⚠️ [VISION] Could not clean up temp file: {cleanup_error}")
+                    
+                    return StreamingResponse(stream_vision_response(), media_type="text/plain")
+                    
+                except Exception as ollama_error:
+                    logger.error(f"❌ [VISION] Ollama call failed: {ollama_error}")
+                    # Clean up temp file
+                    try:
+                        os.unlink(temp_image_path)
+                    except:
+                        pass
+                    return StreamingResponse(
+                        iter([f"❌ Vision model call failed: {str(ollama_error)}\n\nPlease ensure you have a vision model installed:\nollama pull llava:7b"]),
+                        media_type="text/plain"
+                    )
+            
+            except Exception as vision_error:
+                logger.error(f"❌ [VISION] General error: {vision_error}")
+                return StreamingResponse(
+                    iter([f"❌ Vision processing failed: {str(vision_error)}"]),
+                    media_type="text/plain"
+                )
+
+        else:
+            # ✅ NO IMAGE CONTEXT - continue with existing logic
+            logger.info("💬 [TEXT] No image context detected, processing as text")
+            
+            if any(word in request.message.lower() for word in ['image', 'picture', 'photo', 'see', 'show', 'visual', 'provided']):
+                final_prompt = f"""The user is asking about an image, but no image has been provided in this conversation.
+
+User's question: {request.message}
+
+I don't see any image that has been shared with me. Could you please upload an image if you'd like me to analyze one? I can help with image analysis once you share an image file."""
+            else:
+                final_prompt = request.message
+
+        logger.info(f"🔍 [IMAGE DEBUG] Context detection result:")
+        logger.info(f"  - has_image_context: {has_image_context}")
+        logger.info(f"  - image_url: {image_url}")
+        logger.info(f"  - image_name: {image_name}")
+        logger.info(f"  - request.type: {request.type}")
+        logger.info(f"  - request.hasImageContext: {request.hasImageContext}")
+        logger.info(f"  - request.contextFileUrl: {request.contextFileUrl}")
+
         # ✅ SMART RAG DECISION: Only use RAG for document-related queries
         should_use_rag = False
         if request.contextEnabled and model_manager:

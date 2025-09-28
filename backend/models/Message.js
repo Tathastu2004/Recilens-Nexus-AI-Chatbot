@@ -2,6 +2,11 @@
 import mongoose from 'mongoose';
 
 const messageSchema = new mongoose.Schema({
+  session: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ChatSession',
+    required: true
+  },
   message: {
     type: String,
     required: true
@@ -9,32 +14,22 @@ const messageSchema = new mongoose.Schema({
   sender: {
     type: String,
     required: true,
-    enum: ['user', 'AI'] // ✅ ENUM VALUES SHOULD BE STRINGS
-  },
-  session: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'ChatSession',
-    required: true
-  },
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+    enum: ['user', 'assistant', 'AI', 'system'] // ✅ ADD 'assistant' to enum
   },
   type: {
     type: String,
-    enum: ['text', 'image', 'document', 'error'],
-    default: 'text'
+    required: true,
+    enum: ['text', 'image', 'document', 'response', 'file'] // ✅ ADD 'response' to enum
   },
   fileUrl: {
     type: String,
     default: null
   },
-  fileType: {
+  fileName: {
     type: String,
     default: null
   },
-  fileName: {
+  fileType: {
     type: String,
     default: null
   },
@@ -50,12 +45,13 @@ const messageSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-  responseTimeMs: {
-    type: Number,
-    default: null
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
   metadata: {
-    type: mongoose.Schema.Types.Mixed,
+    type: Object,
     default: {}
   }
 }, {

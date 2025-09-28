@@ -239,25 +239,29 @@ export const sendMessage = async (req, res) => {
     const { 
       sessionId, 
       message, 
-      type = "text", 
-      fileUrl, 
-      fileType, 
-      fileName, 
-      extractedText,
-      textLength = 0,
-      documentType,
-      contextEnabled = false,
-      contextInstruction
-    } = req.body;
-    const userId = req.user._id;
-
-    console.log('📋 [SEND MESSAGE] Received payload:', {
-      sessionId: sessionId?.substring(0, 8) + '...',
-      type,
-      hasExtractedText: !!extractedText,
-      extractedTextLength: extractedText?.length || 0,
+      type = 'text',
+      fileUrl,
       fileName,
-      hasContextInstruction: !!contextInstruction
+      fileType,
+      extractedText,
+      contextEnabled,
+      contextInstruction,
+      // ✅ ADD THESE MISSING IMAGE CONTEXT FIELDS:
+      hasActiveContext,
+      contextType,
+      imageAnalysis,
+      contextFileUrl,
+      contextFileName,
+      isFollowUpMessage
+    } = req.body;
+
+    console.log('💬 [CHAT CONTROLLER] Received message:', {
+      type,
+      hasFileUrl: !!fileUrl,
+      hasContextFileUrl: !!contextFileUrl,
+      hasActiveContext,
+      contextType,
+      isFollowUpMessage
     });
 
     // ✅ VALIDATION
@@ -271,11 +275,11 @@ export const sendMessage = async (req, res) => {
 
     // ✅ VERIFY SESSION ACCESS
     const session = await ChatSession.findById(sessionId);
-    if (!session || session.user.toString() !== userId.toString()) {
+    if (!session || session.user.toString() !== req.user._id.toString()) {
       console.error('❌ [SEND MESSAGE] Session access denied:', { 
         sessionFound: !!session, 
         sessionUser: session?.user?.toString(), 
-        requestUser: userId.toString() 
+        requestUser: req.user._id.toString() 
       });
       return res.status(403).json({ 
         success: false, 
@@ -295,10 +299,10 @@ export const sendMessage = async (req, res) => {
       extractedText: extractedText || null,
       hasTextExtraction: !!(extractedText && !extractedText.startsWith("❌")),
       textLength: extractedText ? extractedText.length : 0,
-      userId: userId,
+      userId: req.user._id,
       metadata: {
         contextEnabled,
-        documentType: documentType || null,
+        documentType: fileName ? fileName.split('.').pop().toLowerCase() : null, // ✅ FIXED: Use fileName instead of undefined documentType
         hasContextInstruction: !!contextInstruction
       }
     });
@@ -317,7 +321,7 @@ export const sendMessage = async (req, res) => {
         role: 'user',
         content: message,
         _id: savedUserMessage._id
-      }, userId);
+      }, req.user._id);
     } catch (contextError) {
       console.warn('⚠️ [SEND MESSAGE] Context service warning:', contextError.message);
     }
@@ -325,7 +329,7 @@ export const sendMessage = async (req, res) => {
     // ✅ GET CONTEXT FOR FASTAPI
     let recentContext = [];
     try {
-      recentContext = await cacheService.getFormattedContextForLlama(sessionId, userId);
+      recentContext = await cacheService.getFormattedContextForLlama(sessionId, req.user._id);
     } catch (contextError) {
       console.warn('⚠️ [SEND MESSAGE] Context retrieval warning:', contextError.message);
       recentContext = [];
@@ -347,7 +351,7 @@ export const sendMessage = async (req, res) => {
     let chunkCount = 0;
 
     try {
-      // ✅ ENHANCED FASTAPI PAYLOAD FOR DOCUMENT PROCESSING
+      // ✅ ENHANCED FASTAPI PAYLOAD WITH IMAGE CONTEXT
       const fastApiPayload = {
         sessionId,
         message,
@@ -357,167 +361,133 @@ export const sendMessage = async (req, res) => {
           content: ctx.content
         })),
         adapter_id: null,
-        // ✅ ADD DOCUMENT CONTEXT FIELDS
         extractedText: extractedText || null,
         fileUrl: fileUrl || null,
         fileName: fileName || null,
         fileType: fileType || null,
         textLength: extractedText ? extractedText.length : 0,
-        documentType: documentType || (fileName ? fileName.split('.').pop().toLowerCase() : null),
-        contextEnabled: contextEnabled || !!extractedText,
-        contextInstruction: contextInstruction || null
+        documentType: fileName ? fileName.split('.').pop().toLowerCase() : null,
+        contextEnabled: contextEnabled || !!extractedText || !!fileUrl || !!contextFileUrl,
+        contextInstruction: contextInstruction || null,
+        hasActiveContext: hasActiveContext || false,
+        contextType: contextType || null,
+        imageAnalysis: imageAnalysis || null,
+        contextFileUrl: contextFileUrl || null,
+        contextFileName: contextFileName || null,
+        isFollowUpMessage: isFollowUpMessage || false,
+        hasImageContext: (type === 'image' && !!fileUrl) || (!!contextFileUrl && contextType === 'image'),
+        imageUrl: fileUrl || contextFileUrl || null
       };
 
-      console.log('🦙 [FASTAPI] Enhanced payload for document processing:', {
+      console.log('🖼️ [CHAT CONTROLLER] FastAPI payload debug:', {
         type: fastApiPayload.type,
-        hasExtractedText: !!fastApiPayload.extractedText,
-        extractedTextLength: fastApiPayload.extractedText?.length || 0,
-        fileName: fastApiPayload.fileName,
-        contextMessages: fastApiPayload.conversation_context.length,
-        hasContextInstruction: !!fastApiPayload.contextInstruction,
-        documentType: fastApiPayload.documentType,
-        contextEnabled: fastApiPayload.contextEnabled
+        hasFileUrl: !!fastApiPayload.fileUrl,
+        hasContextFileUrl: !!fastApiPayload.contextFileUrl,
+        hasImageContext: fastApiPayload.hasImageContext,
+        isFollowUp: fastApiPayload.isFollowUpMessage,
+        contextEnabled: fastApiPayload.contextEnabled,
+        imageUrl: !!fastApiPayload.imageUrl
       });
 
-      // ✅ SEND TO ENHANCED FASTAPI ENDPOINT
+      console.log('🚀 [FASTAPI] Sending request to FastAPI...');
+      
+      // ✅ FIXED: Handle FastAPI streaming response properly
       const fastApiResponse = await axios.post(`${FASTAPI_BASE_URL}/chat`, fastApiPayload, {
-        responseType: 'stream',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'text/plain'
+        },
         timeout: 120000,
-        headers: { 'Content-Type': 'application/json' },
-        validateStatus: (status) => status < 500,
+        responseType: 'stream'
       });
 
-      if (fastApiResponse.status !== 200) {
-        throw new Error(`FastAPI returned status ${fastApiResponse.status}`);
-      }
-
-      // ✅ IMPROVED CHUNK HANDLING
+      console.log('✅ [FASTAPI] Got streaming response from FastAPI');
+      
+      let fullResponse = '';
+      
       fastApiResponse.data.on('data', (chunk) => {
-        try {
-          const chunkStr = chunk.toString('utf8');
-          streamedResponse += chunkStr;
-          chunkCount++;
-          
-          if (chunkCount % 20 === 0) {  // Log every 20th chunk for documents
-            console.log(`📦 [CHUNK ${chunkCount}] Total response: ${streamedResponse.length} chars`);
-          }
-          
+        const chunkStr = chunk.toString();
+        fullResponse += chunkStr;
+        // ✅ SAFE: Only write if response is not ended
+        if (!res.destroyed && !res.finished) {
           res.write(chunkStr);
-          if (res.flush) {
-            res.flush();
-          }
-        } catch (chunkError) {
-          console.error('❌ [CHUNK ERROR]:', chunkError);
         }
       });
 
       fastApiResponse.data.on('end', async () => {
         try {
-          console.log("✅ [STREAMING] FastAPI completed");
-          console.log(`📊 Final response: ${streamedResponse.length} chars, ${chunkCount} chunks`);
+          console.log('✅ [FASTAPI] Stream completed');
           
-          // ✅ SAVE AI MESSAGE WITH ENHANCED METADATA
+          // ✅ SAVE AI RESPONSE TO DATABASE
           const aiMessage = new Message({
             session: sessionId,
-            message: streamedResponse,
-            sender: "AI",
-            type: type,
-            userId: userId,
+            message: fullResponse,
+            sender: "assistant",
+            type: "response",
+            userId: req.user._id,
             metadata: {
-              streamingCompleted: true,
-              contextUsed: recentContext.length,
-              documentAnalyzed: type === 'document',
-              extractedTextLength: extractedText?.length || 0,
-              processingPipeline: type === 'document' ? 'Document→Context→Llama' : 'Llama',
-              responseLength: streamedResponse.length,
-              chunkCount
-            },
+              responseLength: fullResponse.length,
+              hasContextUsed: contextEnabled
+            }
           });
+
+          await aiMessage.save();
           
-          const savedAiMessage = await aiMessage.save();
+          // ✅ UPDATE CACHE
+          await cacheService.addMessageToContext(sessionId, {
+            role: 'assistant',  // Use 'assistant' instead of aiMessage.sender
+            content: fullResponse,
+            _id: aiMessage._id,
+            type: "text"  // Use 'text' instead of aiMessage.type
+          }, req.user._id);
           
-          // ✅ ADD AI RESPONSE TO REDIS CONTEXT
-          try {
-            await cacheService.addMessageToContext(sessionId, {
-              role: 'assistant',
-              content: streamedResponse,
-              _id: savedAiMessage._id
-            }, userId);
-          } catch (contextError) {
-            console.warn('⚠️ [AI CONTEXT] Warning saving AI response to context:', contextError.message);
+          console.log('✅ [DATABASE] AI response saved');
+          
+          // ✅ SAFE: Only end if response is not already ended
+          if (!res.destroyed && !res.finished) {
+            res.end();
           }
-
-          // ✅ UPDATE SESSION ACTIVITY
-          session.lastActivity = new Date();
-          await session.save();
           
-          res.end();
-        } catch (endError) {
-          console.error('❌ [STREAMING END] Error:', endError);
-          res.end();
+        } catch (dbError) {
+          console.error('❌ [DATABASE] Failed to save AI response:', dbError);
+          // ✅ SAFE: Only end if response is not already ended
+          if (!res.destroyed && !res.finished) {
+            res.end();
+          }
         }
       });
 
-      fastApiResponse.data.on('error', (error) => {
-        console.error("❌ [STREAMING] FastAPI stream error:", error);
-        const errorMsg = `❌ Streaming Error: ${error.message}`;
-        if (!res.headersSent) {
-          res.write(errorMsg);
-        }
-        res.end();
-      });
-
-      req.on('close', () => {
-        console.log('🔌 [STREAMING] Client disconnected');
-        if (fastApiResponse.data) {
-          fastApiResponse.data.destroy();
+      fastApiResponse.data.on('error', (streamError) => {
+        console.error('❌ [FASTAPI] Stream error:', streamError);
+        // ✅ SAFE: Only send error if headers not sent and response not ended
+        if (!res.headersSent && !res.destroyed && !res.finished) {
+          res.status(500).write(`❌ Stream error: ${streamError.message}`);
+          res.end();
         }
       });
 
     } catch (fastApiError) {
-      console.error("❌ [FASTAPI] Error:", fastApiError);
+      console.error('❌ [FASTAPI] Request failed:', fastApiError.message);
       
-      const errorMessage = `❌ AI Service Error: ${fastApiError.message}. Please try again.`;
-      
-      if (!res.headersSent) {
-        res.write(errorMessage);
+      // ✅ SAFE: Only send error response if headers not sent
+      if (!res.headersSent && !res.destroyed && !res.finished) {
+        if (fastApiError.code === 'ECONNREFUSED') {
+          res.status(503).write("❌ AI service unavailable. Please ensure FastAPI server is running on port 8000.");
+        } else {
+          res.status(500).write(`❌ FastAPI error: ${fastApiError.message}`);
+        }
+        res.end();
       }
-      
-      // ✅ SAVE ERROR MESSAGE WITH CONTEXT INFO
-      try {
-        const errorAiMessage = new Message({
-          session: sessionId,
-          message: errorMessage,
-          sender: "AI",
-          type: "error",
-          userId: userId,
-          metadata: {
-            error: true,
-            errorType: 'fastapi_error',
-            originalError: fastApiError.message,
-            hadDocumentContext: !!extractedText,
-            documentLength: extractedText?.length || 0
-          },
-        });
-        
-        await errorAiMessage.save();
-      } catch (saveError) {
-        console.error('❌ [ERROR SAVE] Failed to save error message:', saveError);
-      }
-      
-      res.end();
+      return; // ✅ IMPORTANT: Return here to prevent further execution
     }
 
   } catch (error) {
     console.error("❌ [SEND MESSAGE] Controller error:", error);
     
-    if (!res.headersSent) {
-      res.status(500).json({ 
-        success: false, 
-        error: "Failed to send message",
-        details: error.message,
-        timestamp: new Date().toISOString()
-      });
+    // ✅ SAFE: Only send error response if headers not sent
+    if (!res.headersSent && !res.destroyed && !res.finished) {
+      res.status(500).write(`❌ Failed to send message: ${error.message}`);
+      res.end();
     }
   }
 };
