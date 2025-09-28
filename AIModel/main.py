@@ -244,7 +244,7 @@ async def enhanced_chat_endpoint(request: EnhancedChatRequest):
             
         # ✅ FALLBACK: Check if ANY image URL exists
         elif request.fileUrl and (request.type == "image" or 
-             (request.fileName and request.fileName.lower().match(r'\.(jpg|jpeg|png|gif|bmp|webp)$'))):
+             (request.fileName and any(ext in request.fileName.lower() for ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']))):
             has_image_context = True
             image_url = request.fileUrl
             image_name = request.fileName or "Image File"
@@ -606,11 +606,11 @@ Please analyze this document and answer the user's question based on the content
             
             return StreamingResponse(error_response(), media_type="text/plain")
 
-    except Exception as e:
-        logger.error(f"❌ [CHAT] Processing failed: {e}")
+    except Exception as chat_error:
+        logger.error(f"❌ [CHAT] Processing failed: {chat_error}")
         
         async def error_response():
-            yield f"❌ Chat processing failed: {str(e)}. Please try again."
+            yield f"❌ Chat processing failed: {str(chat_error)}. Please try again."
         
         return StreamingResponse(error_response(), media_type="text/plain")
 
