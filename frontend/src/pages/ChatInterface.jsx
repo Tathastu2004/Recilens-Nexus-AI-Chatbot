@@ -3,7 +3,7 @@ import SideBar from '../components/SideBar';
 import ChatDashBoard from '../components/ChatDashBoard';
 import { useTheme } from '../context/ThemeContext';
 import { IconSun, IconMoon, IconBrain, IconFileText, IconMicrophone } from '@tabler/icons-react';
-import { TokenDebug } from '../components/TokenDebug';
+// import { TokenDebug } from '../components/TokenDebug';
 
 // ✅ MOVE SessionPersistence OUTSIDE the component - BEFORE the component definition
 const SessionPersistence = {
@@ -520,7 +520,7 @@ const ChatInterface = () => {
         ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900' 
         : 'bg-gradient-to-br from-gray-50 via-blue-50 to-indigo-50'
     }`}>
-      <TokenDebug />
+      
       
       {/* ✅ SIDEBAR - REMOVE FIXED WIDTH CONTAINER */}
       <SideBar
