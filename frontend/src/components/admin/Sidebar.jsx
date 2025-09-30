@@ -1,117 +1,248 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useUser } from "../../context/UserContext";
+import { useClerkUser } from "../../context/ClerkUserContext";
+import { useTheme } from "../../context/ThemeContext";
+import { useAuth } from "@clerk/clerk-react";
+import { useState, useEffect } from "react"; // ✅ Add this import
+import { 
+  IconDashboard, IconMessageCircle, IconChartBar, IconRobot, 
+  IconUsers, IconLogout, IconSun, IconMoon, IconSettings, IconX
+} from "@tabler/icons-react";
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, onClose }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logoutUser } = useUser();
+  const { signOut } = useAuth();
+  const { dbUser: user, clerkUser } = useClerkUser();
+  const { isDark, toggleTheme } = useTheme();
+
+  // ✅ Add isDesktop detection
+  const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 1024);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(window.innerWidth >= 1024);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Use real user data
+  const displayUser = user || {
+    name: `${clerkUser?.firstName || ''} ${clerkUser?.lastName || ''}`.trim() || clerkUser?.username || 'Admin',
+    email: clerkUser?.primaryEmailAddress?.emailAddress || user?.email,
+    profilePicture: clerkUser?.imageUrl || user?.profilePicture,
+    role: user?.role || 'admin'
+  };
 
   const navLinks = [
-    { to: "/admin", label: "Dashboard", icon: "📊" },
-    { to: "/admin/feedback-reply", label: "Feedback", icon: "💬" },
-    { to: "/admin/analytics", label: "Analytics", icon: "📈" },
-    { to: "/admin/models", label: "Model Management", icon: "🤖" },
-    { to: "/admin/users", label: "Users", icon: "👥" },
+    { to: "/admin", label: "Dashboard", icon: IconDashboard },
+    { to: "/admin/feedback-reply", label: "Feedback", icon: IconMessageCircle },
+    { to: "/admin/analytics", label: "Analytics", icon: IconChartBar },
+    { to: "/admin/models", label: "Models", icon: IconRobot },
+    { to: "/admin/users", label: "Users", icon: IconUsers },
   ];
 
   const handleLogout = async () => {
     try {
-      await logoutUser();
-      navigate("/");
+      await signOut();
+      localStorage.clear();
+      navigate("/signin");
     } catch (error) {
       console.error("Logout failed:", error);
-      // Force logout even if API fails
       localStorage.clear();
-      navigate("/");
+      navigate("/signin");
       window.location.reload();
     }
   };
 
+  const handleLinkClick = () => {
+    // Close mobile sidebar when link is clicked
+    if (onClose) onClose();
+  };
+
   return (
-    <aside className="w-64 min-h-screen relative">
-      {/* Glassy background with blur effect */}
-      <div className="absolute inset-0 bg-white/20 backdrop-blur-xl border-r border-white/30 shadow-xl"></div>
-      
-      {/* Content */}
-      <div className="relative z-10 flex flex-col h-full">
-        {/* Header */}
-        <div className="p-6 border-b border-white/20">
-          <h1 className="text-xl font-bold text-gray-800 flex items-center gap-3">
-            <span className="w-8 h-8 bg-gradient-to-br from-green-400 to-blue-500 rounded-lg flex items-center justify-center text-white text-sm font-bold">
-              A
-            </span>
-            Admin Panel
-          </h1>
-        </div>
+    <>
+      {/* Mobile Overlay */}
+      {!isDesktop && isOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-40"
+          onClick={onClose}
+        />
+      )}
 
-        {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-2">
-          {navLinks.map((link) => {
-            const isActive = location.pathname === link.to;
-            
-            return (
-              <Link
-                key={link.to}
-                to={link.to}
-                className={`group flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 relative overflow-hidden ${
-                  isActive
-                    ? "text-white shadow-lg"
-                    : "text-gray-700 hover:text-gray-900 hover:bg-white/30"
-                }`}
+      {/* Sidebar */}
+      <div className={`${isDesktop ? 'w-64 h-screen relative' : 'lg:hidden'} ${
+        !isDesktop && !isOpen ? 'pointer-events-none' : ''
+      }`}>
+        <aside 
+          className={`${
+            isDesktop 
+              ? 'h-screen flex flex-col w-64' 
+              : `fixed left-0 top-0 h-screen w-80 transform transition-transform duration-300 ease-in-out flex flex-col z-50 ${
+                  isOpen ? 'translate-x-0' : '-translate-x-full'
+                }`
+          }`}
+          style={{ 
+            backgroundColor: isDark ? '#1F1F1F' : '#ffffff',
+            borderRightColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+          }}
+        >
+          
+          {/* ✅ HEADER */}
+          <div className="p-4 sm:p-6 border-b"
+               style={{ borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold"
+                     style={{ 
+                       backgroundColor: isDark ? '#ffffff' : '#000000',
+                       color: isDark ? '#000000' : '#ffffff'
+                     }}>
+                  A
+                </div>
+                <div>
+                  <h1 className="text-lg font-semibold"
+                      style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                    Admin Panel
+                  </h1>
+                </div>
+              </div>
+              
+              {/* Mobile Close Button */}
+              <button
+                onClick={onClose}
+                className="lg:hidden p-2 rounded-lg transition-colors"
+                style={{ 
+                  color: isDark ? '#cccccc' : '#666666',
+                  backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
+                }}
               >
-                {/* Active background gradient */}
-                {isActive && (
-                  <div className="absolute inset-0 bg-gradient-to-r from-green-400 to-blue-500 rounded-xl"></div>
-                )}
-                
-                {/* Hover effect */}
-                <div className="absolute inset-0 bg-white/10 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                
-                {/* Content */}
-                <span className="relative text-lg">{link.icon}</span>
-                <span className="relative font-medium">{link.label}</span>
-                
-                {/* Active indicator dot */}
-                {isActive && (
-                  <div className="relative ml-auto w-2 h-2 bg-white rounded-full"></div>
-                )}
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* User Info & Logout Section */}
-        <div className="p-4 border-t border-white/20 space-y-3">
-          {/* User Profile Info */}
-          <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/20 backdrop-blur-sm">
-            <div className="w-10 h-10 bg-gradient-to-br from-purple-400 to-pink-500 rounded-full flex items-center justify-center text-white text-sm font-bold">
-              {user?.name?.charAt(0) || user?.username?.charAt(0) || 'A'}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-800 truncate">
-                {user?.name || user?.username || 'Admin User'}
-              </p>
-              <p className="text-xs text-gray-600 truncate">
-                {user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'Administrator'}
-              </p>
+                <IconX size={20} />
+              </button>
             </div>
           </div>
 
-          {/* Logout Button */}
-          <button
-            onClick={handleLogout}
-            className="w-full px-4 py-3 bg-gradient-to-r from-red-400 to-red-500 text-white rounded-xl hover:from-red-500 hover:to-red-600 transition-all duration-300 shadow-lg hover:shadow-xl font-medium flex items-center justify-center gap-2"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
-            Logout
-          </button>
-        </div>
-      </div>
+          {/* ✅ NAVIGATION */}
+          <nav className="flex-1 p-3 sm:p-4 space-y-1 overflow-y-auto">
+            {navLinks.map((link) => {
+              const isActive = location.pathname === link.to;
+              const Icon = link.icon;
+              
+              return (
+                <Link
+                  key={link.to}
+                  to={link.to}
+                  onClick={handleLinkClick}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
+                    isActive
+                      ? isDark 
+                        ? "bg-white text-black" 
+                        : "bg-black text-white"
+                      : isDark
+                        ? "text-cccccc hover:bg-white/10"
+                        : "text-666666 hover:bg-black/5"
+                  }`}
+                  style={!isActive ? {
+                    color: isDark ? '#cccccc' : '#666666'
+                  } : {}}
+                >
+                  <Icon size={18} />
+                  <span className="font-medium">{link.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
 
-      {/* Subtle glow effect */}
-      <div className="absolute -inset-px bg-gradient-to-b from-white/20 to-transparent rounded-lg pointer-events-none"></div>
-    </aside>
+          {/* ✅ BOTTOM SECTION - Theme, User, Settings, Logout */}
+          <div className="mt-auto">
+            {/* Theme Toggle */}
+            <div className="p-3 sm:p-4 border-t"
+                 style={{ borderTopColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
+              <button
+                onClick={toggleTheme}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors"
+                style={{ 
+                  backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+                  color: isDark ? '#cccccc' : '#666666'
+                }}
+              >
+                {isDark ? <IconSun size={18} /> : <IconMoon size={18} />}
+                <span className="font-medium">
+                  {isDark ? 'Light mode' : 'Dark mode'}
+                </span>
+              </button>
+            </div>
+
+            {/* User Profile */}
+            <div className="p-3 sm:p-4 border-t"
+                 style={{ borderTopColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
+              
+              {/* Profile Info */}
+              <div className="flex items-center gap-3 p-3 rounded-lg mb-3"
+                   style={{ 
+                     backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.02)'
+                   }}>
+                <img
+                  src={displayUser.profilePicture || 'https://assets.aceternity.com/manu.png'}
+                  alt="Profile"
+                  className="w-8 h-8 sm:w-10 sm:h-10 rounded-full object-cover"
+                  style={{ 
+                    backgroundColor: isDark ? '#2D2D2D' : '#f5f5f5',
+                    border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`
+                  }}
+                  onError={(e) => {
+                    e.target.src = 'https://assets.aceternity.com/manu.png';
+                  }}
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate"
+                     style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                    {displayUser.name}
+                  </p>
+                  <p className="text-xs truncate"
+                     style={{ color: isDark ? '#888888' : '#666666' }}>
+                    {displayUser.role?.charAt(0).toUpperCase() + displayUser.role?.slice(1) || 'Admin'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Settings Link */}
+              <Link
+                to="/profile"
+                onClick={handleLinkClick}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors mb-2"
+                style={{ 
+                  color: isDark ? '#cccccc' : '#666666',
+                  backgroundColor: 'transparent'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                }}
+              >
+                <IconSettings size={18} />
+                <span className="font-medium">Settings</span>
+              </Link>
+
+              {/* Logout Button */}
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors"
+                style={{ 
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  color: '#ef4444'
+                }}
+              >
+                <IconLogout size={18} />
+                <span className="font-medium">Sign out</span>
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </>
   );
 }

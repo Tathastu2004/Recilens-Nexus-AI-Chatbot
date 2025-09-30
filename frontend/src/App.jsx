@@ -48,15 +48,25 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
-          <div className="text-center p-8 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700">
-            <h1 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-4">Something went wrong</h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-4">
+        <div className="min-h-screen flex items-center justify-center"
+             style={{ backgroundColor: '#1F1F1F' }}>
+          <div className="text-center p-8 rounded-xl shadow-xl border max-w-md w-full mx-4"
+               style={{ 
+                 backgroundColor: '#2D2D2D',
+                 borderColor: 'rgba(255, 255, 255, 0.1)',
+                 color: '#ffffff'
+               }}>
+            <h1 className="text-2xl font-bold text-red-400 mb-4">Something went wrong</h1>
+            <p className="text-gray-300 mb-4">
               {this.state.error?.message || 'An unexpected error occurred'}
             </p>
             <button 
               onClick={() => window.location.reload()} 
-              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+              className="px-6 py-3 rounded-lg font-medium transition-colors"
+              style={{ 
+                backgroundColor: '#ffffff',
+                color: '#000000'
+              }}
             >
               Reload Page
             </button>
@@ -104,7 +114,7 @@ function App() {
             <ChatProvider>
               <FeedbackProvider>
                 
-                  <div className="App min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300">
+                  <div className="App min-h-screen">
                     {/* <DebugUser /> Add this temporarily */}
                     <Routes>
                       {/* ✅ PRIMARY CLERK AUTHENTICATION ROUTES */}

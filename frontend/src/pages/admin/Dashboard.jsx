@@ -5,9 +5,14 @@ import { useAdmin } from '../../context/AdminContext';
 import { useFeedback } from '../../context/feedbackContext';
 import { useModelManagement } from '../../context/ModelContext';
 import { useUser } from '../../context/UserContext';
-import StatCard from "../../components/admin/Statscard";
-import ChartCard from "../../components/admin/chartcard";
-import Table from "../../components/admin/Table";
+import { useTheme } from '../../context/ThemeContext';
+import {
+  IconUsers, IconMessageCircle, IconBrain, IconFileText,
+  IconTrendingUp, IconServer, IconRefresh, IconAlertTriangle,
+  IconCheck, IconClock, IconActivity, IconDatabase,
+  IconChevronRight, IconShield, IconTarget, IconChartBar,
+  IconArrowLeft, IconSearch, IconCrown
+} from '@tabler/icons-react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell,
@@ -15,11 +20,13 @@ import {
   AreaChart, Area
 } from "recharts";
 
-const COLORS = ["#2F855A", "#68D391", "#81E6D9", "#38B2AC", "#E53E3E", "#DD6B20"];
+// Professional color scheme
+const CHART_COLORS = ["#3B82F6", "#8B5CF6", "#10B981", "#F59E0B", "#EF4444", "#06B6D4"];
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useUser();
+  const { isDark } = useTheme();
   
   // Admin Context
   const { 
@@ -37,10 +44,10 @@ export default function Dashboard() {
     error: feedbackError
   } = useFeedback();
 
-  // ✅ FIXED: Model Management Context - only use available properties
+  // Model Management Context
   const {
-    ingestedDocuments = [], // ✅ Default to empty array
-    notifications = [], // ✅ Default to empty array
+    ingestedDocuments = [],
+    notifications = [],
     getIngestedDocuments,
     getModels,
     ingestionLoading,
@@ -53,11 +60,12 @@ export default function Dashboard() {
   const [analytics, setAnalytics] = useState([]);
   const [users, setUsers] = useState([]);
   const [feedbacks, setFeedbacks] = useState([]);
-  const [models, setModels] = useState([]); // ✅ New state for models
+  const [models, setModels] = useState([]);
   const [systemHealth, setSystemHealth] = useState(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [lastHealthCheck, setLastHealthCheck] = useState(null);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
 
   // Axios instance with interceptors
   const apiClient = axios.create({
@@ -101,7 +109,7 @@ export default function Dashboard() {
     }
   );
 
-  // ✅ System Health Check
+  // System Health Check
   const fetchSystemHealth = async () => {
     setHealthLoading(true);
     try {
@@ -152,14 +160,13 @@ export default function Dashboard() {
     }
   };
 
-  // ✅ FIXED: Single data fetch without auto-refresh
+  // Data fetch
   useEffect(() => {
     const fetchInitialData = async () => {
       setIsInitialLoading(true);
       try {
         console.log('🔄 Fetching initial dashboard data...');
         
-        // ✅ Fetch all data in parallel
         const [
           statsResult,
           analyticsResult,
@@ -172,8 +179,8 @@ export default function Dashboard() {
           getAnalytics(),
           getAllUsers(),
           getAllFeedbacks(),
-          getIngestedDocuments(), // ✅ Use RAG document function
-          getModels() // ✅ Use RAG models function
+          getIngestedDocuments(),
+          getModels()
         ]);
 
         // Process dashboard stats
@@ -194,7 +201,7 @@ export default function Dashboard() {
           setUsers(usersResult.value.data);
         }
 
-        // ✅ Process feedbacks
+        // Process feedbacks
         if (feedbacksResult.status === 'fulfilled' && feedbacksResult.value?.feedbacks) {
           console.log('💬 Feedbacks data:', feedbacksResult.value.feedbacks.length);
           setFeedbacks(feedbacksResult.value.feedbacks);
@@ -203,13 +210,12 @@ export default function Dashboard() {
           setFeedbacks(feedbacksResult.value.data);
         }
 
-        // ✅ Process models
+        // Process models
         if (modelsResult.status === 'fulfilled' && modelsResult.value) {
           console.log('🤖 Models data:', modelsResult.value);
           setModels(Array.isArray(modelsResult.value) ? modelsResult.value : []);
         }
 
-        // Ingested documents are handled by ModelContext automatically
         console.log('📄 Ingested documents from context:', ingestedDocuments.length);
 
         // Initial health check
@@ -223,16 +229,16 @@ export default function Dashboard() {
     };
 
     fetchInitialData();
-  }, [getDashboardStats, getAnalytics, getAllUsers, getAllFeedbacks, getIngestedDocuments, getModels]); // ✅ Fixed dependencies
+  }, [getDashboardStats, getAnalytics, getAllUsers, getAllFeedbacks, getIngestedDocuments, getModels]);
 
-  // ✅ FIXED: Calculate real stats from actual data
+  // Calculate real stats from actual data
   const calculateStats = () => {
     const totalUsers = Array.isArray(users) ? users.length : (dashboardStats?.totalUsers || 0);
     const totalSessions = dashboardStats?.totalSessions || 0;
     const totalMessages = dashboardStats?.totalMessages || 0;
     const feedbackCount = Array.isArray(feedbacks) ? feedbacks.length : 0;
-    const ingestedDocumentsCount = Array.isArray(ingestedDocuments) ? ingestedDocuments.length : 0; // ✅ RAG documents
-    const loadedModelsCount = Array.isArray(models) ? models.length : 0; // ✅ RAG models
+    const ingestedDocumentsCount = Array.isArray(ingestedDocuments) ? ingestedDocuments.length : 0;
+    const loadedModelsCount = Array.isArray(models) ? models.length : 0;
     const aiResponsesCount = totalMessages;
     const analyticsReportsCount = Array.isArray(analytics) ? analytics.length : 0;
 
@@ -241,7 +247,7 @@ export default function Dashboard() {
       totalSessions,
       totalMessages,
       feedbackCount,
-      ingestedDocumentsCount, // ✅ Changed from trainingJobsCount
+      ingestedDocumentsCount,
       loadedModelsCount,
       aiResponsesCount,
       analyticsReportsCount
@@ -253,10 +259,9 @@ export default function Dashboard() {
 
   const stats = calculateStats();
 
-  // ✅ FIXED: Process analytics for charts
+  // Process analytics for charts
   const processAnalyticsForCharts = () => {
     if (!Array.isArray(analytics) || !analytics.length) {
-      // Create mock data when no analytics available
       const mockDates = Array.from({ length: 7 }, (_, i) => {
         const date = new Date();
         date.setDate(date.getDate() - (6 - i));
@@ -318,7 +323,6 @@ export default function Dashboard() {
     }));
   };
 
-  // ✅ NEW: Process ingested documents stats (replaces training stats)
   const processDocumentStats = () => {
     if (!Array.isArray(ingestedDocuments) || !ingestedDocuments.length) return [
       { status: 'Active', count: 0, id: 'active' },
@@ -326,7 +330,6 @@ export default function Dashboard() {
       { status: 'Error', count: 0, id: 'error' }
     ];
 
-    // For now, assume all documents are active since we don't have status
     return [
       { status: 'Active', count: ingestedDocuments.length, id: 'active' },
       { status: 'Processing', count: 0, id: 'processing' },
@@ -358,371 +361,719 @@ export default function Dashboard() {
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     .slice(0, 5) : [];
 
-  const tableHeaders = ["Name", "Email", "Role"];
-  const tableRows = recentUsers.map((user, index) => [
-    user.username || user.name || 'Unknown',
-    user.email || 'No email',
-    user.role || 'client',
-    `user-row-${user._id || index}`
-  ]);
+  // Filter users based on search
+  const filteredUsers = recentUsers.filter(user => 
+    (user.username || user.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (user.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (user.role || '').toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
-  // ✅ Loading state
+  // Loading state
   if (isInitialLoading) {
     return (
-      <div className="p-8 bg-green-50 min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-700"></div>
-        <span className="ml-4 text-green-700 text-lg">Loading dashboard...</span>
+      <div className="min-h-screen flex items-center justify-center"
+           style={{ backgroundColor: isDark ? '#0a0a0a' : '#fafafa' }}>
+        <div className="text-center">
+          <div className="w-8 h-8 rounded-full animate-spin mx-auto mb-4"
+               style={{ 
+                 border: `2px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
+                 borderTopColor: isDark ? '#ffffff' : '#000000'
+               }}></div>
+          <h3 className="text-lg font-semibold mb-2"
+              style={{ color: isDark ? '#ffffff' : '#000000' }}>
+            Loading Dashboard
+          </h3>
+          <p style={{ color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}>
+            Fetching your system overview...
+          </p>
+        </div>
       </div>
     );
   }
 
-  // ✅ Process chart data
+  // Process chart data
   const { conversationsOverTime, topIntents } = processAnalyticsForCharts();
   const feedbackStats = processFeedbackStats();
-  const documentStats = processDocumentStats(); // ✅ Changed from trainingStats
+  const documentStats = processDocumentStats();
   const userRoleStats = processUserRoleStats();
 
   return (
-    <div className="p-8 bg-green-50 min-h-screen">
-      {/* Header with Greeting and Manual Refresh */}
-      <div className="mb-8 flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-green-900 mb-2">
-            Hi, {user?.username || user?.name || 'Admin'}! 👋
-          </h1>
-          <p className="text-green-700">
-            Welcome back to your admin dashboard. Here's your system overview.
-          </p>
-        </div>
-        <button
-          onClick={() => window.location.reload()}
-          className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
-        >
-          ↻ Refresh Data
-        </button>
-      </div>
+    <div className="min-h-screen"
+         style={{ backgroundColor: isDark ? '#0a0a0a' : '#fafafa' }}>
+      
+      {/* ✅ Main Content */}
+      <div className="flex-1 lg:ml-0">
+        {/* ✅ SEAMLESS HEADER - EXACTLY LIKE USERS.JSX */}
+        <div className="backdrop-blur-xl border-b"
+             style={{ 
+               backgroundColor: isDark ? 'rgba(10, 10, 10, 0.8)' : 'rgba(250, 250, 250, 0.8)',
+               borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+             }}>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              
+              {/* Left Section */}
+              <div className="flex items-center gap-4">
+                <div>
+                  <h1 className="text-xl sm:text-2xl font-bold"
+                      style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                    Hi, {user?.username || user?.name || 'Admin'}! 👋
+                  </h1>
+                  <p className="text-xs sm:text-sm"
+                     style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                    Welcome back to your admin dashboard
+                  </p>
+                </div>
+              </div>
 
-      {/* Notifications */}
-      {Array.isArray(notifications) && notifications.length > 0 && (
-        <div className="mb-6 space-y-2">
-          {notifications.slice(0, 3).map((notification, index) => (
-            <div
-              key={`notification-${notification.id || index}`}
-              className={`p-3 rounded-lg text-sm ${
-                notification.type === 'error' 
-                  ? 'bg-red-100 border border-red-300 text-red-800'
-                  : notification.type === 'warning'
-                  ? 'bg-yellow-100 border border-yellow-300 text-yellow-800'
-                  : 'bg-blue-100 border border-blue-300 text-blue-800'
-              }`}
-            >
-              {notification.message}
+              {/* Right Section - Same as before */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                
+                {/* Search */}
+                <div className="relative flex-1 sm:min-w-80">
+                  <IconSearch 
+                    size={18} 
+                    className="absolute left-3 top-1/2 transform -translate-y-1/2"
+                    style={{ color: isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)' }}
+                  />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search recent users..."
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border-0 transition-all focus:ring-2"
+                    style={{ 
+                      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+                      color: isDark ? '#ffffff' : '#000000',
+                      backdropFilter: 'blur(10px)'
+                    }}
+                  />
+                </div>
+                
+                {/* Stats & Actions */}
+                <div className="flex items-center gap-3">
+                  <div className="px-3 py-2 rounded-lg text-sm font-medium"
+                       style={{ 
+                         backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+                         color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)'
+                       }}>
+                    {stats.totalUsers} users • {stats.totalMessages} messages
+                  </div>
+                  <button 
+                    onClick={() => window.location.reload()}
+                    disabled={isInitialLoading}
+                    className="px-4 py-2 rounded-xl font-medium transition-all hover:scale-105 flex items-center gap-2 disabled:opacity-50 text-sm"
+                    style={{ 
+                      backgroundColor: isDark ? '#ffffff' : '#000000',
+                      color: isDark ? '#000000' : '#ffffff'
+                    }}
+                  >
+                    <IconRefresh size={16} className={isInitialLoading ? 'animate-spin' : ''} />
+                    <span className="hidden sm:inline">Refresh</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 sm:space-y-8">
+
+          {/* ✅ ERROR STATE */}
+          {adminError && (
+            <div className="p-4 rounded-2xl flex items-center gap-3 border-0"
+                 style={{ 
+                   backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                   color: isDark ? '#ffffff' : '#000000'
+                 }}>
+              <IconAlertTriangle size={20} className="text-red-500" />
+              <div>
+                <p className="font-medium">Error loading dashboard data</p>
+                <p className="text-sm" style={{ color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}>
+                  {adminError}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ✅ NOTIFICATIONS */}
+          {Array.isArray(notifications) && notifications.length > 0 && (
+            <div className="space-y-4">
+              {notifications.slice(0, 3).map((notification, index) => (
+                <div
+                  key={`notification-${notification.id || index}`}
+                  className={`p-4 rounded-2xl text-sm border-0 ${
+                    notification.type === 'error' 
+                      ? 'bg-red-500/10 text-red-400'
+                      : notification.type === 'warning'
+                      ? 'bg-yellow-500/10 text-yellow-400'
+                      : 'bg-blue-500/10 text-blue-400'
+                  }`}
+                >
+                  {notification.message}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ✅ STATS CARDS */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {[
+              { title: 'Total Users', value: stats.totalUsers, icon: IconUsers },
+              { title: 'Chat Sessions', value: stats.totalSessions, icon: IconMessageCircle },
+              { title: 'Total Messages', value: stats.totalMessages, icon: IconActivity },
+              { title: 'Feedback Count', value: stats.feedbackCount, icon: IconTarget }
+            ].map((stat, index) => (
+              <div key={index} 
+                   className="p-6 rounded-2xl transition-all hover:scale-[1.02] duration-200"
+                   style={{ 
+                     backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+                     backdropFilter: 'blur(10px)',
+                     border: 'none'
+                   }}>
+                <div className="flex items-start justify-between mb-4">
+                  <div className="p-3 rounded-xl"
+                       style={{
+                         backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+                         color: isDark ? '#ffffff' : '#000000'
+                       }}>
+                  <stat.icon size={20} />
+                </div>
+              </div>
+              
+              <div>
+                <h3 className="text-xs font-medium mb-2 uppercase tracking-wider"
+                    style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                  {stat.title}
+                </h3>
+                <p className="text-2xl sm:text-3xl font-bold"
+                   style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                  {typeof stat.value === 'number' ? stat.value.toLocaleString() : stat.value}
+                </p>
+              </div>
             </div>
           ))}
-        </div>
-      )}
-
-      {/* ✅ FIXED: Stats Cards with Real Data */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-        <StatCard title="Total Users" value={stats.totalUsers} />
-        <StatCard title="Chat Sessions" value={stats.totalSessions} />
-        <StatCard title="Total Messages" value={stats.totalMessages} />
-        <StatCard title="Feedback Count" value={stats.feedbackCount} />
-      </div>
-
-      {/* ✅ FIXED: Secondary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-        <StatCard title="Data Sheets" value={stats.ingestedDocumentsCount} /> {/* ✅ Changed from Training Jobs */}
-        <StatCard title="AI Models" value={stats.loadedModelsCount} />
-        <StatCard title="AI Responses" value={stats.aiResponsesCount} />
-        <StatCard title="Analytics Reports" value={stats.analyticsReportsCount} />
-      </div>
-
-      {/* ✅ FIXED: Charts Grid with Real Data */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-8 mb-10">
-        
-        {/* Activity Overview */}
-        <ChartCard title="Activity Overview" className="lg:col-span-2">
-          {conversationsOverTime.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={conversationsOverTime}>
-                <defs>
-                  <linearGradient id="colorConversations" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#2F855A" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#2F855A" stopOpacity={0.1}/>
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Area 
-                  type="monotone" 
-                  dataKey="conversations" 
-                  stroke="#2F855A" 
-                  fillOpacity={1} 
-                  fill="url(#colorConversations)"
-                  name="Conversations"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-64 text-gray-500">
-              <div className="text-center">
-                <p className="mb-2">No activity data available</p>
-                <p className="text-sm">Start using the chatbot to see analytics</p>
-              </div>
-            </div>
-          )}
-        </ChartCard>
-
-        {/* User Roles */}
-        <ChartCard title="User Roles">
-          {userRoleStats.length > 0 && users.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={userRoleStats}
-                  dataKey="count"
-                  nameKey="role"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={80}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                >
-                  {userRoleStats.map((entry, index) => (
-                    <Cell key={`role-cell-${entry.id || index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-64 text-gray-500">
-              <div className="text-center">
-                <p className="mb-2">No user data available</p>
-                <p className="text-sm">Total users: {stats.totalUsers}</p>
-              </div>
-            </div>
-          )}
-        </ChartCard>
-
-        {/* ✅ FIXED: Popular Topics */}
-        <ChartCard title="Popular Topics">
-          {topIntents.length > 0 && topIntents.some(intent => intent.count > 0) ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={topIntents} layout="horizontal">
-                <XAxis type="number" />
-                <YAxis dataKey="intent" type="category" width={80} />
-                <Tooltip />
-                <Bar dataKey="count" fill="#68D391" />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-64 text-gray-500">
-              <div className="text-center">
-                <p className="mb-2">No topic data available</p>
-                <p className="text-sm">Chat interactions will appear here</p>
-              </div>
-            </div>
-          )}
-        </ChartCard>
-
-        {/* ✅ FIXED: RAG Data Sheets Status (replaces Model Training Status) */}
-        <ChartCard title="Data Sheets Status">
-          {documentStats.length > 0 && ingestedDocuments.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={documentStats}>
-                <XAxis dataKey="status" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="count" fill="#81E6D9" />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-64 text-gray-500">
-              <div className="text-center">
-                <p className="mb-2">No data sheets available</p>
-                <p className="text-sm">Ingested documents: {stats.ingestedDocumentsCount}</p>
-              </div>
-            </div>
-          )}
-        </ChartCard>
-
-        {/* ✅ FIXED: Support Feedback */}
-        <ChartCard title="Support Feedback">
-          {feedbackStats.length > 0 && feedbacks.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={feedbackStats}
-                  dataKey="count"
-                  nameKey="status"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={40}
-                  outerRadius={80}
-                  paddingAngle={5}
-                >
-                  {feedbackStats.map((entry, index) => (
-                    <Cell key={`feedback-cell-${entry.id || index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-64 text-gray-500">
-              <div className="text-center">
-                <p className="mb-2">No feedback data available</p>
-                <p className="text-sm">Feedback count: {stats.feedbackCount}</p>
-              </div>
-            </div>
-          )}
-        </ChartCard>
-      </div>
-
-      {/* ✅ FIXED: Recent Users Table */}
-      <div className="bg-white rounded-lg shadow-lg p-6 mb-10">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-semibold text-green-800">Recent Users</h3>
-          <span className="text-sm text-green-600 bg-green-100 px-3 py-1 rounded-full">
-            {stats.totalUsers} Total Users
-          </span>
-        </div>
-        
-        {recentUsers.length > 0 ? (
-          <div className="overflow-x-auto">
-            <Table headers={tableHeaders} rows={tableRows} />
           </div>
-        ) : (
-          <div className="text-center py-8 text-gray-500">
-            <p>No users found</p>
-          </div>
-        )}
-      </div>
 
-      {/* ✅ FIXED: Bottom Section with Real Data */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
-        {/* Quick Actions with Real Counts */}
-        <div className="bg-white p-6 rounded-lg shadow hover:shadow-lg transition-shadow">
-          <h4 className="font-semibold text-green-800 mb-4">Quick Actions</h4>
-          <div className="space-y-3">
-            <button
-              className="w-full text-left text-green-600 hover:text-green-800 py-2 px-3 rounded hover:bg-green-50 transition-colors"
-              onClick={() => navigate('/admin/users')}
-            >
-              → View All Users ({stats.totalUsers})
-            </button>
-            <button
-              className="w-full text-left text-green-600 hover:text-green-800 py-2 px-3 rounded hover:bg-green-50 transition-colors"
-              onClick={() => navigate('/admin/models')}
-            >
-              → Manage Data Sheets ({stats.ingestedDocumentsCount} ingested) {/* ✅ Changed text */}
-            </button>
-            <button
-              className="w-full text-left text-green-600 hover:text-green-800 py-2 px-3 rounded hover:bg-green-50 transition-colors"
-              onClick={() => navigate('/admin/feedback-reply')}
-            >
-              → Review Feedback ({stats.feedbackCount})
-            </button>
-          </div>
-        </div>
-
-        {/* System Health Monitor */}
-        <div className="bg-white p-6 rounded-lg shadow hover:shadow-lg transition-shadow md:col-span-2">
-          <div className="flex justify-between items-center mb-6">
-            <h4 className="font-semibold text-green-800 text-lg">System Health Monitor</h4>
-            <div className="flex items-center gap-3">
-              {systemHealth?.overall && (
-                <span className={`text-xs px-3 py-1 rounded-full font-medium ${
-                  systemHealth.overall === 'healthy'
-                    ? 'bg-green-100 text-green-800 border border-green-300'
-                    : systemHealth.overall === 'degraded'
-                    ? 'bg-yellow-100 text-yellow-800 border border-yellow-300'
-                    : 'bg-red-100 text-red-800 border border-red-300'
-                }`}>
-                  {systemHealth.overall.toUpperCase()}
-                </span>
-              )}
-              <button
-                onClick={fetchSystemHealth}
-                disabled={healthLoading}
-                className="text-sm bg-green-100 text-green-700 px-3 py-1 rounded hover:bg-green-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {healthLoading ? 'Checking...' : '↻ Refresh'}
-              </button>
+          {/* ✅ SECONDARY STATS */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {[
+              { title: 'Data Sheets', value: stats.ingestedDocumentsCount, icon: IconFileText },
+              { title: 'AI Models', value: stats.loadedModelsCount, icon: IconBrain },
+              { title: 'AI Responses', value: stats.aiResponsesCount, icon: IconDatabase },
+              { title: 'Analytics Reports', value: stats.analyticsReportsCount, icon: IconChartBar }
+            ].map((stat, index) => (
+              <div key={index} 
+                   className="p-6 rounded-2xl transition-all hover:scale-[1.02] duration-200"
+                   style={{ 
+                     backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+                     backdropFilter: 'blur(10px)',
+                     border: 'none'
+                   }}>
+                <div className="flex items-start justify-between mb-4">
+                  <div className="p-3 rounded-xl"
+                       style={{
+                         backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+                         color: isDark ? '#ffffff' : '#000000'
+                       }}>
+                  <stat.icon size={20} />
+                </div>
+              </div>
+              
+              <div>
+                <h3 className="text-xs font-medium mb-2 uppercase tracking-wider"
+                    style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                  {stat.title}
+                </h3>
+                <p className="text-2xl sm:text-3xl font-bold"
+                   style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                  {typeof stat.value === 'number' ? stat.value.toLocaleString() : stat.value}
+                </p>
+              </div>
             </div>
+          ))}
           </div>
-          
-          {systemHealth ? (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {Object.entries(systemHealth.services || {}).map(([service, data]) => (
-                  <div key={service} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-medium text-gray-700 capitalize">{service}</span>
-                      <div className="flex items-center gap-2">
-                        <span className={`w-3 h-3 rounded-full ${
-                          data.status === 'online' ? 'bg-green-500 animate-pulse' : 'bg-red-500'
-                        }`}></span>
-                        <span className={`text-sm font-medium ${
-                          data.status === 'online' ? 'text-green-600' : 'text-red-600'
-                        }`}>
-                          {data.status || 'Unknown'}
-                        </span>
-                      </div>
+
+          {/* ✅ CHARTS SECTION */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            
+            {/* Activity Overview */}
+            <div className="lg:col-span-2 rounded-2xl overflow-hidden"
+                 style={{ 
+                   backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+                   backdropFilter: 'blur(10px)',
+                   border: 'none'
+                 }}>
+              <div className="px-6 py-4 border-b border-opacity-10"
+                   style={{ 
+                     backgroundColor: isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.01)',
+                     borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+                   }}>
+                <div className="flex items-center gap-3">
+                  <IconActivity size={18} style={{ color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)' }} />
+                  <h3 className="text-base sm:text-lg font-semibold"
+                      style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                    Activity Overview
+                  </h3>
+                </div>
+              </div>
+              <div className="p-6">
+                {conversationsOverTime.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <AreaChart data={conversationsOverTime}>
+                      <defs>
+                        <linearGradient id="colorConversations" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.8}/>
+                          <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.1}/>
+                        </linearGradient>
+                      </defs>
+                      <XAxis 
+                        dataKey="date" 
+                        tick={{ fontSize: 11, fill: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)' }}
+                        axisLine={{ stroke: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)' }}
+                      />
+                      <YAxis 
+                        tick={{ fontSize: 12, fill: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)' }} 
+                        axisLine={{ stroke: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)' }} 
+                      />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: isDark ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.9)',
+                          border: 'none',
+                          borderRadius: '12px',
+                          color: isDark ? '#ffffff' : '#000000',
+                          backdropFilter: 'blur(10px)',
+                          boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.3)'
+                        }}
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="conversations" 
+                        stroke="#3B82F6" 
+                        fillOpacity={1} 
+                        fill="url(#colorConversations)"
+                        name="Conversations"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-64">
+                    <div className="text-center">
+                      <IconActivity size={48} style={{ color: isDark ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)' }} className="mx-auto mb-4" />
+                      <p className="mb-2" style={{ color: isDark ? '#ffffff' : '#000000' }}>No activity data available</p>
+                      <p className="text-sm" style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                        Start using the chatbot to see analytics
+                      </p>
                     </div>
-                    {data.response_time_ms && (
-                      <div className="text-xs text-gray-500">
-                        Response: {data.response_time_ms}ms
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* User Roles */}
+            <div className="rounded-2xl overflow-hidden"
+                 style={{ 
+                   backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+                   backdropFilter: 'blur(10px)',
+                   border: 'none'
+                 }}>
+              <div className="px-6 py-4 border-b border-opacity-10"
+                   style={{ 
+                     backgroundColor: isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.01)',
+                     borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+                   }}>
+                <div className="flex items-center gap-3">
+                  <IconUsers size={18} style={{ color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)' }} />
+                  <h3 className="text-base sm:text-lg font-semibold"
+                      style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                    User Roles
+                  </h3>
+                </div>
+              </div>
+              <div className="p-6">
+                {userRoleStats.length > 0 && users.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={userRoleStats}
+                        dataKey="count"
+                        nameKey="role"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        labelStyle={{ 
+                          fontSize: '11px', 
+                          fontWeight: '600',
+                          fill: isDark ? '#ffffff' : '#000000'
+                        }}
+                      >
+                        {userRoleStats.map((entry, index) => (
+                          <Cell key={`role-cell-${entry.id || index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: isDark ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.9)',
+                          border: 'none',
+                          borderRadius: '12px',
+                          color: isDark ? '#ffffff' : '#000000',
+                          backdropFilter: 'blur(10px)',
+                          boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.3)'
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-64">
+                    <div className="text-center">
+                      <IconUsers size={48} style={{ color: isDark ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)' }} className="mx-auto mb-4" />
+                      <p className="mb-2" style={{ color: isDark ? '#ffffff' : '#000000' }}>No user data available</p>
+                      <p className="text-sm" style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                        Total users: {stats.totalUsers}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* System Health Monitor */}
+            <div className="lg:col-span-3 rounded-2xl overflow-hidden"
+                 style={{ 
+                   backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+                   backdropFilter: 'blur(10px)',
+                   border: 'none'
+                 }}>
+              <div className="px-6 py-4 border-b border-opacity-10"
+                   style={{ 
+                     backgroundColor: isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.01)',
+                     borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+                   }}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <IconServer size={18} style={{ color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)' }} />
+                    <h3 className="text-base sm:text-lg font-semibold"
+                        style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                      System Health Monitor
+                    </h3>
+                  </div>
+                  <button
+                    onClick={fetchSystemHealth}
+                    disabled={healthLoading}
+                    className="text-sm px-3 py-1 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+                    style={{ 
+                      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+                      color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)'
+                    }}
+                  >
+                    <IconRefresh size={14} className={healthLoading ? 'animate-spin' : ''} />
+                    {healthLoading ? 'Checking...' : 'Refresh'}
+                  </button>
+                </div>
+              </div>
+              <div className="p-6">
+                {systemHealth ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 mb-6">
+                      {systemHealth?.overall && (
+                        <span className={`text-xs px-3 py-1 rounded-full font-medium ${
+                          systemHealth.overall === 'healthy'
+                            ? 'bg-green-500/10 text-green-400'
+                            : systemHealth.overall === 'degraded'
+                            ? 'bg-yellow-500/10 text-yellow-400'
+                            : 'bg-red-500/10 text-red-400'
+                        }`}>
+                          {systemHealth.overall.toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {Object.entries(systemHealth.services || {}).map(([service, data]) => (
+                        <div key={service} 
+                             className="p-4 rounded-xl"
+                             style={{ 
+                               backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+                             }}>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-medium capitalize"
+                                  style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                              {service}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className={`w-3 h-3 rounded-full ${
+                                data.status === 'online' ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                              }`}></span>
+                              <span className={`text-sm font-medium ${
+                                data.status === 'online' ? 'text-green-500' : 'text-red-500'
+                              }`}>
+                                {data.status || 'Unknown'}
+                              </span>
+                            </div>
+                          </div>
+                          {data.response_time_ms && (
+                            <div className="text-xs"
+                                 style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                              Response: {data.response_time_ms}ms
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {systemHealth.summary && (
+                      <div className="pt-4 border-t text-center"
+                           style={{ borderTopColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
+                        <p className="text-sm"
+                           style={{ color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}>
+                          {systemHealth.summary.online_services}/{systemHealth.summary.total_services} services online
+                          ({systemHealth.summary.uptime_percentage}% uptime)
+                        </p>
+                      </div>
+                    )}
+
+                    {lastHealthCheck && (
+                      <div className="text-center pt-2">
+                        <p className="text-xs"
+                           style={{ color: isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)' }}>
+                          Last check: {lastHealthCheck}
+                        </p>
                       </div>
                     )}
                   </div>
-                ))}
+                ) : (
+                  <div className="text-center py-8">
+                    {healthLoading ? (
+                      <div className="flex items-center justify-center gap-3">
+                        <div className="w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin"
+                             style={{ color: isDark ? '#ffffff' : '#000000' }}></div>
+                        <span style={{ color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}>
+                          Checking system health...
+                        </span>
+                      </div>
+                    ) : (
+                      <div>
+                        <IconAlertTriangle size={48} style={{ color: isDark ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)' }} className="mx-auto mb-4" />
+                        <p className="mb-2" style={{ color: isDark ? '#ffffff' : '#000000' }}>Health status unavailable</p>
+                        <button
+                          onClick={fetchSystemHealth}
+                          className="text-sm underline hover:no-underline transition-colors"
+                          style={{ color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}
+                        >
+                          Try checking again
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-
-              {systemHealth.summary && (
-                <div className="pt-4 border-t border-gray-200 text-center">
-                  <p className="text-sm text-gray-600">
-                    {systemHealth.summary.online_services}/{systemHealth.summary.total_services} services online
-                    ({systemHealth.summary.uptime_percentage}% uptime)
-                  </p>
-                </div>
-              )}
-
-              {lastHealthCheck && (
-                <div className="text-center pt-2">
-                  <p className="text-xs text-gray-400">
-                    Last check: {lastHealthCheck}
-                  </p>
-                </div>
-              )}
             </div>
-          ) : (
-            <div className="text-center py-8">
-              {healthLoading ? (
-                <div className="flex items-center justify-center gap-3">
-                  <div className="w-6 h-6 border-2 border-green-200 border-t-green-600 rounded-full animate-spin"></div>
-                  <span className="text-gray-600">Checking system health...</span>
-                </div>
-              ) : (
-                <div className="text-gray-500">
-                  <p className="mb-2">Health status unavailable</p>
-                  <button
-                    onClick={fetchSystemHealth}
-                    className="text-sm text-green-600 hover:text-green-800 underline"
-                  >
-                    Try checking again
-                  </button>
-                </div>
-              )}
+          </div>
+
+          {/* ✅ RECENT USERS TABLE */}
+          {filteredUsers.length > 0 && (
+            <div className="rounded-2xl overflow-hidden"
+                 style={{ 
+                   backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+                   backdropFilter: 'blur(10px)',
+                   border: 'none'
+                 }}>
+            
+            {/* Table Header */}
+            <div className="px-6 py-4 border-b border-opacity-10"
+                 style={{ 
+                   backgroundColor: isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.01)',
+                   borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+                 }}>
+              <div className="flex items-center gap-3">
+                <IconUsers size={18} style={{ color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)' }} />
+                <h3 className="text-base sm:text-lg font-semibold"
+                    style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                  Recent Users
+                </h3>
+              </div>
             </div>
-          )}
+            
+            {/* Table Header Row */}
+            <div className="px-6 py-4 border-b border-opacity-10"
+                 style={{ 
+                   backgroundColor: isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.01)',
+                   borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+                 }}>
+              <div className="grid grid-cols-12 gap-4 text-sm font-semibold"
+                   style={{ color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)' }}>
+                <div className="col-span-3">User</div>
+                <div className="col-span-3">Email</div>
+                <div className="col-span-2">Role</div>
+                <div className="col-span-2">Joined</div>
+                <div className="col-span-2">Actions</div>
+              </div>
+            </div>
+            
+            {/* Table Body */}
+            <div className="divide-y divide-opacity-10"
+                 style={{ 
+                   borderColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'
+                 }}>
+              {filteredUsers.map((user) => (
+                <div key={user._id} 
+                     className="px-6 py-4 hover:bg-opacity-50 transition-all duration-200"
+                     onMouseEnter={(e) => {
+                       e.currentTarget.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.01)';
+                     }}
+                     onMouseLeave={(e) => {
+                       e.currentTarget.style.backgroundColor = 'transparent';
+                     }}>
+                  <div className="grid grid-cols-12 gap-4 text-sm"
+                       style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
+                    
+                    {/* User */}
+                    <div className="col-span-3 flex items-center gap-3">
+                      <img
+                        src={user.profilePicture || 'https://assets.aceternity.com/manu.png'}
+                        alt={user.username || user.name}
+                        className="w-10 h-10 rounded-full object-cover"
+                        style={{ 
+                          backgroundColor: isDark ? '#2D2D2D' : '#f5f5f5',
+                          border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`
+                        }}
+                        onError={(e) => {
+                          e.target.src = 'https://assets.aceternity.com/manu.png';
+                        }}
+                      />
+                      <div>
+                        <div className="font-medium"
+                             style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                          {user.username || user.name || 'Unknown'}
+                        </div>
+                        <div className="text-xs"
+                             style={{ color: isDark ? '#888888' : '#666666' }}>
+                          ID: {user._id?.slice(-8) || 'N/A'}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Email */}
+                    <div className="col-span-3">
+                      <div className="text-sm"
+                           style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                        {user.email || 'No email'}
+                      </div>
+                    </div>
+                    
+                    {/* Role */}
+                    <div className="col-span-2">
+                      <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-medium ${
+                        user.role === 'super-admin' 
+                          ? isDark ? 'bg-purple-900/20 text-purple-400 border border-purple-400/20' : 'bg-purple-100 text-purple-800 border border-purple-300'
+                          : user.role === 'admin'
+                          ? isDark ? 'bg-blue-900/20 text-blue-400 border border-blue-400/20' : 'bg-blue-100 text-blue-800 border border-blue-300'
+                          : isDark ? 'bg-green-900/20 text-green-400 border border-green-400/20' : 'bg-green-100 text-green-800 border border-green-300'
+                      }`}>
+                        {user.role === 'super-admin' && <IconCrown size={12} />}
+                        {user.role === 'admin' && <IconShield size={12} />}
+                        {user.role === 'client' && <IconUsers size={12} />}
+                        {user.role?.charAt(0).toUpperCase() + user.role?.slice(1)}
+                      </span>
+                    </div>
+                    
+                    {/* Joined Date */}
+                    <div className="col-span-2">
+                      <div className="text-sm"
+                           style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                        {user.createdAt 
+                          ? new Date(user.createdAt).toLocaleDateString('en-US', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric'
+                            })
+                          : 'Unknown'}
+                      </div>
+                    </div>
+                    
+                    {/* Actions */}
+                    <div className="col-span-2">
+                      <button
+                        onClick={() => navigate('/admin/users')}
+                        className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+                        style={{ 
+                          backgroundColor: isDark ? 'rgba(59, 130, 246, 0.1)' : 'rgba(59, 130, 246, 0.1)',
+                          color: '#3b82f6'
+                        }}
+                      >
+                        View All
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ✅ QUICK ACTIONS */}
+        <div className="rounded-2xl overflow-hidden"
+             style={{ 
+               backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+               backdropFilter: 'blur(10px)',
+               border: 'none'
+             }}>
+          
+          {/* Header */}
+          <div className="px-6 py-4 border-b border-opacity-10"
+               style={{ 
+                 backgroundColor: isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.01)',
+                 borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+               }}>
+            <div className="flex items-center gap-3">
+              <IconChevronRight size={18} style={{ color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)' }} />
+              <h3 className="text-base sm:text-lg font-semibold"
+                  style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                Quick Actions
+              </h3>
+            </div>
+          </div>
+          
+          {/* Actions */}
+          <div className="p-6 space-y-3">
+            <button
+              className="w-full text-left py-3 px-4 rounded-xl transition-all hover:scale-[1.02] flex items-center justify-between"
+              style={{ 
+                backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+                color: isDark ? '#ffffff' : '#000000'
+              }}
+              onClick={() => navigate('/admin/users')}
+            >
+              <span>View All Users ({stats.totalUsers})</span>
+              <IconChevronRight size={16} />
+            </button>
+            <button
+              className="w-full text-left py-3 px-4 rounded-xl transition-all hover:scale-[1.02] flex items-center justify-between"
+              style={{ 
+                backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+                color: isDark ? '#ffffff' : '#000000'
+              }}
+              onClick={() => navigate('/admin/models')}
+            >
+              <span>Manage Data Sheets ({stats.ingestedDocumentsCount})</span>
+              <IconChevronRight size={16} />
+            </button>
+            <button
+              className="w-full text-left py-3 px-4 rounded-xl transition-all hover:scale-[1.02] flex items-center justify-between"
+              style={{ 
+                backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+                color: isDark ? '#ffffff' : '#000000'
+              }}
+              onClick={() => navigate('/admin/feedback-reply')}
+            >
+              <span>Review Feedback ({stats.feedbackCount})</span>
+              <IconChevronRight size={16} />
+            </button>
+          </div>
         </div>
       </div>
+    </div>
     </div>
   );
 }

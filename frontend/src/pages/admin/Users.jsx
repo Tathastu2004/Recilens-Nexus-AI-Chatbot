@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
 import { useAdmin } from "../../context/AdminContext";
-import Table from "../../components/admin/Table";
+import { useTheme } from "../../context/ThemeContext";
+import { 
+  IconUsers, IconRefresh, IconShield, 
+  IconCrown, IconTrash, IconArrowDown, IconArrowUp, IconAlertCircle,
+  IconSearch
+} from "@tabler/icons-react";
 
 export default function Users() {
+  const { isDark } = useTheme();
   const {
     getAllUsers,
     updateUserRole,
@@ -13,6 +19,7 @@ export default function Users() {
   
   const [users, setUsers] = useState([]);
   const [actionLoading, setActionLoading] = useState({});
+  const [searchTerm, setSearchTerm] = useState('');
 
   const fetchUsers = async () => {
     try {
@@ -39,7 +46,7 @@ export default function Users() {
     setActionLoading(prev => ({ ...prev, [userId]: true }));
     try {
       await updateUserRole(userId, 'admin');
-      await fetchUsers(); // Refresh the list
+      await fetchUsers();
     } catch (error) {
       console.error('❌ Error promoting user:', error);
       alert('Failed to promote user: ' + error.message);
@@ -52,7 +59,7 @@ export default function Users() {
     setActionLoading(prev => ({ ...prev, [userId]: true }));
     try {
       await updateUserRole(userId, 'client');
-      await fetchUsers(); // Refresh the list
+      await fetchUsers();
     } catch (error) {
       console.error('❌ Error demoting user:', error);
       alert('Failed to demote user: ' + error.message);
@@ -66,7 +73,7 @@ export default function Users() {
       setActionLoading(prev => ({ ...prev, [userId]: true }));
       try {
         await deleteUser(userId);
-        await fetchUsers(); // Refresh the list
+        await fetchUsers();
       } catch (error) {
         console.error('❌ Error deleting user:', error);
         alert('Failed to delete user: ' + error.message);
@@ -76,136 +83,326 @@ export default function Users() {
     }
   };
 
-  const headers = ["Name", "Email", "Role", "Created", "Actions"];
-
-  const rows = users.map((user) => [
-    user.username || user.name || 'Unknown',
-    user.email || 'No email',
-    <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-      user.role === 'super-admin' 
-        ? 'bg-purple-100 text-purple-800 border border-purple-300'
-        : user.role === 'admin'
-        ? 'bg-blue-100 text-blue-800 border border-blue-300'
-        : 'bg-green-100 text-green-800 border border-green-300'
-    }`}>
-      {user.role}
-    </span>,
-    user.createdAt 
-      ? new Date(user.createdAt).toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric'
-        })
-      : 'Unknown',
-    user.role === "super-admin" ? (
-      <span className="px-3 py-2 text-gray-600 font-medium cursor-not-allowed select-none rounded-lg bg-gray-100">
-        Protected Account
-      </span>
-    ) : (
-      <div className="flex gap-2">
-        {actionLoading[user._id] ? (
-          <div className="flex items-center gap-2 px-3 py-1.5">
-            <div className="w-4 h-4 border-2 border-gray-300 border-t-green-600 rounded-full animate-spin"></div>
-            <span className="text-sm text-gray-600">Processing...</span>
-          </div>
-        ) : (
-          <>
-            {user.role === "admin" ? (
-              <button
-                className="px-3 py-1.5 rounded-lg bg-orange-100 text-orange-700 font-medium shadow-sm hover:bg-orange-200 hover:shadow-md transition-all duration-200 text-sm"
-                onClick={() => handleDemote(user._id)}
-              >
-                Demote to Client
-              </button>
-            ) : (
-              <button
-                className="px-3 py-1.5 rounded-lg bg-green-500 text-white font-medium shadow-sm hover:bg-green-600 hover:shadow-md transition-all duration-200 text-sm"
-                onClick={() => handlePromote(user._id)}
-              >
-                Promote to Admin
-              </button>
-            )}
-            <button
-              className="px-3 py-1.5 rounded-lg bg-red-500 text-white font-medium shadow-sm hover:bg-red-600 hover:shadow-md transition-all duration-200 text-sm"
-              onClick={() => handleDelete(user._id)}
-            >
-              Delete
-            </button>
-          </>
-        )}
-      </div>
-    ),
-  ]);
+  // Filter users based on search
+  const filteredUsers = users.filter(user => 
+    (user.username || user.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (user.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (user.role || '').toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
-    <div className="p-6 bg-green-50 min-h-screen">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-green-900 font-bold text-3xl">User Management</h2>
-          <div className="flex items-center gap-4">
-            <span className="text-green-700 bg-green-100 px-3 py-1 rounded-full text-sm font-medium">
-              {users.length} Total Users
-            </span>
-            <button 
-              onClick={fetchUsers}
-              disabled={loading}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-2"
-            >
-              {loading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  Refreshing...
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  Refresh
-                </>
-              )}
-            </button>
+    <div className="min-h-screen"
+         style={{ backgroundColor: isDark ? '#0a0a0a' : '#fafafa' }}>
+      
+      {/* ✅ Main Content */}
+      <div className="flex-1 lg:ml-0">
+        {/* ✅ SEAMLESS HEADER */}
+        <div className=" z-10 backdrop-blur-xl border-b"
+             style={{ 
+               backgroundColor: isDark ? 'rgba(10, 10, 10, 0.8)' : 'rgba(250, 250, 250, 0.8)',
+               borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+             }}>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              
+              {/* Left Section */}
+              <div className="flex items-center gap-4">
+                <div>
+                  <h1 className="text-xl sm:text-2xl font-bold"
+                      style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                    User Management
+                  </h1>
+                  <p className="text-xs sm:text-sm"
+                     style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                    Manage {users.length} registered users
+                  </p>
+                </div>
+              </div>
+
+              {/* Right Section */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                
+                {/* Search */}
+                <div className="relative flex-1 sm:min-w-80">
+                  <IconSearch 
+                    size={18} 
+                    className="absolute left-3 top-1/2 transform -translate-y-1/2"
+                    style={{ color: isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)' }}
+                  />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search users..."
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border-0 transition-all focus:ring-2"
+                    style={{ 
+                      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+                      color: isDark ? '#ffffff' : '#000000',
+                      backdropFilter: 'blur(10px)'
+                    }}
+                  />
+                </div>
+                
+                {/* Stats & Actions */}
+                <div className="flex items-center gap-3">
+                  <div className="px-3 py-2 rounded-lg text-sm font-medium"
+                       style={{ 
+                         backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+                         color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)'
+                       }}>
+                    {filteredUsers.length} of {users.length} users
+                  </div>
+                  <button 
+                    onClick={fetchUsers}
+                    disabled={loading}
+                    className="px-4 py-2 rounded-xl font-medium transition-all hover:scale-105 flex items-center gap-2 disabled:opacity-50 text-sm"
+                    style={{ 
+                      backgroundColor: isDark ? '#ffffff' : '#000000',
+                      color: isDark ? '#000000' : '#ffffff'
+                    }}
+                  >
+                    <IconRefresh size={16} className={loading ? 'animate-spin' : ''} />
+                    <span className="hidden sm:inline">Refresh</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
-          {loading && users.length === 0 && (
-            <div className="flex items-center justify-center py-12">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
-              <span className="ml-3 text-gray-700">Loading users...</span>
-            </div>
-          )}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
           
+          {/* Error State */}
           {error && (
-            <div className="m-6 text-red-600 bg-red-50 border border-red-200 p-4 rounded-xl">
-              <div className="flex items-center gap-2">
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-                <strong>Error loading users:</strong> {error}
+            <div className="mb-6 p-4 rounded-2xl flex items-center gap-3 border-0"
+                 style={{ 
+                   backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                   color: isDark ? '#ffffff' : '#000000'
+                 }}>
+              <IconAlertCircle size={20} className="text-red-500" />
+              <div>
+                <p className="font-medium">Error loading users</p>
+                <p className="text-sm" style={{ color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}>
+                  {error}
+                </p>
               </div>
             </div>
           )}
-          
-          {!loading && users.length > 0 && (
-            <div className="p-6">
-              <Table headers={headers} rows={rows} />
+
+          {/* Loading State */}
+          {loading && users.length === 0 ? (
+            <div className="flex items-center justify-center py-16">
+              <div className="text-center">
+                <div className="w-8 h-8 rounded-full animate-spin mx-auto mb-4"
+                     style={{ 
+                       border: `2px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
+                       borderTopColor: isDark ? '#ffffff' : '#000000'
+                     }}></div>
+                <h3 className="text-lg font-semibold mb-2"
+                    style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                  Loading Users
+                </h3>
+                <p style={{ color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}>
+                  Fetching user data...
+                </p>
+              </div>
             </div>
-          )}
-          
-          {!loading && users.length === 0 && !error && (
-            <div className="text-center py-12 text-gray-500">
-              <svg className="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
-              </svg>
-              <p className="text-lg font-medium text-gray-900 mb-2">No users found</p>
-              <p className="text-gray-500 mb-4">There are no users in the system yet.</p>
+          ) : users.length === 0 && !loading ? (
+            <div className="text-center py-16">
+              <div className="text-6xl mb-6">👥</div>
+              <h3 className="text-xl font-semibold mb-3"
+                  style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                No users found
+              </h3>
+              <p className="mb-8"
+                 style={{ color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}>
+                There are no users in the system yet.
+              </p>
               <button 
                 onClick={fetchUsers}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                className="px-6 py-3 font-medium rounded-xl transition-all hover:scale-105 flex items-center gap-2 mx-auto"
+                style={{ 
+                  backgroundColor: isDark ? '#ffffff' : '#000000',
+                  color: isDark ? '#000000' : '#ffffff'
+                }}
               >
+                <IconRefresh size={20} />
                 Refresh Users
               </button>
+            </div>
+          ) : (
+            /* ✅ SEAMLESS USERS TABLE */
+            <div className="rounded-2xl overflow-hidden"
+                 style={{ 
+                   backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+                   backdropFilter: 'blur(10px)',
+                   border: 'none'
+                 }}>
+              
+              {/* Table Header */}
+              <div className="px-6 py-4 border-b border-opacity-10"
+                   style={{ 
+                     backgroundColor: isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.01)',
+                     borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+                   }}>
+                <div className="grid grid-cols-12 gap-4 text-sm font-semibold"
+                     style={{ color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)' }}>
+                  <div className="col-span-3">User</div>
+                  <div className="col-span-3">Email</div>
+                  <div className="col-span-2">Role</div>
+                  <div className="col-span-2">Joined</div>
+                  <div className="col-span-2">Actions</div>
+                </div>
+              </div>
+              
+              {/* Table Body */}
+              <div className="divide-y divide-opacity-10"
+                   style={{ 
+                     borderColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'
+                   }}>
+                {filteredUsers.map((user) => (
+                  <div key={user._id} 
+                       className="px-6 py-4 hover:bg-opacity-50 transition-all duration-200"
+                       onMouseEnter={(e) => {
+                         e.currentTarget.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.01)';
+                       }}
+                       onMouseLeave={(e) => {
+                         e.currentTarget.style.backgroundColor = 'transparent';
+                       }}>
+                    <div className="grid grid-cols-12 gap-4 text-sm"
+                         style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
+                      
+                      {/* User */}
+                      <div className="col-span-3 flex items-center gap-3">
+                        <img
+                          src={user.profilePicture || 'https://assets.aceternity.com/manu.png'}
+                          alt={user.username || user.name}
+                          className="w-10 h-10 rounded-full object-cover"
+                          style={{ 
+                            backgroundColor: isDark ? '#2D2D2D' : '#f5f5f5',
+                            border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`
+                          }}
+                          onError={(e) => {
+                            e.target.src = 'https://assets.aceternity.com/manu.png';
+                          }}
+                        />
+                        <div>
+                          <div className="font-medium"
+                               style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                            {user.username || user.name || 'Unknown'}
+                          </div>
+                          <div className="text-xs"
+                               style={{ color: isDark ? '#888888' : '#666666' }}>
+                            ID: {user._id?.slice(-8) || 'N/A'}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Email */}
+                      <div className="col-span-3">
+                        <div className="text-sm"
+                             style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                          {user.email || 'No email'}
+                        </div>
+                      </div>
+                      
+                      {/* Role */}
+                      <div className="col-span-2">
+                        <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-medium ${
+                          user.role === 'super-admin' 
+                            ? isDark ? 'bg-purple-900/20 text-purple-400 border border-purple-400/20' : 'bg-purple-100 text-purple-800 border border-purple-300'
+                            : user.role === 'admin'
+                            ? isDark ? 'bg-blue-900/20 text-blue-400 border border-blue-400/20' : 'bg-blue-100 text-blue-800 border border-blue-300'
+                            : isDark ? 'bg-green-900/20 text-green-400 border border-green-400/20' : 'bg-green-100 text-green-800 border border-green-300'
+                        }`}>
+                          {user.role === 'super-admin' && <IconCrown size={12} />}
+                          {user.role === 'admin' && <IconShield size={12} />}
+                          {user.role === 'client' && <IconUsers size={12} />}
+                          {user.role?.charAt(0).toUpperCase() + user.role?.slice(1)}
+                        </span>
+                      </div>
+                      
+                      {/* Joined Date */}
+                      <div className="col-span-2">
+                        <div className="text-sm"
+                             style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                          {user.createdAt 
+                            ? new Date(user.createdAt).toLocaleDateString('en-US', {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric'
+                              })
+                            : 'Unknown'}
+                        </div>
+                      </div>
+                      
+                      {/* Actions */}
+                      <div className="col-span-2">
+                        {user.role === "super-admin" ? (
+                          <span className="px-3 py-2 text-xs font-medium rounded-lg cursor-not-allowed select-none"
+                                style={{ 
+                                  backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
+                                  color: isDark ? '#888888' : '#666666'
+                                }}>
+                          Protected Account
+                        </span>
+                        ) : (
+                          <div className="flex gap-2">
+                            {actionLoading[user._id] ? (
+                              <div className="flex items-center gap-2 px-3 py-1.5">
+                                <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"
+                                     style={{ color: isDark ? '#ffffff' : '#000000' }}></div>
+                                <span className="text-sm" style={{ color: isDark ? '#cccccc' : '#666666' }}>
+                                  Processing...
+                                </span>
+                              </div>
+                            ) : (
+                              <>
+                                {user.role === "admin" ? (
+                                  <button
+                                    className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+                                    style={{ 
+                                      backgroundColor: isDark ? 'rgba(251, 146, 60, 0.1)' : 'rgba(251, 146, 60, 0.1)',
+                                      color: '#f59e0b'
+                                    }}
+                                    onClick={() => handleDemote(user._id)}
+                                  >
+                                    <IconArrowDown size={14} />
+                                    Demote
+                                  </button>
+                                ) : (
+                                  <button
+                                    className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+                                    style={{ 
+                                      backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+                                      color: '#10b981'
+                                    }}
+                                    onClick={() => handlePromote(user._id)}
+                                  >
+                                    <IconArrowUp size={14} />
+                                    Promote
+                                  </button>
+                                )}
+                                <button
+                                  className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+                                  style={{ 
+                                    backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                                    color: '#ef4444'
+                                  }}
+                                  onClick={() => handleDelete(user._id)}
+                                >
+                                  <IconTrash size={14} />
+                                  Delete
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

@@ -26,6 +26,9 @@ import FeedBack from './pages/FeedBack';
 // Admin imports
 import AdminRoutes from './routes/AdminRoutes';
 
+// Debugging Component
+// import DebugUser from './components/DebugUser';
+
 // ✅ Enhanced ErrorBoundary
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -66,6 +69,31 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// ✅ ROOT ROUTE COMPONENT WITH SMART REDIRECT
+const RootRedirect = () => {
+  const storedUser = localStorage.getItem('user');
+  
+  if (storedUser) {
+    try {
+      const userData = JSON.parse(storedUser);
+      console.log('🔄 [ROOT REDIRECT] User found in storage:', userData.role, userData.email);
+      
+      if (userData.role === 'admin' || userData.role === 'super-admin') {
+        console.log('🔄 [ROOT REDIRECT] Redirecting admin/super-admin to /admin');
+        return <Navigate to="/admin" replace />;
+      } else {
+        console.log('🔄 [ROOT REDIRECT] Redirecting client to /chat');
+        return <Navigate to="/chat" replace />;
+      }
+    } catch (error) {
+      console.error('❌ [ROOT REDIRECT] Error parsing stored user:', error);
+    }
+  }
+  
+  console.log('🔄 [ROOT REDIRECT] No user data, redirecting to /signin');
+  return <Navigate to="/signin" replace />;
+};
+
 function App() {
   return (
     <ErrorBoundary>
@@ -77,6 +105,7 @@ function App() {
               <FeedbackProvider>
                 
                   <div className="App min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300">
+                    {/* <DebugUser /> Add this temporarily */}
                     <Routes>
                       {/* ✅ PRIMARY CLERK AUTHENTICATION ROUTES */}
                       <Route path="/signin" element={<ClerkSignIn />} />
@@ -84,14 +113,14 @@ function App() {
                       
                       {/* OAuth callback routes */}
                       <Route path="/signin/*" element={<ClerkSignIn />} />
-                      <Route path="/signup/*" element={<ClerkSignIn />} />
+                      <Route path="/signup/*" element={<ClerkSignUp />} />
                       <Route path="/sso-callback" element={<ClerkSignIn />} />
 
                       {/* ✅ MAIN APPLICATION ROUTES (CLERK PROTECTED) */}
                       <Route
                         path="/chat"
                         element={
-                          <ClerkProtectedRoute>
+                          <ClerkProtectedRoute clientOnly={true}>
                             <ChatInterface />
                           </ClerkProtectedRoute>
                         }
@@ -175,16 +204,8 @@ function App() {
                         }
                       />
 
-                      {/* ✅ ROOT REDIRECT - Go to chat if we have any auth */}
-                      <Route 
-                        path="/" 
-                        element={
-                          <Navigate 
-                            to="/chat" 
-                            replace 
-                          />
-                        } 
-                      />
+                      {/* ✅ ROOT REDIRECT WITH SMART LOGIC */}
+                      <Route path="/" element={<RootRedirect />} />
                       
                       {/* Fallback route */}
                       <Route path="*" element={<Navigate to="/signin" replace />} />

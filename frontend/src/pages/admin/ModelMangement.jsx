@@ -2,11 +2,16 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   IconDatabase, IconRobot, IconPlus, IconTrash, IconCheck,
   IconAlertCircle, IconRefresh, IconX, IconUpload, IconLoader,
-  IconBrain, IconEye, IconFile
+  IconBrain, IconEye, IconFile, IconArrowLeft
 } from '@tabler/icons-react';
 import { useModelManagement } from '../../context/ModelContext';
+import { useTheme } from '../../context/ThemeContext';
+import { useNavigate } from 'react-router-dom';
 
 const ModelManagement = () => {
+  const { isDark } = useTheme();
+  const navigate = useNavigate();
+  
   const { 
     ingestedDocuments,
     ingestionLoading,
@@ -92,265 +97,454 @@ const ModelManagement = () => {
     }
   };
 
+  // Wrap the return content:
   return (
-    <div className="p-6 bg-green-50 min-h-screen">
-      {/* Header */}
-      <h2 className="text-green-900 font-bold text-xl mb-6 flex justify-between items-center">
-        <span className="flex items-center gap-2">
-          <IconBrain size={24} />
-          AI Model Management
-        </span>
-        <button
-          onClick={fetchData}
-          className="bg-green-700 text-white px-3 py-2 rounded hover:bg-green-800 disabled:opacity-50 flex items-center gap-2"
-          disabled={ingestionLoading || modelLoading}
-        >
-          <IconRefresh size={16} />
-          {ingestionLoading || modelLoading ? 'Refreshing...' : 'Refresh'}
-        </button>
-      </h2>
-
-      {/* Notifications */}
-      {notifications.map((notification, index) => (
-        <div
-          key={`${notification.id}-${index}`}
-          className={`p-4 rounded-lg mb-4 flex justify-between items-center ${
-            notification.type === 'error'
-              ? 'bg-red-100 border border-red-300 text-red-800'
-              : notification.type === 'warning'
-              ? 'bg-yellow-100 border border-yellow-300 text-yellow-800'
-              : 'bg-blue-100 border border-blue-300 text-blue-800'
-          }`}
-        >
-          <span>{notification.message}</span>
-          <button
-            onClick={() => removeNotification(notification.id)}
-            className="hover:opacity-75"
-          >
-            <IconX size={20} />
-          </button>
-        </div>
-      ))}
+    <div className="min-h-screen"
+         style={{ backgroundColor: isDark ? '#0a0a0a' : '#fafafa' }}>
       
-      {/* RAG Service Status Alert */}
-      <div className={`rounded-lg p-4 mb-6 ${
-        ragStatus.available
-          ? 'bg-green-50 border border-green-200' 
-          : 'bg-yellow-50 border border-yellow-200'
-      }`}>
-        <div className="flex items-start gap-3">
-          <IconAlertCircle size={20} className={
-            ragStatus.available
-              ? 'text-green-600 mt-0.5 flex-shrink-0' 
-              : 'text-yellow-600 mt-0.5 flex-shrink-0'
-          } />
-          <div>
-            <h4 className={`font-medium mb-1 ${
-              ragStatus.available
-                ? 'text-green-800' 
-                : 'text-yellow-800'
-            }`}>
-              RAG System Status
-            </h4>
-            {ragStatus.available ? (
-              <div>
-                <p className="text-green-700 text-sm mb-2">
-                  ✅ RAG system is active! Your uploaded documents can be searched by AI.
-                </p>
-                <div className="text-xs text-green-600">
-                  <p>✅ Document Upload: Working</p>
-                  <p>✅ RAG Indexing: Available</p>
-                  <p>✅ AI Document Search: Available</p>
-                  <p>✅ Smart Query Detection: Enabled</p>
-                </div>
-                {Array.isArray(ingestedDocuments) && ingestedDocuments.length > 0 && (
-                  <p className="text-xs text-green-600 mt-1">
-                    📄 {ingestedDocuments.length} document(s) available for AI search
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div>
-                <p className="text-yellow-700 text-sm mb-2">
-                  ⚠️ RAG system is not fully available. Documents will be stored but AI search won't work.
-                </p>
-                <div className="text-xs text-yellow-600">
-                  <p>✅ Document Upload: Working</p>
-                  <p>❌ RAG Indexing: Not Available</p>
-                  <p>❌ AI Document Search: Not Available</p>
-                  <p>✅ Basic Chat: Working</p>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="bg-white rounded-lg shadow mb-6">
-        <div className="flex border-b border-green-100">
-          <button
-            onClick={() => setActiveTab('data')}
-            className={`px-6 py-4 font-medium flex-1 flex items-center justify-center gap-2 ${
-              activeTab === 'data'
-                ? 'text-black border-b-2 border-green-700 bg-green-25'
-                : 'text-green-600 hover:text-black hover:bg-green-25'
-            }`}
-          >
-            <IconDatabase size={16} />
-            Data Sheets ({Array.isArray(ingestedDocuments) ? ingestedDocuments.length : 0})
-          </button>
-          <button
-            onClick={() => setActiveTab('model')}
-            className={`px-6 py-4 font-medium flex-1 flex items-center justify-center gap-2 ${
-              activeTab === 'model'
-                ? 'text-black border-b-2 border-green-700 bg-green-25'
-                : 'text-green-600 hover:text-black hover:bg-green-25'
-            }`}
-          >
-            <IconRobot size={16} />
-            AI Model Status
-          </button>
-        </div>
-
-        {/* Data Management Tab */}
-        {activeTab === 'data' && (
-          <div className="p-6">
-            <h3 className="text-green-800 font-semibold text-lg mb-4">Ingest New Data Sheet</h3>
-            <form onSubmit={handleIngestDataSheet} className="bg-green-50 p-6 rounded-lg border border-green-200 mb-6">
-              <div className="mb-6">
-                <label className="block text-black font-medium mb-2">Upload Data Sheet File</label>
-                <div className="border-2 border-dashed border-green-300 rounded-lg p-6 text-center">
-                  <input
-                    type="file"
-                    id="dataSheetFile"
-                    accept=".pdf, .png, .jpg, .jpeg"
-                    onChange={(e) => handleIngestionFormChange('dataSheetFile', e.target.files[0])}
-                    className="hidden"
-                  />
-                  {!ingestionForm.dataSheetFile ? (
-                    <label
-                      htmlFor="dataSheetFile"
-                      className="cursor-pointer flex flex-col items-center"
-                    >
-                      <IconUpload size={48} className="text-green-400 mb-2" />
-                      <p className="text-black font-medium">Click to upload data sheet</p>
-                      <p className="text-green-600 text-sm mt-1">
-                        Supports PDF, PNG, JPG, JPEG files
-                      </p>
-                    </label>
-                  ) : (
-                    <div className="flex items-center justify-center gap-3">
-                      <IconCheck size={24} className="text-green-600" />
-                      <div>
-                        <p className="font-medium text-green-800">{ingestionForm.dataSheetFile.name}</p>
-                        <p className="text-green-600 text-sm">
-                          {(ingestionForm.dataSheetFile.size / 1024 / 1024).toFixed(2)} MB
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleIngestionFormChange('dataSheetFile', null)}
-                        className="text-red-600 hover:text-red-800 ml-4"
-                      >
-                        <IconX size={20} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-4">
+      {/* ✅ Main Content */}
+      <div className="flex-1 lg:ml-0">
+        {/* ✅ SEAMLESS HEADER - Same as Users */}
+        <div className="z-10 backdrop-blur-xl border-b"
+             style={{ 
+               backgroundColor: isDark ? 'rgba(10, 10, 10, 0.8)' : 'rgba(250, 250, 250, 0.8)',
+               borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+             }}>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              
+              {/* Left Section */}
+              <div className="flex items-center gap-4">
                 <button
-                  type="submit"
-                  disabled={!ingestionForm.dataSheetFile || ingestionLoading}
-                  className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50 flex items-center gap-2"
+                  onClick={() => navigate('/admin')}
+                  className="flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-70"
+                  style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}
                 >
-                  {ingestionLoading ? (
-                    <>
-                      <IconLoader size={16} className="animate-spin" />
-                      Ingesting...
-                    </>
-                  ) : (
-                    <>
-                      <IconPlus size={16} />
-                      Ingest Data
-                    </>
-                  )}
+                  <IconArrowLeft size={16} />
+                  <span className="hidden sm:inline">Back</span>
                 </button>
-              </div>
-            </form>
 
-            <h3 className="text-green-800 font-semibold text-lg mb-4">Ingested Documents</h3>
-            {(!Array.isArray(ingestedDocuments) || ingestedDocuments.length === 0) ? (
-              <div className="bg-white p-8 rounded-lg shadow text-center">
-                <IconFile size={64} className="mx-auto text-green-300 mb-4" />
-                <p className="text-green-800 text-lg">No documents have been ingested yet.</p>
-                <p className="text-green-600 text-sm mt-2">Upload a file using the form above to get started.</p>
+                <div>
+                  <h1 className="text-xl sm:text-2xl font-bold"
+                      style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                    AI Model Management
+                  </h1>
+                  <p className="text-xs sm:text-sm"
+                     style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                    Manage documents and AI models
+                  </p>
+                </div>
               </div>
-            ) : (
-              <div className="divide-y divide-green-100">
-                {Array.isArray(ingestedDocuments) && ingestedDocuments.map((doc) => (
-                  <div key={doc.docId} className="py-4 flex items-center justify-between hover:bg-green-25 px-2 rounded">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <p className="font-medium text-black">{doc.fileName}</p>
-                        {/* ✅ Add status indicator */}
-                        <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">
-                          📄 Stored
-                        </span>
-                      </div>
-                      <p className="text-sm text-green-600">ID: {doc.docId}</p>
-                      <p className="text-sm text-green-600">
-                        Uploaded: {new Date(doc.ingestedAt).toLocaleDateString()}
-                      </p>
-                      <p className="text-sm text-green-600">
-                        Size: {(doc.size / 1024 / 1024).toFixed(2)} MB • Type: {doc.fileType}
-                      </p>
-                    </div>
-                    <div>
-                      <button
-                        onClick={() => handleDeleteDataSheet(doc.docId)}
-                        disabled={ingestionLoading}
-                        className="p-2 text-red-600 hover:bg-red-100 rounded disabled:opacity-50"
-                      >
-                        <IconTrash size={20} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
 
-        {/* Model Status Tab */}
-        {activeTab === 'model' && (
-          <div className="p-6">
-            <h3 className="text-green-800 font-semibold text-lg mb-4">AI Model Status</h3>
-            <div className="bg-white p-6 rounded-lg shadow">
-              <div className="flex items-center gap-4 mb-4">
-                <IconRobot size={28} className="text-green-600" />
-                <h4 className="font-semibold text-lg text-black">Llama 3 RAG Model</h4>
-              </div>
-              <div className="border-t border-green-100 pt-4">
-                <p className="flex items-center gap-2">
-                  <span className="font-medium">Status:</span>
-                  <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
-                    Active and Ready
-                  </span>
-                </p>
-                <p className="flex items-center gap-2 mt-2">
-                  <span className="font-medium">Description:</span>
-                  <span className="text-sm text-green-600">
-                    This model is an instance of Llama 3 with Retrieval-Augmented Generation capabilities.
-                    It can answer questions based on ingested company data sheets.
-                  </span>
-                </p>
+              {/* Right Section */}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={fetchData}
+                  disabled={ingestionLoading || modelLoading}
+                  className="px-4 py-2 rounded-xl font-medium transition-all hover:scale-105 flex items-center gap-2 disabled:opacity-50 text-sm"
+                  style={{ 
+                    backgroundColor: isDark ? '#ffffff' : '#000000',
+                    color: isDark ? '#000000' : '#ffffff'
+                  }}
+                >
+                  <IconRefresh size={16} className={ingestionLoading || modelLoading ? 'animate-spin' : ''} />
+                  <span className="hidden sm:inline">Refresh</span>
+                </button>
               </div>
             </div>
           </div>
-        )}
+        </div>
+
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+
+          {/* ✅ NOTIFICATIONS - Seamless */}
+          {notifications.length > 0 && (
+            <div className="mb-6 space-y-4">
+              {notifications.map((notification, index) => (
+                <div
+                  key={`${notification.id}-${index}`}
+                  className={`p-4 rounded-2xl flex justify-between items-center border-0 ${
+                    notification.type === 'error'
+                      ? 'bg-red-500/10 text-red-400'
+                      : notification.type === 'warning'
+                      ? 'bg-yellow-500/10 text-yellow-400'
+                      : 'bg-blue-500/10 text-blue-400'
+                  }`}
+                >
+                  <span>{notification.message}</span>
+                  <button
+                    onClick={() => removeNotification(notification.id)}
+                    className="hover:opacity-75 p-1 rounded-lg transition-colors"
+                    style={{
+                      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
+                    }}
+                  >
+                    <IconX size={18} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* ✅ RAG STATUS - Seamless */}
+          <div className={`mb-6 rounded-2xl p-6 border-0 ${
+            ragStatus?.available
+              ? 'bg-green-500/10'
+              : 'bg-yellow-500/10'
+          }`}>
+            <div className="flex items-start gap-4">
+              <IconAlertCircle size={24} className={
+                ragStatus?.available
+                  ? 'text-green-400 flex-shrink-0'
+                  : 'text-yellow-400 flex-shrink-0'
+              } />
+              <div className="flex-1">
+                <h4 className={`font-semibold text-lg mb-3 ${
+                  ragStatus?.available
+                    ? 'text-green-400'
+                    : 'text-yellow-400'
+                }`}>
+                  RAG System Status
+                </h4>
+                {ragStatus?.available ? (
+                  <div>
+                    <p className="mb-4 text-green-300">
+                      ✅ RAG system is active! Your uploaded documents can be searched by AI.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-green-400">
+                      <div className="flex items-center gap-2">
+                        <IconCheck size={16} />
+                        <span>Document Upload: Working</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <IconCheck size={16} />
+                        <span>RAG Indexing: Available</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <IconCheck size={16} />
+                        <span>AI Document Search: Available</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <IconCheck size={16} />
+                        <span>Smart Query Detection: Enabled</span>
+                      </div>
+                    </div>
+                    {Array.isArray(ingestedDocuments) && ingestedDocuments.length > 0 && (
+                      <p className="mt-3 text-sm text-green-400">
+                        📄 {ingestedDocuments.length} document(s) available for AI search
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <p className="mb-4 text-yellow-300">
+                      ⚠️ RAG system is not fully available. Documents will be stored but AI search won't work.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-yellow-400">
+                      <div className="flex items-center gap-2">
+                        <IconCheck size={16} />
+                        <span>Document Upload: Working</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <IconX size={16} />
+                        <span>RAG Indexing: Not Available</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <IconX size={16} />
+                        <span>AI Document Search: Not Available</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <IconCheck size={16} />
+                        <span>Basic Chat: Working</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ✅ MAIN CONTENT CARD - Seamless like Users */}
+          <div className="rounded-2xl overflow-hidden"
+               style={{ 
+                 backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+                 backdropFilter: 'blur(10px)',
+                 border: 'none'
+               }}>
+            
+            {/* Tabs - Seamless */}
+            <div className="flex border-b border-opacity-10"
+                 style={{ 
+                   backgroundColor: isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.01)',
+                   borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+                 }}>
+              <button
+                onClick={() => setActiveTab('data')}
+                className="px-6 py-4 font-medium flex-1 flex items-center justify-center gap-2 transition-all"
+                style={{
+                  color: activeTab === 'data' 
+                    ? isDark ? '#ffffff' : '#000000'
+                    : isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)',
+                  backgroundColor: activeTab === 'data' 
+                    ? isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)'
+                    : 'transparent',
+                  borderBottom: activeTab === 'data' 
+                    ? `2px solid ${isDark ? '#ffffff' : '#000000'}`
+                    : 'none'
+                }}
+              >
+                <IconDatabase size={18} />
+                Data Sheets ({Array.isArray(ingestedDocuments) ? ingestedDocuments.length : 0})
+              </button>
+              <button
+                onClick={() => setActiveTab('model')}
+                className="px-6 py-4 font-medium flex-1 flex items-center justify-center gap-2 transition-all"
+                style={{
+                  color: activeTab === 'model' 
+                    ? isDark ? '#ffffff' : '#000000'
+                    : isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)',
+                  backgroundColor: activeTab === 'model' 
+                    ? isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)'
+                    : 'transparent',
+                  borderBottom: activeTab === 'model' 
+                    ? `2px solid ${isDark ? '#ffffff' : '#000000'}`
+                    : 'none'
+                }}
+              >
+                <IconRobot size={18} />
+                AI Model Status
+              </button>
+            </div>
+
+            {/* ✅ DATA MANAGEMENT TAB */}
+            {activeTab === 'data' && (
+              <div className="p-6 space-y-6">
+                
+                {/* Upload Section */}
+                <div>
+                  <h3 className="text-lg font-semibold mb-4"
+                      style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                    Upload New Document
+                  </h3>
+                  <form onSubmit={handleIngestDataSheet} 
+                        className="p-6 rounded-2xl"
+                        style={{ 
+                          backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+                          border: 'none'
+                        }}>
+                    
+                    <div className="mb-6">
+                      <label className="block text-sm font-medium mb-3"
+                             style={{ color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)' }}>
+                        Select File to Upload
+                      </label>
+                      <div className="border-2 border-dashed rounded-2xl p-8 text-center transition-colors"
+                           style={{ 
+                             borderColor: isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)',
+                             backgroundColor: isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.02)'
+                           }}>
+                        <input
+                          type="file"
+                          id="dataSheetFile"
+                          accept=".pdf, .png, .jpg, .jpeg"
+                          onChange={(e) => handleIngestionFormChange('dataSheetFile', e.target.files[0])}
+                          className="hidden"
+                        />
+                        {!ingestionForm.dataSheetFile ? (
+                          <label
+                            htmlFor="dataSheetFile"
+                            className="cursor-pointer flex flex-col items-center"
+                          >
+                            <IconUpload size={48} style={{ color: isDark ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)' }} className="mb-3" />
+                            <p className="font-medium mb-2"
+                               style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                              Click to upload document
+                            </p>
+                            <p className="text-sm"
+                               style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                              Supports PDF, PNG, JPG, JPEG files
+                            </p>
+                          </label>
+                        ) : (
+                          <div className="flex items-center justify-center gap-4">
+                            <IconCheck size={32} className="text-green-400" />
+                            <div className="text-left">
+                              <p className="font-medium"
+                                 style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                                {ingestionForm.dataSheetFile.name}
+                              </p>
+                              <p className="text-sm"
+                                 style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                                {(ingestionForm.dataSheetFile.size / 1024 / 1024).toFixed(2)} MB
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleIngestionFormChange('dataSheetFile', null)}
+                              className="p-2 rounded-lg transition-colors bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                            >
+                              <IconX size={20} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={!ingestionForm.dataSheetFile || ingestionLoading}
+                        className="px-6 py-3 rounded-xl font-medium transition-all hover:scale-105 flex items-center gap-2 disabled:opacity-50"
+                        style={{ 
+                          backgroundColor: isDark ? '#ffffff' : '#000000',
+                          color: isDark ? '#000000' : '#ffffff'
+                        }}
+                      >
+                        {ingestionLoading ? (
+                          <>
+                            <IconLoader size={18} className="animate-spin" />
+                            Uploading...
+                          </>
+                        ) : (
+                          <>
+                            <IconPlus size={18} />
+                            Upload Document
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* Documents List */}
+                <div>
+                  <h3 className="text-lg font-semibold mb-4"
+                      style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                    Uploaded Documents
+                  </h3>
+                  {(!Array.isArray(ingestedDocuments) || ingestedDocuments.length === 0) ? (
+                    <div className="text-center py-12 rounded-2xl"
+                         style={{ 
+                           backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+                         }}>
+                      <IconFile size={64} style={{ color: isDark ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)' }} className="mx-auto mb-4" />
+                      <h4 className="text-lg font-medium mb-2"
+                          style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                        No documents uploaded yet
+                      </h4>
+                      <p style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                        Upload a file using the form above to get started.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {Array.isArray(ingestedDocuments) && ingestedDocuments.map((doc) => (
+                        <div key={doc.docId} 
+                             className="p-4 rounded-2xl transition-all hover:scale-[1.01]"
+                             style={{ 
+                               backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+                             }}
+                             onMouseEnter={(e) => {
+                               e.currentTarget.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)';
+                             }}
+                             onMouseLeave={(e) => {
+                               e.currentTarget.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)';
+                             }}>
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-start gap-3 flex-1">
+                              <IconFile size={20} style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }} className="mt-1 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <h4 className="font-medium truncate"
+                                      style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                                    {doc.fileName}
+                                  </h4>
+                                  <span className="px-2 py-1 text-xs rounded-lg font-medium flex-shrink-0 bg-green-500/10 text-green-400">
+                                    📄 Stored
+                                  </span>
+                                </div>
+                                <div className="space-y-1 text-sm"
+                                     style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                                  <p>ID: {doc.docId}</p>
+                                  <p>Uploaded: {new Date(doc.ingestedAt).toLocaleDateString()}</p>
+                                  <p>Size: {(doc.size / 1024 / 1024).toFixed(2)} MB • Type: {doc.fileType}</p>
+                                </div>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => handleDeleteDataSheet(doc.docId)}
+                              disabled={ingestionLoading}
+                              className="p-2 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0 bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                            >
+                              <IconTrash size={18} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ✅ MODEL STATUS TAB */}
+            {activeTab === 'model' && (
+              <div className="p-6">
+                <h3 className="text-lg font-semibold mb-6"
+                    style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                  AI Model Status
+                </h3>
+                <div className="p-6 rounded-2xl"
+                     style={{ 
+                       backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+                     }}>
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="p-3 rounded-xl"
+                         style={{
+                           backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+                           color: isDark ? '#ffffff' : '#000000'
+                         }}>
+                      <IconRobot size={32} />
+                    </div>
+                    <div>
+                      <h4 className="text-xl font-semibold"
+                          style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                        Llama 3 RAG Model
+                      </h4>
+                      <p style={{ color: isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                        Retrieval-Augmented Generation System
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="border-t pt-6 space-y-4"
+                       style={{ borderTopColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium"
+                            style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                        Status:
+                      </span>
+                      <span className="px-3 py-1 text-sm rounded-lg font-medium bg-green-500/10 text-green-400">
+                        Active and Ready
+                      </span>
+                    </div>
+                    <div>
+                      <span className="font-medium block mb-2"
+                            style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                        Description:
+                      </span>
+                      <p className="text-sm leading-relaxed"
+                         style={{ color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}>
+                        This model is an instance of Llama 3 with Retrieval-Augmented Generation capabilities.
+                        It can answer questions based on ingested company data sheets and provide contextual responses.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
