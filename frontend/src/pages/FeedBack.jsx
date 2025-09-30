@@ -3,18 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { 
   IconSend, IconMessageCircle, IconCheck, IconClock, IconMail, 
   IconUser, IconX, IconPlus, IconRefresh, IconAlertCircle,
-  IconFilter, IconChevronDown, IconEdit, IconArrowLeft
+  IconArrowLeft, IconSun, IconMoon, IconEdit
 } from '@tabler/icons-react';
-import { useFeedback } from '../context/feedbackContext'; // ✅ Correct path
+import { useFeedback } from '../context/feedbackContext';
 import { useTheme } from '../context/ThemeContext';
-// ✅ FIXED: Use ClerkUserContext instead of UserContext
-import { useClerkUser } from '../context/ClerkUserContext'; // Use ClerkUserContext
+import { useClerkUser } from '../context/ClerkUserContext';
 
 const FeedBack = () => {
   const navigate = useNavigate();
-  const { isDark } = useTheme();
-  
-  // ✅ FIXED: Use ClerkUserContext for authentication
+  const { isDark, toggleTheme } = useTheme();
   const { dbUser: user, isAuthenticated, loading: userLoading } = useClerkUser();
   
   const { 
@@ -56,10 +53,9 @@ const FeedBack = () => {
 
   // Filter and view state
   const [statusFilter, setStatusFilter] = useState('all');
-  const [showFilters, setShowFilters] = useState(false);
   const [expandedFeedback, setExpandedFeedback] = useState(null);
 
-  // ✅ Enhanced load function with better error handling
+  // Load user data function
   const loadUserData = async () => {
     if (!userId) {
       console.log('⚠️ [FEEDBACK] No userId available');
@@ -69,14 +65,12 @@ const FeedBack = () => {
     try {
       console.log('🔍 [FEEDBACK] Loading data for user:', userId);
       
-      // Load feedbacks
       const feedbackResult = await getUserFeedbacks(userId);
       
       if (feedbackResult?.success) {
         console.log('✅ [FEEDBACK] Feedbacks loaded successfully');
       }
       
-      // Load stats if function exists
       if (getUserFeedbackStats) {
         try {
           const statsResult = await getUserFeedbackStats(userId);
@@ -84,7 +78,6 @@ const FeedBack = () => {
             setStats(statsResult.stats);
             console.log('📊 [FEEDBACK] Stats loaded:', statsResult.stats);
           } else {
-            // Fallback: Calculate stats from feedbacks array
             calculateStatsFromFeedbacks();
           }
         } catch (statsError) {
@@ -99,7 +92,7 @@ const FeedBack = () => {
     }
   };
 
-  // ✅ Helper function to calculate stats from feedbacks
+  // Calculate stats from feedbacks
   const calculateStatsFromFeedbacks = () => {
     if (feedbacks.length === 0) return;
 
@@ -125,7 +118,6 @@ const FeedBack = () => {
     });
   };
 
-  // ✅ Load user feedbacks and stats when user is available
   useEffect(() => {
     if (isAuthenticated && userId && !userLoading) {
       console.log('🔄 [FEEDBACK] User authenticated, loading data...');
@@ -133,14 +125,12 @@ const FeedBack = () => {
     }
   }, [isAuthenticated, userId, userLoading]);
 
-  // ✅ Recalculate stats when feedbacks change
   useEffect(() => {
     if (feedbacks.length > 0) {
       calculateStatsFromFeedbacks();
     }
   }, [feedbacks]);
 
-  // Clear success message after 3 seconds
   useEffect(() => {
     if (submitSuccess) {
       const timer = setTimeout(() => setSubmitSuccess(false), 3000);
@@ -148,7 +138,6 @@ const FeedBack = () => {
     }
   }, [submitSuccess]);
 
-  // Handle form input changes
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -157,7 +146,6 @@ const FeedBack = () => {
     }));
   };
 
-  // ✅ Enhanced form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.subject.trim() || !formData.message.trim()) return;
@@ -180,7 +168,6 @@ const FeedBack = () => {
         setShowNewFeedbackForm(false);
         setSubmitSuccess(true);
         
-        // Reload data
         await loadUserData();
         
         console.log('✅ [FEEDBACK] Feedback submitted successfully');
@@ -194,46 +181,40 @@ const FeedBack = () => {
     }
   };
 
-  // ✅ Enhanced status info with better styling
   const getStatusInfo = (status) => {
     const statusMap = {
       'pending': {
-        color: 'text-yellow-600 dark:text-yellow-400',
-        bg: 'bg-yellow-50 dark:bg-yellow-900/20',
-        border: 'border-yellow-200 dark:border-yellow-700',
+        color: isDark ? '#fbbf24' : '#d97706',
+        bg: isDark ? 'rgba(251, 191, 36, 0.1)' : 'rgba(217, 119, 6, 0.1)',
         icon: <IconClock size={14} />,
-        text: 'Pending Review',
-        dot: 'bg-yellow-500'
+        text: 'Pending',
+        dot: '#fbbf24'
       },
       'processed': {
-        color: 'text-blue-600 dark:text-blue-400',
-        bg: 'bg-blue-50 dark:bg-blue-900/20',
-        border: 'border-blue-200 dark:border-blue-700',
+        color: isDark ? '#3b82f6' : '#2563eb',
+        bg: isDark ? 'rgba(59, 130, 246, 0.1)' : 'rgba(37, 99, 235, 0.1)',
         icon: <IconMail size={14} />,
         text: 'Replied',
-        dot: 'bg-blue-500'
+        dot: '#3b82f6'
       },
       'completed': {
-        color: 'text-green-600 dark:text-green-400',
-        bg: 'bg-green-50 dark:bg-green-900/20',
-        border: 'border-green-200 dark:border-green-700',
+        color: isDark ? '#10b981' : '#059669',
+        bg: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(5, 150, 105, 0.1)',
         icon: <IconCheck size={14} />,
         text: 'Completed',
-        dot: 'bg-green-500'
+        dot: '#10b981'
       }
     };
 
     return statusMap[status] || {
-      color: 'text-gray-600 dark:text-gray-400',
-      bg: 'bg-gray-50 dark:bg-gray-900/20',
-      border: 'border-gray-200 dark:border-gray-700',
+      color: isDark ? '#6b7280' : '#4b5563',
+      bg: isDark ? 'rgba(107, 114, 128, 0.1)' : 'rgba(75, 85, 99, 0.1)',
       icon: <IconClock size={14} />,
       text: status || 'Unknown',
-      dot: 'bg-gray-500'
+      dot: '#6b7280'
     };
   };
 
-  // ✅ Enhanced time formatting
   const formatTimeAgo = (dateString) => {
     const date = new Date(dateString);
     const now = new Date();
@@ -243,71 +224,79 @@ const FeedBack = () => {
     const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
 
     if (diffInDays > 0) {
-      return `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`;
+      return `${diffInDays}d ago`;
     } else if (diffInHours > 0) {
-      return `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`;
+      return `${diffInHours}h ago`;
     } else if (diffInMinutes > 0) {
-      return `${diffInMinutes} minute${diffInMinutes > 1 ? 's' : ''} ago`;
+      return `${diffInMinutes}m ago`;
     } else {
       return 'Just now';
     }
   };
 
-  // Filter feedbacks
   const filteredFeedbacks = feedbacks.filter(feedback => 
     statusFilter === 'all' || feedback.status === statusFilter
   );
 
-  // ✅ FIXED: Better loading and authentication checks
+  // ✅ LOADING STATE
   if (userLoading) {
     return (
-      <div className={`min-h-screen flex items-center justify-center transition-all duration-300 ${
-        isDark 
-          ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900' 
-          : 'bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50'
-      }`}>
-        <div className="text-center space-y-4 p-8">
-          <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto shadow-xl">
-            <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
-          </div>
-          <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200">
+      <div className="min-h-screen flex items-center justify-center"
+           style={{ backgroundColor: isDark ? '#1F1F1F' : '#ffffff' }}>
+        <div className="text-center space-y-4">
+          <div className="w-8 h-8 rounded-full animate-spin mx-auto"
+               style={{ 
+                 border: `2px solid ${isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)'}`,
+                 borderTopColor: isDark ? '#ffffff' : '#000000'
+               }}></div>
+          <div className="text-sm"
+               style={{ color: isDark ? '#cccccc' : '#666666' }}>
             Loading...
-          </h2>
-          <p className="text-gray-600 dark:text-gray-400 max-w-md">
-            Please wait while we load your feedback system.
-          </p>
+          </div>
         </div>
       </div>
     );
   }
 
+  // ✅ AUTH ERROR STATE
   if (!isAuthenticated || !user) {
     return (
-      <div className={`min-h-screen flex items-center justify-center transition-all duration-300 ${
-        isDark 
-          ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900' 
-          : 'bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50'
-      }`}>
-        <div className="text-center space-y-4 p-8">
-          <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto shadow-xl">
-            <IconUser size={32} className="text-white" />
+      <div className="min-h-screen flex items-center justify-center p-4"
+           style={{ backgroundColor: isDark ? '#1F1F1F' : '#ffffff' }}>
+        <div className="text-center space-y-6 p-8 rounded-xl max-w-md w-full"
+             style={{ 
+               backgroundColor: isDark ? '#2D2D2D' : '#ffffff',
+               border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`
+             }}>
+          <div className="text-4xl">🔒</div>
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold"
+                style={{ color: isDark ? '#ffffff' : '#000000' }}>
+              Authentication Required
+            </h3>
+            <p className="text-sm"
+               style={{ color: isDark ? '#cccccc' : '#666666' }}>
+              Please log in to access the feedback system.
+            </p>
           </div>
-          <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200">
-            Authentication Required
-          </h2>
-          <p className="text-gray-600 dark:text-gray-400 max-w-md">
-            Please log in to access the feedback system and view your submitted feedback.
-          </p>
           <div className="flex gap-3 justify-center">
             <button
               onClick={() => navigate('/signin')}
-              className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg transform hover:scale-105"
+              className="px-6 py-2 font-medium rounded-lg transition-colors"
+              style={{ 
+                backgroundColor: isDark ? '#ffffff' : '#000000',
+                color: isDark ? '#000000' : '#ffffff'
+              }}
             >
               Sign In
             </button>
             <button
               onClick={() => navigate('/chat')}
-              className="px-6 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-all"
+              className="px-6 py-2 font-medium rounded-lg transition-colors"
+              style={{ 
+                backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+                color: isDark ? '#cccccc' : '#666666'
+              }}
             >
               Back to Chat
             </button>
@@ -318,113 +307,112 @@ const FeedBack = () => {
   }
 
   return (
-    <div className={`min-h-screen transition-all duration-300 ${
-      isDark 
-        ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900' 
-        : 'bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50'
-    }`}>
-      {/* Header with User Info */}
-     <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-b border-gray-200/50 dark:border-gray-700/50 sticky top-0 z-40">
-  <div className="max-w-6xl mx-auto px-6 py-4">
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        {/* ✅ Red Back Arrow Button */}
-        <button
-          onClick={() => navigate('/chat')}
-          className="p-2 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 rounded-lg transition-all shadow-sm hover:shadow-md transform hover:scale-105"
-          title="Back to Chat"
-        >
-          <IconArrowLeft size={18} />
-        </button>
-        
-        <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center shadow-md">
-          <IconMessageCircle size={18} className="text-white" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
-            Feedback & Support
-          </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Welcome <span className="font-medium text-blue-600 dark:text-blue-400">{user.name}</span> - Share your thoughts and get help from our team
-          </p>
-        </div>
-      </div>
+    <div className="min-h-screen"
+         style={{ backgroundColor: isDark ? '#1F1F1F' : '#ffffff' }}>
       
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => setShowFilters(!showFilters)}
-          className={`p-2 rounded-lg transition-colors ${
-            showFilters 
-              ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' 
-              : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400'
-          }`}
-          title="Toggle filters"
-        >
-          <IconFilter size={18} />
-        </button>
-        
-        <button
-          onClick={loadUserData}
-          disabled={loading}
-          className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-          title="Refresh feedbacks"
-        >
-          <IconRefresh size={18} className={`${loading ? 'animate-spin' : ''} text-gray-500 dark:text-gray-400`} />
-        </button>
-        
-        <button
-          onClick={() => setShowNewFeedbackForm(true)}
-          className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2 transform hover:scale-105"
-        >
-          <IconPlus size={16} />
-          New Feedback
-        </button>
-      </div>
-    </div>
+      {/* ✅ HEADER */}
+      <div className="border-b"
+           style={{ 
+             backgroundColor: isDark ? '#1F1F1F' : '#ffffff',
+             borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+           }}>
+        <div className="max-w-4xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => navigate('/chat')}
+                className="flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-70"
+                style={{ color: isDark ? '#cccccc' : '#666666' }}
+              >
+                <IconArrowLeft size={16} />
+                Back
+              </button>
 
-    {/* Filters Bar */}
-    {showFilters && (
-      <div className="mt-4 pt-4 border-t border-gray-200/50 dark:border-gray-700/50">
-        <div className="flex flex-wrap gap-2">
-          {['all', 'pending', 'processed'].map((status) => (
-            <button
-              key={status}
-              onClick={() => setStatusFilter(status)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                statusFilter === status
-                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md'
-                  : 'bg-white/70 dark:bg-gray-800/70 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200/50 dark:border-gray-700/50'
-              }`}
-            >
-              {status === 'all' ? 'All Feedback' : status.charAt(0).toUpperCase() + status.slice(1)}
-              {status !== 'all' && stats[status] > 0 && (
-                <span className="ml-2 px-2 py-0.5 bg-white/20 rounded-full text-xs">
-                  {stats[status]}
-                </span>
-              )}
-            </button>
-          ))}
+              <div>
+                <h1 className="text-lg font-semibold"
+                    style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                  Feedback
+                </h1>
+                <p className="text-sm"
+                   style={{ color: isDark ? '#cccccc' : '#666666' }}>
+                  Share your thoughts and get help
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={loadUserData}
+                disabled={loading}
+                className="p-2 rounded-lg transition-colors hover:opacity-70"
+                style={{ color: isDark ? '#cccccc' : '#666666' }}
+                title="Refresh"
+              >
+                <IconRefresh size={16} className={loading ? 'animate-spin' : ''} />
+              </button>
+
+              <button
+                onClick={toggleTheme}
+                className="p-2 rounded-lg transition-colors hover:opacity-70"
+                style={{ color: isDark ? '#cccccc' : '#666666' }}
+              >
+                {isDark ? <IconSun size={16} /> : <IconMoon size={16} />}
+              </button>
+
+              <button
+                onClick={() => setShowNewFeedbackForm(true)}
+                className="px-4 py-2 font-medium rounded-lg transition-colors flex items-center gap-2"
+                style={{ 
+                  backgroundColor: isDark ? '#ffffff' : '#000000',
+                  color: isDark ? '#000000' : '#ffffff'
+                }}
+              >
+                <IconPlus size={16} />
+                New Feedback
+              </button>
+            </div>
+          </div>
+
+          {/* Filter Tabs */}
+          <div className="flex gap-2 mt-4">
+            {['all', 'pending', 'processed', 'completed'].map((status) => (
+              <button
+                key={status}
+                onClick={() => setStatusFilter(status)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  statusFilter === status
+                    ? isDark ? 'bg-white text-black' : 'bg-black text-white'
+                    : isDark ? 'text-cccccc hover:bg-white/10' : 'text-666666 hover:bg-black/5'
+                }`}
+              >
+                {status === 'all' ? 'All' : status.charAt(0).toUpperCase() + status.slice(1)}
+                {status !== 'all' && stats[status] > 0 && (
+                  <span className="ml-2 px-2 py-0.5 rounded-full text-xs"
+                        style={{ backgroundColor: 'rgba(255, 255, 255, 0.2)' }}>
+                    {stats[status]}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
-    )}
-  </div>
-</div>
 
-
-      <div className="max-w-6xl mx-auto px-6 py-6">
+      <div className="max-w-4xl mx-auto px-6 py-6">
         
         {/* Success Message */}
         {submitSuccess && (
-          <div className="mb-6 p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border border-green-200 dark:border-green-700 rounded-xl flex items-center gap-3 animate-fade-in">
-            <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
-              <IconCheck size={16} className="text-white" />
-            </div>
+          <div className="mb-6 p-4 rounded-lg border flex items-center gap-3"
+               style={{ 
+                 backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(5, 150, 105, 0.1)',
+                 borderColor: '#10b981',
+                 color: isDark ? '#ffffff' : '#000000'
+               }}>
+            <IconCheck size={20} style={{ color: '#10b981' }} />
             <div>
-              <p className="text-green-800 dark:text-green-200 font-medium">
-                Feedback submitted successfully!
-              </p>
-              <p className="text-green-600 dark:text-green-400 text-sm">
-                We'll review your feedback and get back to you at {user.email} soon.
+              <p className="font-medium">Feedback submitted successfully!</p>
+              <p className="text-sm" style={{ color: isDark ? '#cccccc' : '#666666' }}>
+                We'll review your feedback and get back to you soon.
               </p>
             </div>
           </div>
@@ -432,182 +420,170 @@ const FeedBack = () => {
 
         {/* Error Message */}
         {error && (
-          <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl flex items-start gap-3 animate-fade-in">
-            <IconAlertCircle size={20} className="text-red-500 mt-0.5 flex-shrink-0" />
+          <div className="mb-6 p-4 rounded-lg border flex items-start gap-3"
+               style={{ 
+                 backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(220, 38, 38, 0.1)',
+                 borderColor: '#ef4444',
+                 color: isDark ? '#ffffff' : '#000000'
+               }}>
+            <IconAlertCircle size={20} style={{ color: '#ef4444' }} className="mt-0.5 flex-shrink-0" />
             <div className="flex-1">
-              <p className="text-red-800 dark:text-red-200 font-medium">
-                Something went wrong
-              </p>
-              <p className="text-red-600 dark:text-red-400 text-sm">
+              <p className="font-medium">Error</p>
+              <p className="text-sm" style={{ color: isDark ? '#cccccc' : '#666666' }}>
                 {error}
               </p>
             </div>
             <button
               onClick={clearError}
-              className="p-1 hover:bg-red-100 dark:hover:bg-red-800 rounded transition-colors"
+              className="p-1 rounded transition-colors hover:opacity-70"
             >
-              <IconX size={16} className="text-red-500" />
+              <IconX size={16} style={{ color: '#ef4444' }} />
             </button>
           </div>
         )}
 
-        {/* ✅ Enhanced Stats Cards with Real Data (Total, Pending, Replied, Completed) */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-xl p-5 border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Total</p>
-                <p className="text-2xl font-bold text-gray-800 dark:text-gray-200">
-                  {stats.total}
-                </p>
-                <p className="text-xs text-gray-500">All feedback</p>
-              </div>
-              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center shadow-md">
-                <IconMessageCircle size={20} className="text-white" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-xl p-5 border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Pending</p>
-                <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-                  {stats.pending}
-                </p>
-                <p className="text-xs text-gray-500">{stats.percentages?.pending || 0}% of total</p>
-              </div>
-              <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-900/30 rounded-xl flex items-center justify-center">
-                <IconClock size={20} className="text-yellow-600 dark:text-yellow-400" />
+        {/* Stats Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          {[
+            { label: 'Total', value: stats.total, icon: IconMessageCircle, color: isDark ? '#ffffff' : '#000000' },
+            { label: 'Pending', value: stats.pending, icon: IconClock, color: '#fbbf24' },
+            { label: 'Replied', value: stats.processed, icon: IconMail, color: '#3b82f6' },
+            { label: 'Completed', value: stats.completed, icon: IconCheck, color: '#10b981' }
+          ].map((stat, index) => (
+            <div
+              key={index}
+              className="p-4 rounded-lg border"
+              style={{ 
+                backgroundColor: isDark ? '#2D2D2D' : '#ffffff',
+                borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm" style={{ color: isDark ? '#cccccc' : '#666666' }}>
+                    {stat.label}
+                  </p>
+                  <p className="text-2xl font-bold" style={{ color: stat.color }}>
+                    {stat.value}
+                  </p>
+                </div>
+                <stat.icon size={24} style={{ color: stat.color }} />
               </div>
             </div>
-          </div>
-
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-xl p-5 border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Replied</p>
-                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                  {stats.processed}
-                </p>
-                <p className="text-xs text-gray-500">{stats.percentages?.processed || 0}% of total</p>
-              </div>
-              <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center">
-                <IconMail size={20} className="text-blue-600 dark:text-blue-400" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-xl p-5 border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Completed</p>
-                <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                  {stats.completed}
-                </p>
-                <p className="text-xs text-gray-500">{stats.percentages?.completed || 0}% of total</p>
-              </div>
-              <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-xl flex items-center justify-center">
-                <IconCheck size={20} className="text-green-600 dark:text-green-400" />
-              </div>
-            </div>
-          </div>
+          ))}
         </div>
 
         {/* New Feedback Form Modal */}
         {showNewFeedbackForm && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden transform animate-scale-in">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="w-full max-w-2xl rounded-2xl shadow-xl"
+                 style={{ 
+                   backgroundColor: isDark ? '#2D2D2D' : '#ffffff',
+                   border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`
+                 }}>
               
               {/* Form Header */}
-              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20">
-                <div className="flex items-center gap-3">
-                  <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-                    <IconEdit size={14} className="text-white" />
-                  </div>
-                  <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-                    Submit New Feedback
-                  </h2>
-                </div>
+              <div className="flex items-center justify-between p-6 border-b"
+                   style={{ borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
+                <h2 className="text-lg font-semibold"
+                    style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                  Submit Feedback
+                </h2>
                 <button
                   onClick={() => setShowNewFeedbackForm(false)}
-                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                  className="p-2 rounded-lg transition-colors hover:opacity-70"
+                  style={{ color: isDark ? '#cccccc' : '#666666' }}
                 >
-                  <IconX size={18} className="text-gray-500 dark:text-gray-400" />
+                  <IconX size={18} />
                 </button>
               </div>
 
               {/* Form Content */}
-              <form onSubmit={handleSubmit} className="p-6 space-y-6 max-h-[calc(90vh-120px)] overflow-y-auto">
+              <form onSubmit={handleSubmit} className="p-6 space-y-6">
                 
                 {/* Subject Field */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                    Subject <span className="text-red-500">*</span>
+                  <label className="block text-sm font-medium mb-2"
+                         style={{ color: isDark ? '#cccccc' : '#666666' }}>
+                    Subject *
                   </label>
-                  <div className="relative">
-                    <IconEdit size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                    <input
-                      type="text"
-                      name="subject"
-                      value={formData.subject}
-                      onChange={handleInputChange}
-                      placeholder="Brief description of your feedback"
-                      className="w-full pl-10 pr-16 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-800 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-400 transition-all"
-                      required
-                      maxLength={100}
-                    />
-                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
-                      {formData.subject.length}/100
-                    </div>
+                  <input
+                    type="text"
+                    name="subject"
+                    value={formData.subject}
+                    onChange={handleInputChange}
+                    placeholder="Brief description of your feedback"
+                    className="w-full p-3 rounded-lg border transition-colors"
+                    style={{ 
+                      backgroundColor: isDark ? '#1F1F1F' : '#ffffff',
+                      borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                      color: isDark ? '#ffffff' : '#000000'
+                    }}
+                    required
+                    maxLength={100}
+                  />
+                  <div className="text-xs mt-1" style={{ color: isDark ? '#888888' : '#888888' }}>
+                    {formData.subject.length}/100
                   </div>
                 </div>
 
                 {/* Message Field */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                    Message <span className="text-red-500">*</span>
+                  <label className="block text-sm font-medium mb-2"
+                         style={{ color: isDark ? '#cccccc' : '#666666' }}>
+                    Message *
                   </label>
-                  <div className="relative">
-                    <textarea
-                      name="message"
-                      value={formData.message}
-                      onChange={handleInputChange}
-                      placeholder="Please provide detailed feedback or describe any issues you're experiencing..."
-                      rows={6}
-                      className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-800 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-400 resize-none transition-all"
-                      required
-                      maxLength={1000}
-                    />
-                    <div className="absolute right-3 bottom-3 text-xs text-gray-400">
-                      {formData.message.length}/1000
-                    </div>
+                  <textarea
+                    name="message"
+                    value={formData.message}
+                    onChange={handleInputChange}
+                    placeholder="Please provide detailed feedback..."
+                    rows={6}
+                    className="w-full p-3 rounded-lg border transition-colors resize-none"
+                    style={{ 
+                      backgroundColor: isDark ? '#1F1F1F' : '#ffffff',
+                      borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                      color: isDark ? '#ffffff' : '#000000'
+                    }}
+                    required
+                    maxLength={1000}
+                  />
+                  <div className="text-xs mt-1" style={{ color: isDark ? '#888888' : '#888888' }}>
+                    {formData.message.length}/1000
                   </div>
                 </div>
 
                 {/* Form Actions */}
-                <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex items-center justify-end gap-3 pt-4">
                   <button
                     type="button"
                     onClick={() => setShowNewFeedbackForm(false)}
-                    className="px-6 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                    className="px-6 py-2 rounded-lg transition-colors"
+                    style={{ 
+                      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+                      color: isDark ? '#cccccc' : '#666666'
+                    }}
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting || !formData.subject.trim() || !formData.message.trim()}
-                    className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center gap-2 transform hover:scale-105 disabled:transform-none"
+                    className="px-6 py-2 rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
+                    style={{ 
+                      backgroundColor: isDark ? '#ffffff' : '#000000',
+                      color: isDark ? '#000000' : '#ffffff'
+                    }}
                   >
                     {isSubmitting ? (
                       <>
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
                         Submitting...
                       </>
                     ) : (
                       <>
                         <IconSend size={16} />
-                        Submit Feedback
+                        Submit
                       </>
                     )}
                   </button>
@@ -617,35 +593,45 @@ const FeedBack = () => {
           </div>
         )}
 
-        {/* ✅ Enhanced Feedbacks List with Better Formatting */}
+        {/* Feedbacks List */}
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="text-center space-y-3">
-              <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full animate-pulse" />
-              <p className="text-sm text-gray-600 dark:text-gray-400">Loading your feedbacks...</p>
+              <div className="w-8 h-8 rounded-full animate-spin mx-auto"
+                   style={{ 
+                     border: `2px solid ${isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)'}`,
+                     borderTopColor: isDark ? '#ffffff' : '#000000'
+                   }}></div>
+              <p className="text-sm" style={{ color: isDark ? '#cccccc' : '#666666' }}>
+                Loading your feedbacks...
+              </p>
             </div>
           </div>
         ) : filteredFeedbacks.length === 0 ? (
           <div className="text-center py-16">
-            <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl">
-              <IconMessageCircle size={32} className="text-white" />
-            </div>
-            <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-3">
+            <div className="text-6xl mb-6">💬</div>
+            <h3 className="text-xl font-semibold mb-3"
+                style={{ color: isDark ? '#ffffff' : '#000000' }}>
               {statusFilter === 'all' 
-                ? "No feedback submitted yet" 
-                : `No ${statusFilter} feedback found`
+                ? "No feedback yet" 
+                : `No ${statusFilter} feedback`
               }
             </h3>
-            <p className="text-gray-600 dark:text-gray-400 mb-8 max-w-md mx-auto leading-relaxed">
+            <p className="mb-8 max-w-md mx-auto"
+               style={{ color: isDark ? '#cccccc' : '#666666' }}>
               {statusFilter === 'all'
-                ? "Share your thoughts and help us improve your experience."
-                : `You don't have any ${statusFilter} feedback at the moment.`
+                ? "Share your thoughts and help us improve."
+                : `You don't have any ${statusFilter} feedback.`
               }
             </p>
             {statusFilter === 'all' && (
               <button
                 onClick={() => setShowNewFeedbackForm(true)}
-                className="px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg flex items-center gap-3 mx-auto transform hover:scale-105"
+                className="px-6 py-3 font-medium rounded-lg transition-colors flex items-center gap-2 mx-auto"
+                style={{ 
+                  backgroundColor: isDark ? '#ffffff' : '#000000',
+                  color: isDark ? '#000000' : '#ffffff'
+                }}
               >
                 <IconPlus size={20} />
                 Submit Your First Feedback
@@ -661,70 +647,83 @@ const FeedBack = () => {
               return (
                 <div
                   key={feedback._id}
-                  className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm rounded-2xl border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden"
+                  className="rounded-lg border transition-colors"
+                  style={{ 
+                    backgroundColor: isDark ? '#2D2D2D' : '#ffffff',
+                    borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+                  }}
                 >
                   {/* Header */}
                   <div 
-                    className="p-6 cursor-pointer"
+                    className="p-4 cursor-pointer"
                     onClick={() => setExpandedFeedback(isExpanded ? null : feedback._id)}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
-                          <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 line-clamp-1">
+                          <h3 className="font-semibold"
+                              style={{ color: isDark ? '#ffffff' : '#000000' }}>
                             {feedback.subject}
                           </h3>
-                          <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border ${statusInfo.bg} ${statusInfo.border} ${statusInfo.color}`}>
-                            <div className={`w-1.5 h-1.5 rounded-full ${statusInfo.dot}`} />
+                          <div className="inline-flex items-center gap-2 px-2 py-1 rounded-lg text-xs font-medium"
+                               style={{
+                                 backgroundColor: statusInfo.bg,
+                                 color: statusInfo.color
+                               }}>
+                            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: statusInfo.dot }} />
                             {statusInfo.text}
                           </div>
                         </div>
-                        <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        <div className="flex items-center gap-3 text-sm mb-2"
+                             style={{ color: isDark ? '#888888' : '#666666' }}>
                           <span>
-                            {new Date(feedback.createdAt).toLocaleDateString('en-US', {
-                              year: 'numeric',
-                              month: 'short',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
+                            {new Date(feedback.createdAt).toLocaleDateString()}
                           </span>
                           <span>•</span>
                           <span>{formatTimeAgo(feedback.createdAt)}</span>
                           {feedback.reply && (
                             <>
                               <span>•</span>
-                              <span className="text-blue-600 dark:text-blue-400 font-medium">Replied</span>
+                              <span style={{ color: '#3b82f6' }}>Replied</span>
                             </>
                           )}
                         </div>
                         {!isExpanded && (
-                          <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">
+                          <p className="text-sm line-clamp-2"
+                             style={{ color: isDark ? '#cccccc' : '#666666' }}>
                             {feedback.message}
                           </p>
                         )}
                       </div>
-                      <button className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors ml-4">
-                        <IconChevronDown 
-                          size={18} 
-                          className={`text-gray-400 transition-transform ${
-                            isExpanded ? 'rotate-180' : ''
-                          }`} 
-                        />
+                      <button className="p-2 rounded-lg transition-colors hover:opacity-70 ml-4">
+                        <svg 
+                          className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} 
+                          fill="none" 
+                          stroke="currentColor" 
+                          viewBox="0 0 24 24"
+                          style={{ color: isDark ? '#888888' : '#666666' }}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
                       </button>
                     </div>
                   </div>
 
                   {/* Expanded Content */}
                   {isExpanded && (
-                    <div className="px-6 pb-6 border-t border-gray-200/50 dark:border-gray-700/50">
+                    <div className="px-4 pb-4 border-t"
+                         style={{ borderTopColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
+                      
                       {/* Message */}
                       <div className="mt-4 mb-6">
-                        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                        <h4 className="text-sm font-medium mb-3"
+                            style={{ color: isDark ? '#cccccc' : '#666666' }}>
                           Your Message
                         </h4>
-                        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
-                          <p className="text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
+                        <div className="p-4 rounded-lg"
+                             style={{ backgroundColor: isDark ? '#1F1F1F' : '#f8f9fa' }}>
+                          <p className="whitespace-pre-wrap"
+                             style={{ color: isDark ? '#ffffff' : '#000000' }}>
                             {feedback.message}
                           </p>
                         </div>
@@ -733,12 +732,18 @@ const FeedBack = () => {
                       {/* Reply */}
                       {feedback.reply && (
                         <div>
-                          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                          <h4 className="text-sm font-medium mb-3 flex items-center gap-2"
+                              style={{ color: isDark ? '#cccccc' : '#666666' }}>
                             <IconUser size={16} />
                             Support Team Reply
                           </h4>
-                          <div className="bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 rounded-xl p-4 border border-green-200 dark:border-green-700">
-                            <p className="text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
+                          <div className="p-4 rounded-lg border"
+                               style={{ 
+                                 backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(5, 150, 105, 0.1)',
+                                 borderColor: '#10b981'
+                               }}>
+                            <p className="whitespace-pre-wrap"
+                               style={{ color: isDark ? '#ffffff' : '#000000' }}>
                               {feedback.reply}
                             </p>
                           </div>

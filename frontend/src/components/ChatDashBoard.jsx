@@ -9,17 +9,15 @@ import axios from "axios";
 import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 import { useChat } from '../context/ChatContext';
 import { useTheme } from '../context/ThemeContext';
-import { useAuth } from '@clerk/clerk-react'; // ✅ ADD CLERK AUTH
+import { useAuth } from '@clerk/clerk-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import '../styles/animations.css';
 
-const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) => {
+const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete, onMobileMenuToggle }) => {
   // ✅ CLERK AUTH INTEGRATION
   const { getToken, userId: clerkUserId, isSignedIn } = useAuth();
   
-  // Constants
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
 
   // ✅ GET CLERK TOKEN HELPER
@@ -30,7 +28,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
     try {
       const token = await getToken();
-      console.log('🔑 [CHAT DASHBOARD] Got Clerk token:', token ? 'Present' : 'Missing');
       return token;
     } catch (error) {
       console.error('❌ [CHAT DASHBOARD] Failed to get Clerk token:', error);
@@ -39,7 +36,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   }, [getToken, isSignedIn]);
 
   // THEME CONTEXT
-  const { theme, isDark, toggleTheme, isTransitioning } = useTheme();
+  const { isDark, toggleTheme } = useTheme();
 
   // STATE MANAGEMENT
   const [input, setInput] = useState("");
@@ -51,20 +48,11 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const [uploadResult, setUploadResult] = useState(null);
   const [isAIStreaming, setIsAIStreaming] = useState(false);
   const [activeFileContext, setActiveFileContext] = useState(null);
-
-  // STATE FOR COPY-PASTE FUNCTIONALITY
   const [pastedImage, setPastedImage] = useState(null);
   const [pastePreview, setPastePreview] = useState(null);
   const [showPasteIndicator, setShowPasteIndicator] = useState(false);
-
-  // STATE FOR DOCUMENT SUPPORT
-  const [dragOver, setDragOver] = useState(false);
   const [fileValidationError, setFileValidationError] = useState(null);
-  const [uploadProgress, setUploadProgress] = useState(0);
-
-  // STATE FOR DEDUPLICATION
-  const [duplicateCheck, setDuplicateCheck] = useState(null);
-  const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -79,7 +67,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     chatContextAvailable = false;
   }
 
-  // DESTRUCTURE CONTEXT VALUES
   const {
     currentSessionId: contextSessionId,
     setSession,
@@ -90,69 +77,23 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     isConnected,
     fetchSessionMessages,
     isSessionStreaming,
-    initializeContext,
-    reconnect,
     detectFileType,
-    validateFile,
-    supportedFileTypes,
-    getSessionStats,
-    clearSessionCache,
-    aiServiceHealth,
-    generateFileHash,
-    checkDuplicateFile,
-    getDuplicateStats,
-    cleanupDuplicates,
-    contextStats,
-    getContextStats,
-    clearSessionContext,
-    fetchContextStats
+    validateFile
   } = chatContext || {};
 
   // FALLBACK MESSAGE FETCHING
   const [fallbackMessages, setFallbackMessages] = useState([]);
   const [isFetchingFallback, setIsFetchingFallback] = useState(false);
 
-  // CONNECTION STATUS
   const actualIsConnected = chatContextAvailable ? (isConnected ?? false) : false;
   const activeSessionId = selectedSession || currentSessionId;
 
-  const handleClearContext = useCallback(async (sessionId) => {
-    if (!clearSessionContext) {
-      console.warn('⚠️ [CONTEXT] clearSessionContext function not available');
-      setFileValidationError('Context clearing is not available. Please refresh the page.');
-      return;
-    }
-
-    try {
-      console.log('🗑️ [CONTEXT] Clearing context for session:', sessionId.substring(0, 8) + '...');
-      
-      const success = await clearSessionContext(sessionId);
-      if (success) {
-        console.log('✅ [CONTEXT] Context cleared successfully');
-        
-        if (fetchContextStats) {
-          await fetchContextStats(sessionId);
-        }
-        
-        setShowPasteIndicator(true);
-        setTimeout(() => setShowPasteIndicator(false), 2000);
-        
-      } else {
-        console.error('❌ [CONTEXT] Failed to clear context');
-        setFileValidationError('Failed to clear context. Please try again.');
-      }
-    } catch (error) {
-      console.error('❌ [CONTEXT] Error clearing context:', error);
-      setFileValidationError(`Error clearing context: ${error.message}`);
-    }
-  }, [clearSessionContext, fetchContextStats]);
-
-  // ENHANCED FILE TYPE DETECTION
+  // ✅ ENHANCED FILE TYPE DETECTION
   const getFileIcon = useCallback((fileType, fileName) => {
     const type = detectFileType ? detectFileType(null, fileName, fileType) : 'unknown';
     switch (type) {
       case 'image':
-        return <IconClipboard size={16} className="text-purple-500" />;
+        return <IconClipboard size={16} className="text-blue-500" />;
       case 'document':
         if (fileName?.toLowerCase().endsWith('.pdf') || fileType?.includes('pdf')) {
           return <IconFile size={16} className="text-red-500" />;
@@ -165,83 +106,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         return <IconPaperclip size={16} className="text-gray-500" />;
     }
   }, [detectFileType]);
-
-  const getImageContextText = useCallback(() => {
-    if (!activeFileContext?.imageAnalysis) return "";
-    return `\n--- IMAGE CONTEXT ---\nImage: ${activeFileContext.fileName}\nPrevious Analysis: ${activeFileContext.imageAnalysis}\n---\n`;
-  }, [activeFileContext]);
-
-  // ENHANCED FILE VALIDATION
-  const validateFileBeforeUpload = useCallback(async (file) => {
-    if (!file) return { isValid: false, error: 'No file selected' };
-    setFileValidationError(null);
-    setDuplicateCheck(null);
-    setShowDuplicateWarning(false);
-    try {
-      if (validateFile) {
-        const validation = await validateFile(file);
-        if (!validation.isValid) {
-          setFileValidationError(validation.error);
-          return validation;
-        }
-      }
-      if (generateFileHash && checkDuplicateFile) {
-        const fileHash = await generateFileHash(file);
-        if (fileHash) {
-          const duplicateResult = await checkDuplicateFile(fileHash);
-          if (duplicateResult.success && duplicateResult.isDuplicate) {
-            setDuplicateCheck({
-              isDuplicate: true,
-              existingFile: duplicateResult.existingFile,
-              fileHash
-            });
-            setShowDuplicateWarning(true);
-            return { 
-              isValid: true, 
-              isDuplicate: true, 
-              existingFile: duplicateResult.existingFile,
-              warning: 'This file already exists in your uploads. Using existing version will save bandwidth.'
-            };
-          } else {
-            setDuplicateCheck({ isDuplicate: false, fileHash });
-          }
-        }
-      }
-      return { isValid: true, detectedType: 'unknown' };
-    } catch (error) {
-      const errorMsg = `Validation failed: ${error.message}`;
-      setFileValidationError(errorMsg);
-      return { isValid: false, error: errorMsg };
-    }
-  }, [validateFile, generateFileHash, checkDuplicateFile]);
-
-  // DRAG AND DROP HANDLERS
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(true);
-  }, []);
-  
-  const handleDragLeave = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(false);
-  }, []);
-  
-  const handleDrop = useCallback(async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(false);
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      const droppedFile = files[0];
-      const validation = await validateFileBeforeUpload(droppedFile);
-      if (validation.isValid) {
-        setFile(droppedFile);
-        if (pastedImage) clearPastedImage();
-      }
-    }
-  }, [validateFileBeforeUpload, pastedImage]);
 
   // IMAGE PASTE UTILITY FUNCTIONS
   const createFileFromBlob = (blob, filename = 'pasted-image.png') => {
@@ -261,17 +125,14 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     const clipboardData = e.clipboardData || window.clipboardData;
     if (!clipboardData) return;
     const items = clipboardData.items;
-    let imageFound = false;
+    
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (item.type.indexOf('image') !== -1) {
         e.preventDefault();
-        imageFound = true;
         const blob = item.getAsFile();
         if (blob) {
           const imageFile = createFileFromBlob(blob, `pasted-image-${Date.now()}.png`);
-          const validation = await validateFileBeforeUpload(imageFile);
-          if (!validation.isValid) return;
           const previewUrl = await createImagePreview(imageFile);
           setPastedImage(imageFile);
           setPastePreview(previewUrl);
@@ -282,7 +143,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         }
       }
     }
-  }, [createImagePreview, validateFileBeforeUpload]);
+  }, [createImagePreview]);
 
   // KEYBOARD SHORTCUTS
   const handleKeyDown = useCallback((e) => {
@@ -309,21 +170,12 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     if (!inputElement) return;
     inputElement.addEventListener('paste', handlePaste);
     inputElement.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('dragover', handleDragOver);
-    document.addEventListener('dragleave', handleDragLeave);
-    document.addEventListener('drop', handleDrop);
-    document.addEventListener('paste', handlePaste);
-    document.addEventListener('keydown', handleKeyDown);
+    
     return () => {
       inputElement.removeEventListener('paste', handlePaste);
       inputElement.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('dragover', handleDragOver);
-      document.removeEventListener('dragleave', handleDragLeave);
-      document.removeEventListener('drop', handleDrop);
-      document.removeEventListener('paste', handlePaste);
-      document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [handlePaste, handleKeyDown, handleDragOver, handleDragLeave, handleDrop]);
+  }, [handlePaste, handleKeyDown]);
 
   // ✅ UPDATED FALLBACK FETCH FUNCTION WITH CLERK TOKEN
   const fetchMessagesViaHTTP = useCallback(async (sessionId) => {
@@ -331,7 +183,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     
     try {
       setIsFetchingFallback(true);
-      const token = await getAuthToken(); // ✅ USE CLERK TOKEN
+      const token = await getAuthToken();
       if (!token) {
         console.warn('⚠️ [FETCH] No auth token available');
         return [];
@@ -354,14 +206,13 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     } catch (error) {
       console.error('❌ [FETCH] Error fetching messages:', error);
       setFallbackMessages([]);
-      if (chatContextAvailable && reconnect) reconnect();
       return [];
     } finally {
       setIsFetchingFallback(false);
     }
-  }, [backendUrl, getAuthToken, chatContextAvailable, reconnect, setSessionMessages]);
+  }, [backendUrl, getAuthToken, chatContextAvailable, setSessionMessages]);
 
-  // ENHANCED INITIALIZE SESSION WITH CONTEXT STATS
+  // INITIALIZE SESSION
   useEffect(() => {
     const initializeSession = async () => {
       if (selectedSession && selectedSession !== 'null' && selectedSession !== 'undefined') {
@@ -372,10 +223,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           if ((!messages || messages.length === 0) && chatContextAvailable && fetchSessionMessages) {
             await fetchSessionMessages(selectedSession);
           }
-          
-          if (chatContextAvailable && fetchContextStats) {
-            await fetchContextStats(selectedSession);
-          }
         } catch (error) {
           console.warn('⚠️ [INIT] Session initialization warning:', error);
         }
@@ -383,9 +230,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       setHasInitialized(true);
     };
     if (!hasInitialized) initializeSession();
-  }, [selectedSession, hasInitialized, chatContextAvailable, fetchMessagesViaHTTP, setSession, fetchSessionMessages, fetchContextStats]);
+  }, [selectedSession, hasInitialized, chatContextAvailable, fetchMessagesViaHTTP, setSession, fetchSessionMessages]);
 
-  // ENHANCED WATCH FOR SESSION CHANGES WITH CONTEXT
+  // WATCH FOR SESSION CHANGES
   useEffect(() => {
     if (selectedSession && selectedSession !== currentSessionId) {
       setFallbackMessages([]);
@@ -395,12 +242,8 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       if (chatContextAvailable && setSession) setSession(selectedSession);
       fetchMessagesViaHTTP(selectedSession);
       if (chatContextAvailable && fetchSessionMessages) fetchSessionMessages(selectedSession);
-      
-      if (chatContextAvailable && fetchContextStats) {
-        fetchContextStats(selectedSession);
-      }
     }
-  }, [selectedSession, currentSessionId, chatContextAvailable, setSession, fetchMessagesViaHTTP, fetchSessionMessages, clearPastedImage, fetchContextStats]);
+  }, [selectedSession, currentSessionId, chatContextAvailable, setSession, fetchMessagesViaHTTP, fetchSessionMessages, clearPastedImage]);
 
   // GET CURRENT MESSAGES
   const actualMessages = useMemo(() => {
@@ -422,75 +265,63 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   const [isManuallyEditing, setIsManuallyEditing] = useState(false);
   const [hasStoppedListening, setHasStoppedListening] = useState(false);
 
-  // USER MESSAGE COMPONENT
-  const UserMessage = ({ message, timestamp, status, fileUrl, type, fileType, fileName, isDuplicate, hasTextExtraction, extractedTextLength }) => {
-    const detectedType = detectFileType ? detectFileType(fileUrl, fileName, fileType) : 'unknown';
-    
+  // ✅ MINIMAL USER MESSAGE COMPONENT
+  const UserMessage = ({ message, timestamp, status, fileUrl, fileName, fileType }) => {
     return (
-      <div className="flex justify-end mb-4 animate-fade-in px-4">
-        <div className="flex items-start gap-2 max-w-[85%]">
-          <div className={`px-4 py-3 rounded-2xl shadow-sm transition-all duration-300 ${
-            status === 'failed'
-              ? 'bg-red-500/10 text-red-600 border border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800'
-              : 'bg-gradient-to-br from-blue-600 to-purple-600 text-white shadow-lg'
-          }`}>
+      <div className="flex justify-end mb-4 px-4">
+        <div className="flex items-start gap-3 max-w-[70%]">
+          <div className="px-4 py-3 rounded-2xl"
+               style={{ 
+                 backgroundColor: isDark ? '#333333' : '#000000',
+                 color: '#ffffff'
+               }}>
             <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
               {message}
             </div>
             
             {fileUrl && (
               <div className="mt-3 pt-2 border-t border-white/20">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 p-2 bg-white/10 rounded-lg">
-                    {getFileIcon(fileType, fileName)}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs text-white/90 font-medium truncate">
-                        {fileName || 'File'}
-                      </div>
-                      <div className="text-xs text-white/70">
-                        {fileType || 'File'}
-                        {hasTextExtraction && (
-                          <span className="ml-2 text-green-300">
-                            • {extractedTextLength} chars
-                          </span>
-                        )}
-                      </div>
+                <div className="flex items-center gap-2 p-2 bg-white/10 rounded-lg">
+                  {getFileIcon(fileType, fileName)}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-white/90 font-medium truncate">
+                      {fileName || 'File'}
                     </div>
-                    <a 
-                      href={fileUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="p-1 hover:bg-white/10 rounded transition-colors"
-                      title="Download file"
-                    >
-                      <IconDownload size={14} className="text-white/70" />
-                    </a>
+                    <div className="text-xs text-white/70">
+                      {fileType || 'File'}
+                    </div>
                   </div>
+                  <a 
+                    href={fileUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="p-1 hover:bg-white/10 rounded transition-colors"
+                    title="Download file"
+                  >
+                    <IconDownload size={14} className="text-white/70" />
+                  </a>
                 </div>
               </div>
             )}
             
-            <div className="text-xs text-white/70 mt-2">
-              {timestamp && !isNaN(new Date(timestamp).getTime())
-                ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                : ""}
-            </div>
+            {timestamp && (
+              <div className="text-xs text-white/70 mt-2">
+                {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </div>
+            )}
           </div>
           
-          <div className="flex-shrink-0 w-7 h-7 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center shadow-md">
-            <IconUser size={14} className="text-white" />
+          <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center"
+               style={{ backgroundColor: isDark ? '#333333' : '#f5f5f5' }}>
+            <IconUser size={16} style={{ color: isDark ? '#ffffff' : '#000000' }} />
           </div>
         </div>
       </div>
     );
   };
 
-  // AI MESSAGE COMPONENT WITH IMAGE CONTEXT INTEGRATION
-  const AiMessage = ({ message, timestamp, fileUrl, fileType, isStreaming = false, type, processingInfo, completedBy, metadata }) => {
-    const isImageResponse = type === 'image' || completedBy === 'BLIP';
-    const isDocumentResponse = type === 'document';
-
-    // Clean message
+  // ✅ MINIMAL AI MESSAGE COMPONENT
+  const AiMessage = ({ message, timestamp, isStreaming = false }) => {
     const displayMessage = useMemo(() => {
       if (!message) return '';
       if (typeof message === 'object' && message.message) return message.message;
@@ -506,56 +337,68 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }, [message]);
 
     return (
-      <div className="flex items-start gap-2 mb-4 animate-fade-in px-4">
-        <div className="flex-shrink-0 w-7 h-7 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-full flex items-center justify-center shadow-md">
-          <IconRobot size={14} className="text-white" />
+      <div className="flex items-start gap-3 mb-4 px-4">
+        <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center"
+             style={{ backgroundColor: isDark ? '#333333' : '#f5f5f5' }}>
+          <IconRobot size={16} style={{ color: isDark ? '#ffffff' : '#000000' }} />
         </div>
         
-        <div className="flex-1 max-w-[85%]">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl px-4 py-3 shadow-sm border border-gray-200 dark:border-gray-700">
+        <div className="flex-1 max-w-[70%]">
+          <div className="rounded-2xl px-4 py-3"
+               style={{ 
+                 backgroundColor: isDark ? '#2D2D2D' : '#f5f5f5',
+                 color: isDark ? '#ffffff' : '#000000'
+               }}>
             {isStreaming && (!displayMessage || displayMessage.length === 0) ? (
               <div className="flex items-center gap-3">
-                <div className="typing-indicator">
-                  <span />
-                  <span />
-                  <span />
+                <div className="flex gap-1">
+                  <div className="w-2 h-2 rounded-full animate-pulse"
+                       style={{ backgroundColor: isDark ? '#666666' : '#999999' }}></div>
+                  <div className="w-2 h-2 rounded-full animate-pulse"
+                       style={{ 
+                         backgroundColor: isDark ? '#666666' : '#999999',
+                         animationDelay: '0.2s'
+                       }}></div>
+                  <div className="w-2 h-2 rounded-full animate-pulse"
+                       style={{ 
+                         backgroundColor: isDark ? '#666666' : '#999999',
+                         animationDelay: '0.4s'
+                       }}></div>
                 </div>
-                <span className="text-sm text-gray-500 dark:text-gray-400">
+                <span className="text-sm">
                   AI is thinking...
                 </span>
               </div>
             ) : (
-              <div className="space-y-2">
-                <div className="prose prose-sm max-w-none text-gray-800 dark:text-gray-200">
-                  <ReactMarkdown
-                    components={{
-                      p: ({children}) => <p className="mb-1 leading-relaxed">{children}</p>,
-                      code: ({node, inline, className, children, ...props}) => {
-                        const match = /language-(\w+)/.exec(className || '');
-                        return !inline && match ? (
-                          <SyntaxHighlighter style={oneDark} language={match[1]} PreTag="div" {...props}>
-                            {String(children).replace(/\n$/, '')}
-                          </SyntaxHighlighter>
-                        ) : (
-                          <code className={className} {...props}>{children}</code>
-                        );
-                      }
-                    }}
-                  >
-                    {displayMessage}
-                  </ReactMarkdown>
+              <div className="prose prose-sm max-w-none">
+                <ReactMarkdown
+                  components={{
+                    p: ({children}) => <p className="mb-1 leading-relaxed">{children}</p>,
+                    code: ({node, inline, className, children, ...props}) => {
+                      const match = /language-(\w+)/.exec(className || '');
+                      return !inline && match ? (
+                        <SyntaxHighlighter style={oneDark} language={match[1]} PreTag="div" {...props}>
+                          {String(children).replace(/\n$/, '')}
+                        </SyntaxHighlighter>
+                      ) : (
+                        <code className={className} {...props}>{children}</code>
+                      );
+                    }
+                  }}
+                >
+                  {displayMessage}
+                </ReactMarkdown>
 
-                  {/* Streaming cursor */}
-                  {isStreaming && displayMessage && displayMessage.length > 0 && (
-                    <span className="animate-pulse ml-0.5 text-gray-400">▍</span>
-                  )}
-                </div>
+                {isStreaming && displayMessage && displayMessage.length > 0 && (
+                  <span className="animate-pulse ml-0.5">▍</span>
+                )}
               </div>
             )}
           </div>
           
           {!isStreaming && timestamp && (
-            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 px-1">
+            <div className="text-xs mt-1 px-1"
+                 style={{ color: isDark ? '#888888' : '#666666' }}>
               {new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </div>
           )}
@@ -597,7 +440,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   }, [listening]);
 
-  // ✅ ENHANCED FILE UPLOAD HANDLER WITH CLERK TOKEN
+  // ✅ FILE UPLOAD HANDLER WITH CLERK TOKEN
   const handleFileSelect = async (e) => {
     const selectedFile = e.target.files[0];
     if (!selectedFile) return;
@@ -605,10 +448,9 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     setFile(selectedFile);
     setIsUploading(true);
     setFileValidationError(null);
-    setUploadProgress(0);
     
     try {
-      const token = await getAuthToken(); // ✅ USE CLERK TOKEN
+      const token = await getAuthToken();
       if (!token) {
         setFileValidationError('Authentication required. Please sign in again.');
         setIsUploading(false);
@@ -620,32 +462,25 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       
       const response = await axios.post(`${backendUrl}/api/chat/upload`, formData, {
         headers: {
-          'Authorization': `Bearer ${token}`, // ✅ USE CLERK TOKEN
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'multipart/form-data',
-        },
-        onUploadProgress: (progressEvent) => {
-          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          setUploadProgress(percentCompleted);
-        },
+        }
       });
       
       setUploadResult(response.data);
       
-      // Establish context for both images and documents
       if (response.data && response.data.extractedText) {
-        // Document context
         setActiveFileContext({
           extractedText: response.data.extractedText,
           fileUrl: response.data.fileUrl,
           fileName: response.data.fileName,
         });
       } else if (/\.(png|jpe?g|gif|bmp|webp)$/i.test(response.data.fileName || "")) {
-        // Image context - will be populated after BLIP analysis
         setActiveFileContext({
           fileUrl: response.data.fileUrl,
           fileName: response.data.fileName,
           fileType: response.data.fileType || 'image',
-          imageAnalysis: null // Will be filled by AI response
+          imageAnalysis: null
         });
       }
       
@@ -662,17 +497,16 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     }
   };
 
-  // ✅ ENHANCED HANDLE SUBMIT WITH CLERK TOKEN
+  // ✅ HANDLE SUBMIT WITH CLERK TOKEN
   const handleSubmit = async (e) => {
     e.preventDefault();
     setInput("");
     let finalInput = input.trim();
 
     // Handle pasted image upload
-    let pastedImageUploadResult = null;
     if (pastedImage) {
       try {
-        const token = await getAuthToken(); // ✅ USE CLERK TOKEN
+        const token = await getAuthToken();
         if (!token) {
           setFileValidationError('Authentication required. Please sign in again.');
           return;
@@ -683,11 +517,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         
         const response = await axios.post(`${backendUrl}/api/chat/upload`, formData, {
           headers: {
-            'Authorization': `Bearer ${token}`, // ✅ USE CLERK TOKEN
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'multipart/form-data',
           }
         });
-        pastedImageUploadResult = response.data;
         setUploadResult(response.data);
         setPastedImage(null);
         setPastePreview(null);
@@ -703,7 +536,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       }
     }
 
-    // If no text input but a file is uploaded, set a default message
     if (!finalInput && uploadResult) {
       if (uploadResult.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i)) {
         finalInput = `Uploaded document: ${uploadResult.fileName}`;
@@ -722,12 +554,10 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       return;
     }
 
-    // ENHANCED FILE TYPE DETECTION AND CONTEXT HANDLING
     let fileContext = null;
     let messageType = 'text';
     
     if (uploadResult && uploadResult.fileUrl) {
-      // PROPER FILE TYPE DETECTION
       const isImage = uploadResult.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
       const isDocument = uploadResult.fileName?.toLowerCase().match(/\.(pdf|docx?|txt)$/i);
       
@@ -738,15 +568,12 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           fileType: 'image',
         };
         messageType = 'image';
-        
-        // ESTABLISH IMAGE CONTEXT
         setActiveFileContext({
           fileUrl: uploadResult.fileUrl,
           fileName: uploadResult.fileName,
           fileType: 'image',
-          imageAnalysis: null // Will be filled by BLIP response
+          imageAnalysis: null
         });
-        
       } else if (isDocument && uploadResult.extractedText) {
         fileContext = {
           extractedText: uploadResult.extractedText,
@@ -758,10 +585,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         setActiveFileContext(fileContext);
       }
     } else if (activeFileContext) {
-      // HANDLE EXISTING CONTEXT (for follow-up messages)
       fileContext = activeFileContext;
-      
-      // DETERMINE TYPE FROM CONTEXT
       const isImage = activeFileContext.fileType === 'image' || 
                      activeFileContext.fileName?.toLowerCase().match(/\.(png|jpe?g|gif|bmp|webp)$/i);
       const isDocument = activeFileContext.extractedText || 
@@ -774,24 +598,18 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       }
     }
 
-    // Optimistically add user message
     const optimisticUserMsg = {
       _id: `user-${Date.now()}`,
-      sender: clerkUserId, // ✅ USE CLERK USER ID
+      sender: clerkUserId,
       message: finalInput,
       timestamp: new Date().toISOString(),
       fileUrl: fileContext?.fileUrl || null,
       fileName: fileContext?.fileName || null,
       type: messageType,
-      hasTextExtraction: !!fileContext?.extractedText,
-      extractedTextLength: fileContext?.extractedText?.length || 0,
-      status: 'sending',
-      contextEnabled: true,
-      willUseContext: true
+      status: 'sending'
     };
     if (addMessageToSession) addMessageToSession(activeSessionId, optimisticUserMsg);
 
-    // ENHANCED: Build message data with PERSISTENT context info
     const messageData = {
       sessionId: activeSessionId,
       message: finalInput,
@@ -801,36 +619,13 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       fileType: messageType,
       extractedText: messageType === 'document' ? fileContext?.extractedText : null,
       contextEnabled: true,
-      // ✅ ADD THESE MISSING FIELDS FOR IMAGE CONTEXT:
       hasActiveContext: !!activeFileContext,
       contextType: activeFileContext?.fileType || null,
       imageAnalysis: activeFileContext?.imageAnalysis || null,
-      // ✅ CRITICAL: Ensure image URL is passed for follow-up messages
       contextFileUrl: activeFileContext?.fileUrl || null,
       contextFileName: activeFileContext?.fileName || null,
-      isFollowUpMessage: !!activeFileContext && !fileContext?.fileUrl // This is a follow-up to existing context
+      isFollowUpMessage: !!activeFileContext && !fileContext?.fileUrl
     };
-
-    console.log('🖼️ [FRONTEND DEBUG] Sending message with image context:', {
-      type: messageData.type,
-      hasActiveContext: messageData.hasActiveContext,
-      contextType: messageData.contextType,
-      hasContextFileUrl: !!messageData.contextFileUrl,
-      isFollowUp: messageData.isFollowUpMessage
-    });
-
-    // Debugging: Log the complete message payload
-    console.log('🔍 [DEBUG] Complete message payload being sent:', {
-      sessionId: messageData.sessionId,
-      message: messageData.message,
-      type: messageData.type,
-      fileUrl: messageData.fileUrl,
-      contextFileUrl: messageData.contextFileUrl,
-      hasActiveContext: messageData.hasActiveContext,
-      contextType: messageData.contextType,
-      isFollowUpMessage: messageData.isFollowUpMessage,
-      activeFileContext: activeFileContext
-    });
 
     setIsAIStreaming(true);
 
@@ -839,7 +634,6 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       if (sendMessage) {
         response = await sendMessage(messageData);
       } else {
-        // ✅ FALLBACK HTTP REQUEST WITH CLERK TOKEN
         const token = await getAuthToken();
         if (!token) {
           setFileValidationError('Authentication required. Please sign in again.');
@@ -847,7 +641,7 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         }
 
         response = await axios.post(`${backendUrl}/api/chat/send`, messageData, {
-          headers: { 'Authorization': `Bearer ${token}` } // ✅ USE CLERK TOKEN
+          headers: { 'Authorization': `Bearer ${token}` }
         });
       }
 
@@ -863,39 +657,32 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
             fileUrl: aiMsg.fileUrl,
             fileName: aiMsg.fileName,
             type: aiMsg.type,
-            completedBy: aiMsg.completedBy,
-            hasTextExtraction: aiMsg.hasTextExtraction,
-            extractedTextLength: aiMsg.textLength,
-            metadata: aiMsg.metadata,
             status: 'sent'
           });
         }
       }
 
-      // ✅ UPDATE SESSION TITLE WITH FIRST MESSAGE (WITH CLERK TOKEN)
+      // Update session title with first message
       const sessionMessages = getCurrentSessionMessages ? getCurrentSessionMessages() : [];
       const userMessages = sessionMessages.filter(msg => msg.sender !== 'AI' && msg.sender !== 'ai');
 
-      if (userMessages.length <= 1) { // This is the first user message
+      if (userMessages.length <= 1) {
         const titleText = finalInput.length > 50 
           ? finalInput.substring(0, 50) + '...' 
           : finalInput;
         
         try {
-          const token = await getAuthToken(); // ✅ USE CLERK TOKEN
+          const token = await getAuthToken();
           if (token) {
             await axios.patch(`${backendUrl}/api/chat/session/${activeSessionId}`, {
               title: titleText
             }, {
-              headers: { 'Authorization': `Bearer ${token}` } // ✅ USE CLERK TOKEN
+              headers: { 'Authorization': `Bearer ${token}` }
             });
             
-            // Dispatch event to update UI
             window.dispatchEvent(new CustomEvent('sessionTitleUpdated', {
               detail: { sessionId: activeSessionId, title: titleText }
             }));
-            
-            console.log('✅ [TITLE UPDATE] Session title updated to:', titleText);
           }
         } catch (titleError) {
           console.warn('⚠️ [TITLE UPDATE] Failed to update session title:', titleError);
@@ -932,15 +719,18 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
   // ✅ EARLY RETURN IF NOT SIGNED IN
   if (!isSignedIn) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex items-center justify-center h-screen"
+           style={{ backgroundColor: isDark ? '#1F1F1F' : '#ffffff' }}>
         <div className="text-center space-y-4">
-          <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-xl mx-auto">
-            <IconRobot size={32} className="text-white" />
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-xl mx-auto"
+               style={{ backgroundColor: isDark ? '#333333' : '#f5f5f5' }}>
+            <IconRobot size={32} style={{ color: isDark ? '#ffffff' : '#000000' }} />
           </div>
-          <h2 className="text-xl font-bold text-gray-800 dark:text-gray-200">
+          <h2 className="text-xl font-bold"
+              style={{ color: isDark ? '#ffffff' : '#000000' }}>
             Authentication Required
           </h2>
-          <p className="text-gray-600 dark:text-gray-400">
+          <p style={{ color: isDark ? '#cccccc' : '#666666' }}>
             Please sign in to access the chat dashboard.
           </p>
         </div>
@@ -948,36 +738,18 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
     );
   }
 
-  // MAIN RENDER
+  // ✅ MAIN RENDER - MINIMAL CHATGPT/PERPLEXITY STYLE
   return (
-    <div className={`flex flex-col h-screen transition-all duration-300 relative ${
-      isDark 
-        ? 'bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900' 
-        : 'bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50'
-    } ${isTransitioning ? 'animate-pulse' : ''}`}>
-      
-      {/* DRAG & DROP OVERLAY */}
-      {dragOver && (
-        <div className="absolute inset-0 z-50 bg-blue-500/20 backdrop-blur-sm flex items-center justify-center border-4 border-dashed border-blue-400">
-          <div className="text-center space-y-4 p-8 bg-white/90 dark:bg-gray-800/90 rounded-2xl shadow-2xl">
-            <div className="w-16 h-16 mx-auto bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center">
-              <IconUpload size={32} className="text-white" />
-            </div>
-            <div>
-              <h3 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-2">
-                Drop your file here
-              </h3>
-              <p className="text-gray-600 dark:text-gray-400 text-sm">
-                Supports images and documents
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+    <div className="flex flex-col h-screen"
+         style={{ backgroundColor: isDark ? '#1F1F1F' : '#ffffff' }}>
       
       {/* PASTE INDICATOR */}
       {showPasteIndicator && (
-        <div className="absolute top-4 right-4 z-50 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg animate-fade-in flex items-center gap-2">
+        <div className="absolute top-4 right-4 z-50 px-4 py-2 rounded-lg shadow-lg flex items-center gap-2"
+             style={{ 
+               backgroundColor: isDark ? '#333333' : '#000000',
+               color: '#ffffff'
+             }}>
           <IconClipboard size={16} />
           <span className="text-sm font-medium">
             {pastedImage ? 'Image pasted!' : 'Context cleared!'}
@@ -985,72 +757,103 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         </div>
       )}
       
-      {/* HEADER */}
-      <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-b border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-7 h-7 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-lg flex items-center justify-center">
-              <IconRobot size={16} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
-                AI Assistant
-              </h1>
-              <div className="text-xs text-gray-500 dark:text-gray-400">
-                <span>Image Analysis • Document Processing • Text Generation</span>
-              </div>
-            </div>
-          </div>
-          
-          <button
-            onClick={toggleTheme}
-            className={`p-2 rounded-lg transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 ${
-              isTransitioning ? 'animate-spin' : ''
-            }`}
-            title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
-          >
-            {isDark ? (
-              <IconSun size={18} className="text-yellow-500" />
-            ) : (
-              <IconMoon size={18} className="text-gray-600" />
-            )}
-          </button>
-        </div>
+      {/* ✅ MINIMAL HEADER */}
+      <div className="hidden lg:flex justify-end p-4">
+        <button
+          onClick={toggleTheme}
+          className="p-2 rounded-lg transition-colors"
+          style={{
+            backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+            color: isDark ? '#ffffff' : '#666666'
+          }}
+          title={isDark ? 'Light mode' : 'Dark mode'}
+        >
+          {isDark ? <IconSun size={20} /> : <IconMoon size={20} />}
+        </button>
       </div>
 
-      {/* MESSAGES AREA */}
-      <div className="flex-1 overflow-y-auto py-4">
+      {/* ✅ MOBILE HEADER - FIXED POSITION */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between p-4"
+           style={{ 
+             backgroundColor: isDark ? '#1F1F1F' : '#ffffff',
+             borderBottom: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`
+           }}>
+        
+        <button
+          onClick={() => {
+            if (onMobileMenuToggle) {
+              onMobileMenuToggle();
+            } else {
+              setIsMobileMenuOpen(true);
+            }
+          }}
+          className="p-2 rounded-lg transition-colors"
+          style={{
+            backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+            color: isDark ? '#ffffff' : '#000000'
+          }}
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+
+        <div className="text-lg font-semibold"
+             style={{ color: isDark ? '#ffffff' : '#000000' }}>
+          Nexus AI
+        </div>
+
+        <button
+          onClick={toggleTheme}
+          className="p-2 rounded-lg transition-colors"
+          style={{
+            backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+            color: isDark ? '#ffffff' : '#000000'
+          }}
+        >
+          {isDark ? <IconSun size={20} /> : <IconMoon size={20} />}
+        </button>
+      </div>
+
+      {/* Add mobile padding top to prevent content overlap */}
+      <div className="lg:hidden h-16"></div>
+
+      {/* ✅ MESSAGES AREA */}
+      <div className="flex-1 overflow-y-auto">
         {(isFetchingFallback || isLoadingMessages) ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center space-y-3">
-              <div className="relative">
-                <div className="w-10 h-10 bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-500 rounded-full animate-pulse"></div>
-              </div>
-              <p className="text-sm text-gray-600 dark:text-gray-400 font-medium">Loading conversation...</p>
+              <div className="w-8 h-8 rounded-full animate-spin mx-auto"
+                   style={{ 
+                     border: `2px solid ${isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)'}`,
+                     borderTopColor: isDark ? '#ffffff' : '#000000'
+                   }}></div>
+              <p className="text-sm font-medium"
+                 style={{ color: isDark ? '#cccccc' : '#666666' }}>
+                Loading conversation...
+              </p>
             </div>
           </div>
         ) : actualMessages.length === 0 ? (
           <div className="flex items-center justify-center h-full px-4">
-            <div className="text-center space-y-4 max-w-md">
-              <div className="relative">
-                <div className="w-16 h-16 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-2xl flex items-center justify-center shadow-xl">
-                  <IconRobot size={32} className="text-white" />
-                </div>
+            <div className="text-center space-y-6 max-w-md">
+              <div className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-xl mx-auto"
+                   style={{ backgroundColor: isDark ? '#333333' : '#f5f5f5' }}>
+                <IconRobot size={32} style={{ color: isDark ? '#ffffff' : '#000000' }} />
               </div>
-              <div className="space-y-2">
-                <h2 className="text-xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
-                  Hello! I'm your AI assistant
+              <div className="space-y-3">
+                <h2 className="text-2xl font-bold"
+                    style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                  How can I help you today?
                 </h2>
-                <p className="text-gray-600 dark:text-gray-400 leading-relaxed text-sm">
-                  I can analyze images, process documents (PDF, DOCX, TXT), and help with general questions.
-                  <br />
-                  <strong>I'll remember our conversation context!</strong>
+                <p style={{ color: isDark ? '#cccccc' : '#666666' }}>
+                  I can analyze images, process documents, and help with general questions.
                 </p>
               </div>
             </div>
           </div>
         ) : (
-          <div className="max-w-4xl mx-auto">
+          <div className="max-w-4xl mx-auto py-4">
             {actualMessages.map((msg, index) => {
               const normalizedSender = (msg.sender || '').toLowerCase();
               const isAI = normalizedSender === 'ai' || normalizedSender === 'assistant' || normalizedSender === 'system';
@@ -1068,7 +871,11 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
       {/* ACTIVE FILE CONTEXT BANNER */}
       {activeFileContext && (
         <div className="max-w-4xl mx-auto px-4">
-          <div className="flex items-center justify-between bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/30 dark:to-blue-900/30 border border-green-200 dark:border-green-700 rounded-xl px-4 py-2 mb-2 mt-2 relative">
+          <div className="flex items-center justify-between px-4 py-2 mb-2 rounded-xl border"
+               style={{ 
+                 backgroundColor: isDark ? 'rgba(0, 150, 255, 0.1)' : 'rgba(0, 150, 255, 0.1)',
+                 borderColor: '#0096ff'
+               }}>
             <div className="flex items-center gap-2">
               {(() => {
                 const isImage = activeFileContext.fileType?.startsWith('image') ||
@@ -1076,36 +883,40 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                 if (isImage) {
                   return (
                     <>
-                      <IconClipboard size={18} className="text-purple-600 dark:text-purple-400" />
-                      <span className="text-sm text-purple-800 dark:text-purple-200 font-medium">
-                        Referencing image:&nbsp;
-                        <span className="font-semibold">{activeFileContext.fileName}</span>
+                      <IconClipboard size={18} style={{ color: '#0096ff' }} />
+                      <span className="text-sm font-medium"
+                            style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                        Referencing image: {activeFileContext.fileName}
                       </span>
                       {activeFileContext.fileUrl && (
                         <img
                           src={activeFileContext.fileUrl}
                           alt={activeFileContext.fileName}
-                          className="ml-2 w-8 h-8 object-cover rounded border border-purple-200 dark:border-purple-700"
+                          className="ml-2 w-8 h-8 object-cover rounded border"
+                          style={{ borderColor: '#0096ff' }}
                         />
                       )}
                     </>
                   );
                 }
-                // Document context
                 return (
                   <>
-                    <IconFileText size={18} className="text-green-600 dark:text-green-400" />
-                    <span className="text-sm text-green-800 dark:text-green-200 font-medium">
-                      Referencing document:&nbsp;
-                      <span className="font-semibold">{activeFileContext.fileName}</span>
+                    <IconFileText size={18} style={{ color: '#0096ff' }} />
+                    <span className="text-sm font-medium"
+                          style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                      Referencing document: {activeFileContext.fileName}
                     </span>
                   </>
                 );
               })()}
             </div>
             <button
-              className="ml-2 p-1 rounded-full bg-blue-600 hover:bg-red-500 hover:text-white transition-colors"
-              title="Detach file from chat"
+              className="p-1 rounded-full transition-colors"
+              style={{ 
+                backgroundColor: '#0096ff',
+                color: '#ffffff'
+              }}
+              title="Clear context"
               onClick={() => setActiveFileContext(null)}
             >
               <IconX size={16} />
@@ -1114,15 +925,24 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
         </div>
       )}
 
-      {/* INPUT AREA */}
-      <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-t border-gray-200/50 dark:border-gray-700/50 px-4 py-3">
+      {/* ✅ INPUT AREA */}
+      <div className="border-t p-4"
+           style={{ 
+             backgroundColor: isDark ? '#1F1F1F' : '#ffffff',
+             borderTopColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+           }}>
         <div className="max-w-4xl mx-auto">
           
           {/* FILE VALIDATION ERROR */}
           {fileValidationError && (
-            <div className="mb-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg flex items-start gap-2">
-              <IconAlertCircle size={16} className="text-red-500 mt-0.5 flex-shrink-0" />
-              <div className="text-sm text-red-600 dark:text-red-400">
+            <div className="mb-3 p-3 rounded-lg border flex items-start gap-2"
+                 style={{ 
+                   backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                   borderColor: '#ef4444'
+                 }}>
+              <IconAlertCircle size={16} className="mt-0.5 flex-shrink-0" style={{ color: '#ef4444' }} />
+              <div className="text-sm"
+                   style={{ color: isDark ? '#ffffff' : '#000000' }}>
                 {fileValidationError}
               </div>
             </div>
@@ -1130,9 +950,17 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           
           {/* PASTED IMAGE PREVIEW */}
           {pastedImage && pastePreview && (
-            <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl border border-blue-200 dark:border-blue-700 relative">
+            <div className="mb-3 p-3 rounded-xl border relative"
+                 style={{ 
+                   backgroundColor: isDark ? 'rgba(0, 150, 255, 0.1)' : 'rgba(0, 150, 255, 0.1)',
+                   borderColor: '#0096ff'
+                 }}>
               <button
-                className="absolute top-2 right-2 p-1 rounded-full bg-gray-200 hover:bg-red-500 hover:text-white transition-colors"
+                className="absolute top-2 right-2 p-1 rounded-full transition-colors"
+                style={{ 
+                  backgroundColor: '#ef4444',
+                  color: '#ffffff'
+                }}
                 title="Remove pasted image"
                 onClick={clearPastedImage}
               >
@@ -1140,16 +968,19 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
               </button>
               <div className="flex items-start gap-3">
                 <div className="flex-shrink-0">
-                  <img src={pastePreview} alt="Pasted" className="w-16 h-16 rounded-lg object-cover border-2 border-blue-300 dark:border-blue-600" />
+                  <img src={pastePreview} alt="Pasted" className="w-16 h-16 rounded-lg object-cover border-2"
+                       style={{ borderColor: '#0096ff' }} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <IconClipboard size={16} className="text-blue-600 dark:text-blue-400" />
-                    <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                    <IconClipboard size={16} style={{ color: '#0096ff' }} />
+                    <span className="text-sm font-medium"
+                          style={{ color: isDark ? '#ffffff' : '#000000' }}>
                       Pasted Image Ready
                     </span>
                   </div>
-                  <p className="text-xs text-blue-600 dark:text-blue-400">
+                  <p className="text-xs"
+                     style={{ color: isDark ? '#cccccc' : '#666666' }}>
                     {pastedImage.name} • {(pastedImage.size / 1024).toFixed(1)} KB
                   </p>
                 </div>
@@ -1159,9 +990,17 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
 
           {/* IMAGE FILE PREVIEW */}
           {file && !pastedImage && detectFileType && detectFileType(null, file.name, file.type) === 'image' && (
-            <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl border border-blue-200 dark:border-blue-700 relative">
+            <div className="mb-3 p-3 rounded-xl border relative"
+                 style={{ 
+                   backgroundColor: isDark ? 'rgba(0, 150, 255, 0.1)' : 'rgba(0, 150, 255, 0.1)',
+                   borderColor: '#0096ff'
+                 }}>
               <button
-                className="absolute top-2 right-2 p-1 rounded-full bg-gray-200 hover:bg-red-500 hover:text-white transition-colors"
+                className="absolute top-2 right-2 p-1 rounded-full transition-colors"
+                style={{ 
+                  backgroundColor: '#ef4444',
+                  color: '#ffffff'
+                }}
                 title="Remove uploaded image"
                 onClick={() => setFile(null)}
               >
@@ -1169,16 +1008,19 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
               </button>
               <div className="flex items-start gap-3">
                 <div className="flex-shrink-0">
-                  <img src={URL.createObjectURL(file)} alt="Uploaded" className="w-16 h-16 rounded-lg object-cover border-2 border-blue-300 dark:border-blue-600" />
+                  <img src={URL.createObjectURL(file)} alt="Uploaded" className="w-16 h-16 rounded-lg object-cover border-2"
+                       style={{ borderColor: '#0096ff' }} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <IconClipboard size={16} className="text-blue-600 dark:text-blue-400" />
-                    <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                    <IconClipboard size={16} style={{ color: '#0096ff' }} />
+                    <span className="text-sm font-medium"
+                          style={{ color: isDark ? '#ffffff' : '#000000' }}>
                       Uploaded Image Ready
                     </span>
                   </div>
-                  <p className="text-xs text-blue-600 dark:text-blue-400">
+                  <p className="text-xs"
+                     style={{ color: isDark ? '#cccccc' : '#666666' }}>
                     {file.name} • {(file.size / 1024).toFixed(1)} KB
                   </p>
                 </div>
@@ -1187,7 +1029,11 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
           )}
           
           <form onSubmit={handleSubmit} className="relative">
-            <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-2xl shadow-sm border border-gray-200/50 dark:border-gray-600/50 px-3 py-2">
+            <div className="flex items-center gap-3 rounded-2xl shadow-sm border px-4 py-3"
+                 style={{ 
+                   backgroundColor: isDark ? '#2D2D2D' : '#ffffff',
+                   borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+                 }}>
               <input
                 type="file"
                 onChange={handleFileSelect}
@@ -1197,24 +1043,27 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
               />
               <label
                 htmlFor="fileUpload"
-                className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors cursor-pointer group"
-                title="Upload file (images or documents)"
+                className="p-2 rounded-lg transition-colors cursor-pointer"
+                style={{
+                  color: isDark ? '#cccccc' : '#666666'
+                }}
+                title="Upload file"
               >
-                <IconUpload size={18} className="text-gray-500 group-hover:text-gray-700 dark:text-gray-400 dark:group-hover:text-gray-200 transition-colors" />
+                <IconUpload size={20} />
               </label>
 
               {browserSupportsSpeechRecognition && (
                 <button
                   type="button"
                   onClick={handleVoiceInput}
-                  className={`p-2 rounded-lg transition-all duration-200 ${
-                    listening 
-                      ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-md' 
-                      : 'hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 dark:text-gray-400'
-                  }`}
+                  className="p-2 rounded-lg transition-colors"
+                  style={{
+                    backgroundColor: listening ? '#22c55e' : 'transparent',
+                    color: listening ? '#ffffff' : isDark ? '#cccccc' : '#666666'
+                  }}
                   title={listening ? "Stop recording" : "Start voice input"}
                 >
-                  {listening ? <IconCheck size={18} /> : <IconMicrophone size={18} />}
+                  {listening ? <IconCheck size={20} /> : <IconMicrophone size={20} />}
                 </button>
               )}
 
@@ -1225,25 +1074,32 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
                 onChange={handleInputChange}
                 placeholder={listening ? "Listening..." : 
                            pastedImage ? "Add a message (optional)..." : 
-                           "Ask me anything, paste images, or drag & drop documents..."}
-                className="flex-1 bg-transparent border-none outline-none text-gray-800 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-400 text-sm py-1"
+                           "Message Nexus AI..."}
+                className="flex-1 bg-transparent border-none outline-none text-sm py-1"
+                style={{ 
+                  color: isDark ? '#ffffff' : '#000000'
+                }}
                 disabled={isAIStreaming}
               />
 
               <button
                 type="submit"
-                className={`p-2 rounded-lg transition-all duration-200 ${
-                  (!input.trim() && !file && !pastedImage) || isUploading || isAIStreaming
-                    ? 'bg-gray-200 dark:bg-gray-600 text-gray-400 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 shadow-md hover:shadow-lg transform hover:scale-105'
-                }`}
+                className="p-2 rounded-lg transition-colors"
+                style={{
+                  backgroundColor: (!input.trim() && !file && !pastedImage) || isUploading || isAIStreaming
+                    ? isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+                    : isDark ? '#ffffff' : '#000000',
+                  color: (!input.trim() && !file && !pastedImage) || isUploading || isAIStreaming
+                    ? isDark ? '#666666' : '#999999'
+                    : isDark ? '#000000' : '#ffffff'
+                }}
                 disabled={(!input.trim() && !file && !pastedImage) || isUploading || isAIStreaming}
                 title="Send message"
               >
                 {isUploading ? (
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
                 ) : (
-                  <IconSend size={18} />
+                  <IconSend size={20} />
                 )}
               </button>
             </div>
@@ -1251,11 +1107,21 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete }) =>
 
           {/* AI STREAMING INDICATOR */}
           {isAIStreaming && (
-            <div className="text-xs text-blue-500 dark:text-blue-400 mt-2 px-2 flex items-center gap-2">
-              <div className="typing-indicator">
-                <span></span>
-                <span></span>
-                <span></span>
+            <div className="text-xs mt-2 px-2 flex items-center gap-2"
+                 style={{ color: isDark ? '#cccccc' : '#666666' }}>
+              <div className="flex gap-1">
+                <div className="w-1 h-1 rounded-full animate-pulse"
+                     style={{ backgroundColor: isDark ? '#666666' : '#999999' }}></div>
+                <div className="w-1 h-1 rounded-full animate-pulse"
+                     style={{ 
+                       backgroundColor: isDark ? '#666666' : '#999999',
+                       animationDelay: '0.2s'
+                     }}></div>
+                <div className="w-1 h-1 rounded-full animate-pulse"
+                     style={{ 
+                       backgroundColor: isDark ? '#666666' : '#999999',
+                       animationDelay: '0.4s'
+                     }}></div>
               </div>
               <span>AI is responding...</span>
             </div>

@@ -1,7 +1,6 @@
 "use client";
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Sidebar, SidebarBody, SidebarLink } from "./ui/sidebar.jsx";
 import { Link } from "react-router-dom";
 import {
   IconArrowLeft,
@@ -9,7 +8,6 @@ import {
   IconUserBolt,
   IconMessagePlus,
   IconTrash,
-  IconRobot,
   IconBolt,
   IconAlertTriangle,
 } from "@tabler/icons-react";
@@ -18,14 +16,14 @@ import { cn } from "../lib/utils.js";
 import { useClerkUser } from "../context/ClerkUserContext";
 import { useChat } from "../context/ChatContext.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
-import { useAuth } from '@clerk/clerk-react'; // ✅ ADD CLERK AUTH
+import { useAuth } from '@clerk/clerk-react';
 
 // ✅ UTILITY FUNCTIONS (unchanged)
 const formatChatTitle = (chat) => {
   if (!chat) return "New Chat";
   
   if (chat.title && chat.title !== "New Chat" && chat.title.trim() !== "") {
-    return chat.title.length > 30 ? chat.title.substring(0, 30) + "..." : chat.title;
+    return chat.title.length > 25 ? chat.title.substring(0, 25) + "..." : chat.title;
   }
   
   if (chat.messages && chat.messages.length > 0) {
@@ -33,7 +31,7 @@ const formatChatTitle = (chat) => {
     if (firstUserMessage && firstUserMessage.content) {
       const content = firstUserMessage.content.trim();
       if (content.length > 0) {
-        return content.length > 30 ? content.substring(0, 30) + "..." : content;
+        return content.length > 25 ? content.substring(0, 25) + "..." : content;
       }
     }
   }
@@ -64,55 +62,55 @@ const formatDate = (dateString) => {
   return date.toLocaleDateString();
 };
 
-// ✅ DELETE CONFIRMATION DIALOG (unchanged)
+// ✅ REDESIGNED DELETE CONFIRMATION DIALOG
 const DeleteConfirmationDialog = ({ isOpen, onConfirm, onCancel, isDark, chatTitle }) => {
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       <div 
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+        className="absolute inset-0 backdrop-blur-sm transition-opacity"
+        style={{ backgroundColor: isDark ? 'rgba(0, 0, 0, 0.7)' : 'rgba(255, 255, 255, 0.7)' }}
         onClick={onCancel}
       ></div>
       
-      <div className={`relative w-full max-w-md mx-auto rounded-2xl border shadow-2xl transition-all transform scale-100 ${
-        isDark 
-          ? 'bg-gray-800 border-gray-700' 
-          : 'bg-white border-gray-200'
-      }`}>
+      <div className="relative w-full max-w-md mx-auto rounded-2xl shadow-2xl transition-all transform scale-100"
+           style={{ 
+             backgroundColor: isDark ? '#2D2D2D' : '#ffffff',
+             border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'}`
+           }}>
         <div className="p-6">
-          <div className={`flex items-center justify-center w-12 h-12 mx-auto mb-4 rounded-full ${
-            isDark ? 'bg-red-900/30' : 'bg-red-100'
-          }`}>
-            <IconAlertTriangle size={24} className={isDark ? 'text-red-400' : 'text-red-600'} />
+          <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 rounded-full"
+               style={{ backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.1)' }}>
+            <IconAlertTriangle size={24} style={{ color: '#ef4444' }} />
           </div>
           
-          <h3 className={`text-lg font-semibold text-center mb-2 ${
-            isDark ? 'text-white' : 'text-gray-900'
-          }`}>
+          <h3 className="text-lg font-semibold text-center mb-2"
+              style={{ color: isDark ? '#ffffff' : '#000000' }}>
             Delete Chat Session
           </h3>
           
-          <p className={`text-sm text-center mb-6 leading-relaxed ${
-            isDark ? 'text-gray-300' : 'text-gray-600'
-          }`}>
+          <p className="text-sm text-center mb-6 leading-relaxed"
+             style={{ color: isDark ? '#d1d5db' : '#6b7280' }}>
             Are you sure you want to delete "{chatTitle}"? This action cannot be undone.
           </p>
           
           <div className="flex gap-3">
             <button
               onClick={onCancel}
-              className={`flex-1 px-4 py-2.5 rounded-xl font-medium transition-all duration-200 ${
-                isDark 
-                  ? 'bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600' 
-                  : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300'
-              }`}
+              className="flex-1 px-4 py-2.5 rounded-xl font-medium transition-all duration-200 hover:scale-[1.02]"
+              style={{ 
+                backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+                color: isDark ? '#d1d5db' : '#374151',
+                border: 'none'
+              }}
             >
               Cancel
             </button>
             <button
               onClick={onConfirm}
-              className="flex-1 px-4 py-2.5 rounded-xl font-medium text-white bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+              className="flex-1 px-4 py-2.5 rounded-xl font-medium transition-all duration-200 hover:scale-[1.02]"
+              style={{ backgroundColor: '#ef4444', color: '#ffffff' }}
             >
               Delete
             </button>
@@ -123,10 +121,10 @@ const DeleteConfirmationDialog = ({ isOpen, onConfirm, onCancel, isDark, chatTit
   );
 };
 
-const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete }) => {
+const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete, isMobileMenuOpen, onMobileMenuClose }) => {
   const [chats, setChats] = useState([]);
   const { clerkUser, dbUser, loading, isAuthenticated } = useClerkUser();
-  const { getToken } = useAuth(); // ✅ USE CLERK AUTH
+  const { getToken } = useAuth();
   const { isDark } = useTheme();
   
   const user = dbUser || {
@@ -139,21 +137,21 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
 
   const navigate = useNavigate();
   
-  // State management (unchanged)
+  // State management
   const [isOpen, setIsOpen] = useState(true);
   const [hoveredChat, setHoveredChat] = useState(null);
   const [deletingChat, setDeletingChat] = useState(null);
   const [creatingChat, setCreatingChat] = useState(false);
   const [error, setError] = useState(null);
   
-  // Refs (unchanged)
+  // Refs
   const operationInProgress = useRef(false);
   const hoverTimeoutRef = useRef(null);
   const stateChangeTimeoutRef = useRef(null);
   const isHoveringRef = useRef(false);
   const lastStateChangeRef = useRef(Date.now());
 
-  // Delete dialog state (unchanged)
+  // Delete dialog state
   const [deleteDialog, setDeleteDialog] = useState({
     isOpen: false,
     chatId: null,
@@ -174,7 +172,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     }
   }, [getToken]);
 
-  // ✅ STABLE LOGOUT FUNCTION (unchanged)
+  // ✅ STABLE LOGOUT FUNCTION
   const logoutUser = async () => {
     try {
       localStorage.clear();
@@ -190,7 +188,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     }
   };
 
-  // Chat context integration (unchanged)
+  // Chat context integration
   let chatContext = null;
   let chatContextAvailable = false;
 
@@ -211,7 +209,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     debug
   } = chatContext || {};
 
-  // Sidebar toggle handlers (unchanged)
+  // Sidebar toggle handlers
   const handleSidebarToggle = useCallback((newState, immediate = false) => {
     const now = Date.now();
     
@@ -262,7 +260,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     }, 200);
   }, [handleSidebarToggle]);
 
-  // Cleanup timeouts (unchanged)
+  // Cleanup timeouts
   useEffect(() => {
     return () => {
       if (hoverTimeoutRef.current) {
@@ -281,7 +279,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     try {
       setError(null);
       
-      const token = await getAuthToken(); // ✅ USE CLERK TOKEN
+      const token = await getAuthToken();
       if (!token) {
         console.warn("⚠️ [SIDEBAR] No Clerk token available");
         setError("Authentication required. Please sign in again.");
@@ -296,7 +294,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
 
       const res = await fetch(`${backendUrl}/api/chat/sessions`, {
         headers: { 
-          Authorization: `Bearer ${token}`, // ✅ USE CLERK TOKEN
+          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         },
         cache: useCache ? 'default' : 'no-cache',
@@ -310,7 +308,6 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
       if (!res.ok) {
         if (res.status === 401) {
           setError("Session expired. Please sign in again.");
-          // Clear local storage and redirect
           localStorage.clear();
           navigate('/signup');
           return;
@@ -366,7 +363,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
       setCreatingChat(true);
       setError(null);
 
-      const token = await getAuthToken(); // ✅ USE CLERK TOKEN
+      const token = await getAuthToken();
       if (!token) {
         throw new Error("Authentication required. Please sign in again.");
       }
@@ -376,7 +373,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
       const res = await fetch(`${backendUrl}/api/chat/session`, {
         method: 'POST',
         headers: { 
-          Authorization: `Bearer ${token}`, // ✅ USE CLERK TOKEN
+          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ title: "New Chat" })
@@ -427,7 +424,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     }
   }, [backendUrl, getAuthToken, chatContextAvailable, setSession, onSelectSession, navigate]);
 
-  // Delete dialog handlers (unchanged)
+  // Delete dialog handlers
   const openDeleteDialog = useCallback((chatId, chatTitle) => {
     setDeleteDialog({
       isOpen: true,
@@ -457,7 +454,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
       setDeletingChat(chatId);
       setError(null);
       
-      const token = await getAuthToken(); // ✅ USE CLERK TOKEN
+      const token = await getAuthToken();
       if (!token) {
         throw new Error("Authentication required. Please sign in again.");
       }
@@ -476,7 +473,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
       const res = await fetch(`${backendUrl}/api/chat/session/${chatId}`, {
         method: 'DELETE',
         headers: { 
-          Authorization: `Bearer ${token}`, // ✅ USE CLERK TOKEN
+          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         }
       });
@@ -509,7 +506,7 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     }
   }, [deleteDialog, getAuthToken, backendUrl, currentSessionId, selectedSessionId, chatContextAvailable, setSession, onSessionDelete, fetchChats, closeDeleteDialog, navigate]);
 
-  // Rest of the handlers (unchanged)
+  // Rest of the handlers
   const handleSelectChat = useCallback((sessionId) => {
     if (operationInProgress.current) return;
     
@@ -532,19 +529,20 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     }
   }, [navigate]);
 
-  // Links definition (unchanged)
+  // Links definition
   const links = [
     {
       label: creatingChat ? "Creating..." : "New Chat",
       href: "#",
       icon: creatingChat ? (
-        <div className={`animate-spin rounded-full h-5 w-5 border-2 ${
-          isDark ? 'border-blue-400 border-t-transparent' : 'border-blue-500 border-t-transparent'
-        }`}></div>
+        <div className="animate-spin rounded-full h-5 w-5"
+             style={{ 
+               border: `2px solid ${isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)'}`,
+               borderTopColor: isDark ? '#ffffff' : '#000000'
+             }}></div>
       ) : (
-        <IconMessagePlus className={`h-5 w-5 shrink-0 ${
-          isDark ? 'text-blue-400' : 'text-blue-600'
-        }`} />
+        <IconMessagePlus className="h-5 w-5 shrink-0"
+                        style={{ color: '#ffffff' }} />
       ),
       onClick: handleNewChat,
       disabled: creatingChat || operationInProgress.current
@@ -552,23 +550,20 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     {
       label: "Profile",
       href: "/profile",
-      icon: <IconUserBolt className={`h-5 w-5 shrink-0 ${
-        isDark ? 'text-gray-300' : 'text-gray-700'
-      }`} />,
+      icon: <IconUserBolt className="h-5 w-5 shrink-0"
+                          style={{ color: isDark ? '#ffffff' : '#000000' }} />,
     },
     {
       label: "Feedback",
       href: "/feedback",
-      icon: <IconMessageCircle className={`h-5 w-5 shrink-0 ${
-        isDark ? 'text-gray-300' : 'text-gray-700'
-      }`} />,
+      icon: <IconMessageCircle className="h-5 w-5 shrink-0"
+                              style={{ color: isDark ? '#ffffff' : '#000000' }} />,
     },
     {
       label: "Logout",
       href: "#",
-      icon: <IconArrowLeft className={`h-5 w-5 shrink-0 ${
-        isDark ? 'text-red-400' : 'text-red-600'
-      }`} />,
+      icon: <IconArrowLeft className="h-5 w-5 shrink-0"
+                          style={{ color: '#ef4444' }} />,
       onClick: handleLogout,
     },
   ];
@@ -583,14 +578,19 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
   // Loading state
   if (loading && !user?._id && !clerkUser?.id) {
     return (
-      <div className={`h-screen w-[280px] flex items-center justify-center ${
-        isDark ? 'bg-gray-900' : 'bg-gray-50'
-      }`}>
+      <div className="h-screen flex items-center justify-center"
+           style={{ 
+             width: '280px',
+             backgroundColor: isDark ? '#1F1F1F' : '#f8f9fa'
+           }}>
         <div className="text-center space-y-4">
-          <div className={`w-8 h-8 rounded-full border-2 border-t-2 animate-spin mx-auto ${
-            isDark ? 'border-gray-700 border-t-blue-400' : 'border-gray-200 border-t-blue-500'
-          }`}></div>
-          <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+          <div className="w-8 h-8 rounded-full animate-spin mx-auto"
+               style={{ 
+                 border: `2px solid ${isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)'}`,
+                 borderTopColor: isDark ? '#ffffff' : '#000000'
+               }}></div>
+          <div className="text-sm"
+               style={{ color: isDark ? '#d1d5db' : '#6b7280' }}>
             Loading...
           </div>
         </div>
@@ -598,30 +598,27 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
     );
   }
 
-  // Rest of the render method stays the same...
   return (
     <>
-      {/* ✅ SIDEBAR CONTAINER - UNCHANGED */}
+      {/* ✅ REDESIGNED SIDEBAR CONTAINER */}
       <div 
         className={`h-screen transition-all duration-300 ease-in-out ${  
           isOpen ? 'w-[280px]' : 'w-[70px]'
-        } ${
-          isDark 
-            ? 'bg-gradient-to-b from-gray-800 via-gray-900 to-black' 
-            : 'bg-gradient-to-b from-gray-50 via-gray-100 to-gray-200'
         } overflow-hidden`}
+        style={{ backgroundColor: isDark ? '#1F1F1F' : '#f8f9fa' }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
-        <div className={`flex flex-col h-full justify-between transition-all duration-300 ${
-          isDark 
-            ? 'bg-gradient-to-b from-gray-800 via-gray-900 to-black border-r border-gray-700/50' 
-            : 'bg-gradient-to-b from-white via-gray-50 to-gray-100 border-r border-gray-200'
-        } overflow-hidden`}>
+        <div className="flex flex-col h-full justify-between transition-all duration-300 overflow-hidden"
+             style={{ 
+               backgroundColor: isDark ? '#1F1F1F' : '#f8f9fa',
+               borderRight: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'}`
+             }}>
           <div className="flex flex-1 flex-col overflow-hidden">
-            {/* Logo section unchanged */}
-            <div className={`relative z-20 flex items-center py-6 text-sm font-normal transition-all duration-300 ${
-              isOpen ? 'justify-start px-6' : 'justify-center px-3'
+            
+            {/* ✅ MINIMAL LOGO SECTION - Updated for mobile */}
+            <div className={`relative z-20 flex items-center justify-between py-6 text-sm font-normal transition-all duration-300 ${
+              isOpen ? 'px-6' : 'justify-center px-3'
             }`}>
               <Link 
                 to="/chat" 
@@ -636,28 +633,38 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
                   navigate('/chat');
                 }}
               >
-                <div className="w-8 h-8 bg-gradient-to-br from-purple-500 via-blue-500 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg shrink-0">
-                  <IconRobot size={18} className="text-white" />
-                </div>
                 {isOpen && (
                   <motion.span 
                     initial={{ opacity: 0, width: 0 }}
                     animate={{ opacity: 1, width: "auto" }}
                     exit={{ opacity: 0, width: 0 }}
                     transition={{ duration: 0.2 }}
-                    className={`font-bold text-lg ml-3 truncate ${
-                      isDark 
-                        ? 'bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent' 
-                        : 'bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent'
-                    }`}
+                    className="font-bold text-xl truncate"
+                    style={{ color: isDark ? '#ffffff' : '#000000' }}
                   >
                     Nexus AI
                   </motion.span>
                 )}
               </Link>
+
+              {/* ✅ MOBILE CLOSE BUTTON */}
+              {isMobileMenuOpen && (
+                <button
+                  onClick={onMobileMenuClose}
+                  className="lg:hidden p-2 rounded-lg transition-all duration-200 hover:scale-105"
+                  style={{
+                    color: isDark ? '#ffffff' : '#000000',
+                    backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+                  }}
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
             </div>
 
-            {/* New Chat Button and Connection Status */}
+            {/* New Chat Button */}
             <div className={`mb-6 transition-all duration-300 ${
               isOpen ? 'px-6' : 'px-3'
             }`}>
@@ -668,15 +675,15 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
                   <button
                     onClick={links[0].disabled ? undefined : links[0].onClick}
                     disabled={links[0].disabled}
-                    className={`transition-all duration-200 flex items-center ${
-                      isDark 
-                        ? 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white shadow-lg hover:shadow-xl' 
-                        : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white shadow-md hover:shadow-lg'
-                    } transform hover:scale-105 disabled:hover:scale-100 disabled:opacity-50 ${
+                    className={`transition-all duration-200 flex items-center transform hover:scale-105 disabled:hover:scale-100 disabled:opacity-50 ${
                       isOpen 
                         ? 'w-full p-3 rounded-xl gap-3 justify-start min-w-0' 
                         : 'w-12 h-12 rounded-xl justify-center'
                     }`}
+                    style={{
+                      backgroundColor: isDark ? '#333333' : '#000000',
+                      color: '#ffffff'
+                    }}
                   >
                     <div className="shrink-0">
                       {links[0].icon}
@@ -702,15 +709,13 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
                     animate={{ opacity: 1, width: "auto" }}
                     exit={{ opacity: 0, width: 0 }}
                     transition={{ duration: 0.2 }}
-                    className={`ml-4 text-xs px-3 py-1.5 rounded-full font-medium whitespace-nowrap shrink-0 ${
-                      isConnected 
-                        ? isDark 
-                          ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-500/30' 
-                          : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                        : isDark 
-                          ? 'bg-red-900/30 text-red-400 border border-red-500/30' 
-                          : 'bg-red-100 text-red-700 border border-red-200'
-                    }`}
+                    className="ml-4 text-xs px-3 py-1.5 rounded-full font-medium whitespace-nowrap shrink-0"
+                    style={{
+                      backgroundColor: isConnected 
+                        ? isDark ? 'rgba(34, 197, 94, 0.2)' : 'rgba(34, 197, 94, 0.1)'
+                        : isDark ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.1)',
+                      color: isConnected ? '#22c55e' : '#ef4444'
+                    }}
                   >
                     {isConnected ? '⚡' : '🔄'}
                   </motion.div>
@@ -724,18 +729,17 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
                   transition={{ duration: 0.2 }}
-                  className={`text-xs p-4 rounded-lg mt-4 ${
-                    isDark 
-                      ? 'text-red-400 bg-red-900/20 border border-red-500/30' 
-                      : 'text-red-600 bg-red-50 border border-red-200'
-                  }`}
+                  className="text-xs p-4 rounded-lg mt-4"
+                  style={{ 
+                    backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                    color: isDark ? '#ffffff' : '#000000'
+                  }}
                 >
                   <div className="truncate">{error}</div>
                   <button
                     onClick={() => fetchChats(false)}
-                    className={`mt-2 underline hover:no-underline transition-colors text-xs ${
-                      isDark ? 'text-red-300' : 'text-red-700'
-                    }`}
+                    className="mt-2 underline hover:no-underline transition-colors text-xs"
+                    style={{ color: '#ef4444' }}
                   >
                     Retry
                   </button>
@@ -743,13 +747,9 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
               )}
             </div>
 
-            {/* ✅ CHAT SESSIONS CONTAINER */}
-            <div className={`flex-1 overflow-hidden rounded-xl mb-6 transition-all duration-300 ${
-              isOpen ? 'mx-6' : 'mx-2'
-            } ${
-              isDark 
-                ? 'bg-gradient-to-b from-gray-700/30 to-gray-800/30 border border-gray-600/30 backdrop-blur-sm' 
-                : 'bg-gradient-to-b from-gray-50/80 to-gray-100/80 border border-gray-200/50 backdrop-blur-sm'
+            {/* ✅ REDESIGNED CHAT SESSIONS LIST - NATURAL DESIGN */}
+            <div className={`flex-1 overflow-hidden mb-6 transition-all duration-300 ${
+              isOpen ? 'mx-3' : 'mx-2'
             }`}>
               {isOpen ? (
                 <motion.div 
@@ -759,67 +759,20 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
                   transition={{ duration: 0.2 }}
                   className="h-full flex flex-col overflow-hidden"
                 >
-                  {/* SESSIONS HEADER */}
-                  <div className={`p-5 border-b shrink-0 ${
-                    isDark 
-                      ? 'border-gray-600/30 bg-gray-800/20' 
-                      : 'border-gray-200/50 bg-white/50'
-                  }`}>
-                    <div className="flex items-center gap-3 mb-3 min-w-0">
-                      <div className="w-5 h-5 bg-gradient-to-br from-purple-500 via-blue-500 to-cyan-500 rounded-lg flex items-center justify-center shadow-lg shrink-0">
-                        <IconRobot size={12} className="text-white" />
-                      </div>
-                      <span className={`text-sm font-bold truncate ${
-                        isDark 
-                          ? 'bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent' 
-                          : 'bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent'
-                      }`}>
-                        Chat Sessions
-                      </span>
-                    </div>
-                    
-                    <div className={`text-xs flex items-center gap-3 min-w-0 ${
-                      isDark ? 'text-gray-400' : 'text-gray-600'
-                    }`}>
-                      <span className="truncate">{chats.length} conversations</span>
-                    </div>
-                  </div>
-                  
                   {/* SESSIONS LIST */}
-                  <div className="flex-1 overflow-y-auto p-4">
-                    <div className="space-y-3">
+                  <div className="flex-1 overflow-y-auto">
+                    <div className="space-y-1">
                       {chats.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-10 text-center">
-                          <div className="relative mb-6">
-                            <div className="w-12 h-12 bg-gradient-to-br from-purple-500 via-blue-500 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg">
-                              <IconRobot size={20} className="text-white" />
-                            </div>
-                            <div className="absolute -top-1 -right-1 w-4 h-4 bg-gradient-to-r from-green-400 to-emerald-500 rounded-full flex items-center justify-center">
-                              <IconBolt size={8} className="text-white" />
-                            </div>
-                          </div>
-                          <h3 className={`text-base font-bold mb-2 ${
-                            isDark 
-                              ? 'bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent' 
-                              : 'bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent'
-                          }`}>
-                            Ready to Chat!
+                        <div className="flex flex-col items-center justify-center py-16 text-center px-4">
+                          <div className="text-4xl mb-4">💬</div>
+                          <h3 className="text-base font-semibold mb-2"
+                              style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                            No conversations yet
                           </h3>
-                          <p className={`text-sm mb-4 leading-relaxed ${
-                            isDark ? 'text-gray-400' : 'text-gray-600'
-                          }`}>
-                            No conversations yet. Start your first AI chat session and explore the possibilities.
+                          <p className="text-sm mb-6 leading-relaxed"
+                             style={{ color: isDark ? '#888888' : '#6b7280' }}>
+                            Start a new chat to begin your AI conversation
                           </p>
-                          <button
-                            onClick={handleNewChat}
-                            className={`px-4 py-2 rounded-xl font-medium transition-all duration-200 ${
-                              isDark 
-                                ? 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white' 
-                                : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
-                            } shadow-lg hover:shadow-xl transform hover:scale-105`}
-                          >
-                            Start New Chat
-                          </button>
                         </div>
                       ) : (
                         chats.map((chat) => {
@@ -835,77 +788,73 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
                               onClick={() => handleSelectChat(chat._id)}
                               onMouseEnter={() => setHoveredChat(chat._id)}
                               onMouseLeave={() => setHoveredChat(null)}
-                              className={`group relative rounded-xl transition-all duration-200 border cursor-pointer overflow-hidden ${
-                                isCurrentSession
-                                  ? isDark 
-                                    ? 'bg-gradient-to-r from-blue-900/40 to-purple-900/40 border-blue-500/50 shadow-lg shadow-blue-500/20' 
-                                    : 'bg-gradient-to-r from-blue-100 to-purple-100 border-blue-300 shadow-md'
-                                  : isDark 
-                                    ? 'hover:bg-gray-700/30 border-gray-600/30 hover:border-gray-500/50' 
-                                    : 'hover:bg-white/70 border-gray-200 hover:border-gray-300'
-                              } ${isStreaming ? 'animate-pulse ring-2 ring-purple-500/30' : ''}`}
+                              className={`group relative rounded-lg transition-all duration-200 cursor-pointer px-3 py-2.5 ${
+                                isStreaming ? 'animate-pulse' : ''
+                              }`}
+                              style={{
+                                backgroundColor: isCurrentSession
+                                  ? isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)'
+                                  : hoveredChat === chat._id 
+                                    ? isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.03)'
+                                    : 'transparent'
+                              }}
                             >
-                              <div className="p-4 min-w-0">
-                                <div className="flex items-center justify-between min-w-0">
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-3 min-w-0">
-                                      <div className={`w-2 h-2 rounded-full shrink-0 transition-all duration-200 ${
-                                        isCurrentSession 
-                                          ? 'bg-gradient-to-r from-blue-400 to-purple-400 shadow-lg' 
-                                          : isDark 
-                                            ? 'bg-gray-600' 
-                                            : 'bg-gray-400'
-                                      }`}></div>
-                                      <span className={`font-medium text-sm truncate transition-colors duration-200 ${
-                                        isCurrentSession 
-                                          ? isDark 
-                                            ? 'text-blue-300' 
-                                            : 'text-blue-700'
-                                          : isDark 
-                                            ? 'text-gray-200' 
-                                            : 'text-gray-800'
-                                      }`}>
-                                        {formatChatTitle(chat)}
-                                      </span>
-                                      {isStreaming && (
-                                        <div className="flex items-center gap-1 shrink-0">
-                                          <div className="w-1 h-1 bg-purple-400 rounded-full animate-pulse"></div>
-                                          <div className="w-1 h-1 bg-blue-400 rounded-full animate-pulse" style={{animationDelay: '0.2s'}}></div>
-                                          <div className="w-1 h-1 bg-cyan-400 rounded-full animate-pulse" style={{animationDelay: '0.4s'}}></div>
-                                        </div>
-                                      )}
-                                    </div>
+                              <div className="flex items-center justify-between min-w-0">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <span className="font-medium text-sm truncate transition-colors duration-200"
+                                          style={{ 
+                                            color: isCurrentSession 
+                                              ? isDark ? '#ffffff' : '#000000'
+                                              : isDark ? '#cccccc' : '#333333'
+                                          }}>
+                                      {formatChatTitle(chat)}
+                                    </span>
+                                    {isStreaming && (
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <div className="w-1 h-1 rounded-full animate-pulse"
+                                             style={{ backgroundColor: isDark ? '#ffffff' : '#000000' }}></div>
+                                        <div className="w-1 h-1 rounded-full animate-pulse"
+                                             style={{ 
+                                               backgroundColor: isDark ? '#ffffff' : '#000000',
+                                               animationDelay: '0.2s'
+                                             }}></div>
+                                        <div className="w-1 h-1 rounded-full animate-pulse"
+                                             style={{ 
+                                               backgroundColor: isDark ? '#ffffff' : '#000000',
+                                               animationDelay: '0.4s'
+                                             }}></div>
+                                      </div>
+                                    )}
                                   </div>
-                                  
-                                  {/* DELETE BUTTON */}
-                                  {hoveredChat === chat._id && !operationInProgress.current && (
-                                    <motion.button
-                                      initial={{ opacity: 0, scale: 0.8 }}
-                                      animate={{ opacity: 1, scale: 1 }}
-                                      exit={{ opacity: 0, scale: 0.8 }}
-                                      transition={{ duration: 0.1 }}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        openDeleteDialog(chat._id, formatChatTitle(chat));
-                                      }}
-                                      disabled={deletingChat === chat._id}
-                                      className={`ml-3 p-2 rounded-lg transition-all duration-200 disabled:opacity-50 shrink-0 ${
-                                        isDark 
-                                          ? 'text-gray-400 hover:text-red-400 hover:bg-red-500/20' 
-                                          : 'text-gray-500 hover:text-red-600 hover:bg-red-100'
-                                      }`}
-                                      title="Delete chat"
-                                    >
-                                      {deletingChat === chat._id ? (
-                                        <div className={`w-3 h-3 animate-spin rounded-full border ${
-                                          isDark ? 'border-red-400 border-t-transparent' : 'border-red-600 border-t-transparent'
-                                        }`}></div>
-                                      ) : (
-                                        <IconTrash className="h-3 w-3" />
-                                      )}
-                                    </motion.button>
-                                  )}
                                 </div>
+                                
+                                {/* DELETE BUTTON */}
+                                {hoveredChat === chat._id && !operationInProgress.current && (
+                                  <motion.button
+                                    initial={{ opacity: 0, scale: 0.8 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.8 }}
+                                    transition={{ duration: 0.1 }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openDeleteDialog(chat._id, formatChatTitle(chat));
+                                    }}
+                                    disabled={deletingChat === chat._id}
+                                    className="ml-3 p-1.5 rounded-md transition-all duration-200 disabled:opacity-50 shrink-0 hover:scale-110"
+                                    style={{ 
+                                      color: '#ef4444',
+                                      backgroundColor: 'rgba(239, 68, 68, 0.1)'
+                                    }}
+                                    title="Delete chat"
+                                  >
+                                    {deletingChat === chat._id ? (
+                                      <div className="w-3 h-3 animate-spin rounded-full border border-red-500 border-t-transparent"></div>
+                                    ) : (
+                                      <IconTrash className="h-3 w-3" />
+                                    )}
+                                  </motion.button>
+                                )}
                               </div>
                             </div>
                           );
@@ -917,15 +866,11 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
               ) : (
                 // COLLAPSED STATE
                 <div className="flex flex-col items-center py-6 space-y-4">
-                  <div className="w-8 h-8 bg-gradient-to-br from-purple-500 via-blue-500 to-cyan-500 rounded-lg flex items-center justify-center shadow-lg">
-                    <IconRobot size={16} className="text-white" />
-                  </div>
-                  
-                  <div className={`text-xs px-2 py-1 rounded-full font-medium ${
-                    isDark 
-                      ? 'bg-blue-900/30 text-blue-400 border border-blue-500/30' 
-                      : 'bg-blue-100 text-blue-800 border border-blue-200'
-                  }`}>
+                  <div className="text-xs px-2 py-1 rounded-full font-medium"
+                       style={{
+                         backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                         color: isDark ? '#ffffff' : '#000000'
+                       }}>
                     {chats.length}
                   </div>
 
@@ -940,22 +885,21 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
                           <div
                             key={chat._id}
                             onClick={() => handleSelectChat(chat._id)}
-                            className={`w-2 h-2 rounded-full cursor-pointer transition-all duration-200 hover:scale-110 ${
-                              isCurrentSession 
-                                ? 'bg-gradient-to-r from-blue-400 to-purple-400 shadow-lg scale-125' 
-                                : isDark 
-                                  ? 'bg-gray-600 hover:bg-gray-500' 
-                                  : 'bg-gray-400 hover:bg-gray-500'
-                            }`}
+                            className="w-2 h-2 rounded-full cursor-pointer transition-all duration-200 hover:scale-110"
+                            style={{ 
+                              backgroundColor: isCurrentSession 
+                                ? isDark ? '#ffffff' : '#000000'
+                                : isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.3)',
+                              transform: isCurrentSession ? 'scale(1.25)' : 'scale(1)'
+                            }}
                             title={formatChatTitle(chat)}
                           />
                         );
                       })}
                       
                       {chats.length > 3 && (
-                        <div className={`text-xs ${
-                          isDark ? 'text-gray-500' : 'text-gray-400'
-                        }`}>
+                        <div className="text-xs"
+                             style={{ color: isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.3)' }}>
                           ⋯
                         </div>
                       )}
@@ -966,22 +910,29 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
             </div>
 
             {/* Navigation Links */}
-            <div className={`mt-auto pt-6 border-t transition-all duration-300 ${
+            <div className={`mt-auto pt-6 transition-all duration-300 ${
               isOpen ? 'px-6' : 'px-3'
-            } ${isDark ? 'border-gray-700/50' : 'border-gray-200'}`}>
+            }`}
+                 style={{ borderTop: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'}` }}>
               {links.slice(1).map((link, idx) => (
                 <div key={idx} className={`mb-3 flex ${isOpen ? 'justify-start' : 'justify-center'}`}>
                   <button
                     onClick={link.onClick || (() => navigate(link.href))}
-                    className={`transition-all duration-200 flex items-center text-left ${
-                      isDark 
-                        ? 'hover:bg-gray-700/30 text-gray-300 hover:text-white' 
-                        : 'hover:bg-gray-100 text-gray-700 hover:text-gray-900'
-                    } ${
+                    className={`transition-all duration-200 flex items-center text-left hover:scale-105 ${
                       isOpen 
                         ? 'w-full p-3 rounded-xl gap-3 justify-start min-w-0' 
                         : 'w-12 h-12 rounded-xl justify-center'
                     }`}
+                    style={{
+                      backgroundColor: 'transparent',
+                      color: link.label === 'Logout' ? '#ef4444' : isDark ? '#ffffff' : '#000000'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = 'transparent';
+                    }}
                   >
                     <div className="shrink-0">
                       {link.icon}
@@ -1004,41 +955,47 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
           </div>
 
           {/* User Profile Section */}
-          <div className={`border-t pt-5 pb-3 transition-all duration-300 ${
+          <div className={`pt-5 pb-3 transition-all duration-300 ${
             isOpen ? 'px-6' : 'px-3'
-          } ${isDark ? 'border-gray-700/50' : 'border-gray-200'} flex ${
-            isOpen ? 'justify-start' : 'justify-center'
-          }`}>
+          } flex ${isOpen ? 'justify-start' : 'justify-center'}`}
+               style={{ borderTop: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'}` }}>
             <button
               onClick={() => navigate('/profile')}
-              className={`transition-all duration-200 flex items-center text-left ${
-                isDark 
-                  ? 'hover:bg-gray-700/30 text-gray-300' 
-                  : 'hover:bg-gray-100 text-gray-700'
-              } ${
+              className={`transition-all duration-200 flex items-center text-left hover:scale-105 ${
                 isOpen 
                   ? 'w-full p-3 rounded-xl gap-3 justify-start min-w-0' 
                   : 'w-12 h-12 rounded-xl justify-center p-0'
               }`}
+              style={{ 
+                backgroundColor: 'transparent',
+                color: isDark ? '#ffffff' : '#000000'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = 'transparent';
+              }}
             >
               <div className={`relative shrink-0 ${isOpen ? '' : 'flex items-center justify-center'}`}>
                 <img
                   src={getProfilePictureUrl()}
-                  className={`rounded-full object-cover border-2 transition-all duration-200 ${
-                    isDark ? 'border-gray-600' : 'border-gray-200'
-                  } ${isOpen ? 'h-8 w-8' : 'h-10 w-10'}`}
+                  className={`rounded-full object-cover transition-all duration-200 ${
+                    isOpen ? 'h-8 w-8' : 'h-10 w-10'
+                  }`}
+                  style={{ border: `2px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}` }}
                   alt="Avatar"
                   onError={(e) =>
                     (e.target.src = "https://assets.aceternity.com/manu.png")
                   }
                 />
-                <div className={`absolute rounded-full border-2 transition-all duration-200 ${
-                  isDark ? 'border-gray-800' : 'border-white'
-                } ${
-                  chatContextAvailable && isConnected ? 'bg-green-500' : 'bg-gray-400'
-                } ${
+                <div className={`absolute rounded-full transition-all duration-200 ${
                   isOpen ? '-bottom-0.5 -right-0.5 w-3 h-3' : '-bottom-1 -right-1 w-4 h-4'
-                }`}></div>
+                }`}
+                     style={{ 
+                       backgroundColor: chatContextAvailable && isConnected ? '#22c55e' : '#6b7280',
+                       border: `2px solid ${isDark ? '#1F1F1F' : '#f8f9fa'}`
+                     }}></div>
               </div>
               
               {isOpen && (
@@ -1049,14 +1006,12 @@ const SideBar = ({ onSelectSession, onToggle, selectedSessionId, onSessionDelete
                   transition={{ duration: 0.2 }}
                   className="flex-1 min-w-0"
                 >
-                  <div className={`font-medium truncate transition-colors duration-200 ${
-                    isDark ? 'text-gray-200' : 'text-gray-800'
-                  }`}>
+                  <div className="font-medium truncate transition-colors duration-200"
+                       style={{ color: isDark ? '#ffffff' : '#000000' }}>
                     {user?.name || "User Name"}
                   </div>
-                  <div className={`text-xs transition-colors duration-200 ${
-                    isDark ? 'text-gray-500' : 'text-gray-500'
-                  }`}>
+                  <div className="text-xs transition-colors duration-200"
+                       style={{ color: isDark ? '#888888' : '#6b7280' }}>
                     {chatContextAvailable && isConnected ? 'Online' : 'Offline'}
                   </div>
                 </motion.div>

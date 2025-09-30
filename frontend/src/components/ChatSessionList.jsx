@@ -12,35 +12,33 @@ const DeleteConfirmationDialog = ({ isOpen, onConfirm, onCancel, isDark, session
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       {/* Backdrop */}
       <div 
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+        className="absolute inset-0 backdrop-blur-sm transition-opacity"
+        style={{ backgroundColor: isDark ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.8)' }}
         onClick={onCancel}
       ></div>
       
       {/* Dialog */}
-      <div className={`relative w-full max-w-md mx-auto rounded-2xl border shadow-2xl transition-all transform scale-100 ${
-        isDark 
-          ? 'bg-gray-800 border-gray-700' 
-          : 'bg-white border-gray-200'
-      }`}>
+      <div className="relative w-full max-w-md mx-auto rounded-2xl shadow-2xl transition-all transform scale-100"
+           style={{ 
+             backgroundColor: isDark ? '#2f2f2f' : '#ffffff',
+             border: `1px solid ${isDark ? '#4a4a4a' : '#e5e5e5'}`
+           }}>
         <div className="p-6">
           {/* Icon */}
-          <div className={`flex items-center justify-center w-12 h-12 mx-auto mb-4 rounded-full ${
-            isDark ? 'bg-red-900/30' : 'bg-red-100'
-          }`}>
-            <IconExclamationTriangle size={24} className={isDark ? 'text-red-400' : 'text-red-600'} />
+          <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 rounded-full"
+               style={{ backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.1)' }}>
+            <IconExclamationTriangle size={24} style={{ color: '#ef4444' }} />
           </div>
           
           {/* Title */}
-          <h3 className={`text-lg font-semibold text-center mb-2 ${
-            isDark ? 'text-white' : 'text-gray-900'
-          }`}>
+          <h3 className="text-lg font-semibold text-center mb-2"
+              style={{ color: isDark ? '#ffffff' : '#000000' }}>
             Delete Chat Session
           </h3>
           
           {/* Message */}
-          <p className={`text-sm text-center mb-6 leading-relaxed ${
-            isDark ? 'text-gray-300' : 'text-gray-600'
-          }`}>
+          <p className="text-sm text-center mb-6 leading-relaxed"
+             style={{ color: isDark ? '#d1d5db' : '#6b7280' }}>
             Are you sure you want to delete "{sessionTitle}"? This action cannot be undone.
           </p>
           
@@ -48,17 +46,19 @@ const DeleteConfirmationDialog = ({ isOpen, onConfirm, onCancel, isDark, session
           <div className="flex gap-3">
             <button
               onClick={onCancel}
-              className={`flex-1 px-4 py-2.5 rounded-xl font-medium transition-all duration-200 ${
-                isDark 
-                  ? 'bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600' 
-                  : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300'
-              }`}
+              className="flex-1 px-4 py-2.5 rounded-xl font-medium transition-all duration-200 hover:scale-[1.02]"
+              style={{ 
+                backgroundColor: isDark ? '#4a4a4a' : '#f5f5f5',
+                color: isDark ? '#d1d5db' : '#374151',
+                border: `1px solid ${isDark ? '#4a4a4a' : '#e5e5e5'}`
+              }}
             >
               Cancel
             </button>
             <button
               onClick={onConfirm}
-              className="flex-1 px-4 py-2.5 rounded-xl font-medium text-white bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+              className="flex-1 px-4 py-2.5 rounded-xl font-medium transition-all duration-200 hover:scale-[1.02]"
+              style={{ backgroundColor: '#ef4444', color: '#ffffff' }}
             >
               Delete
             </button>
@@ -172,7 +172,7 @@ const ChatSessionList = ({ onSelect }) => {
         },
         body: JSON.stringify({
           title: 'New Chat',
-          autoUpdateTitle: true // <-- Added this line
+          autoUpdateTitle: true
         })
       });
 
@@ -425,7 +425,7 @@ const ChatSessionList = ({ onSelect }) => {
   // ✅ FORMATTING FUNCTIONS
   const formatSessionTitle = useCallback((session) => {
     if (session.title && session.title !== 'New Chat') {
-      return session.title.length > 30 ? `${session.title.substring(0, 30)}...` : session.title;
+      return session.title.length > 25 ? `${session.title.substring(0, 25)}...` : session.title;
     }
     return 'New Chat';
   }, []);
@@ -469,43 +469,38 @@ const ChatSessionList = ({ onSelect }) => {
   // ✅ RENDER
   return (
     <>
-      <div className={`h-full flex flex-col transition-all duration-300 ${
-        isDark 
-          ? 'bg-gradient-to-b from-gray-800 via-gray-900 to-black' 
-          : 'bg-gradient-to-b from-gray-100 via-gray-200 to-gray-300'
-      }`}>
+      <div className="h-full flex flex-col transition-all duration-300"
+           style={{ backgroundColor: isDark ? '#171717' : '#ffffff' }}>
         
         {/* Header */}
-        <div className={`p-4 border-b transition-all duration-300 ${
-          isDark 
-            ? 'border-gray-700/50 bg-gray-800/50 backdrop-blur-sm' 
-            : 'border-gray-300/50 bg-white/50 backdrop-blur-sm'
-        }`}>
+        <div className="p-3 sm:p-4 transition-all duration-300"
+             style={{ 
+               borderBottom: `1px solid ${isDark ? '#4a4a4a' : '#e5e5e5'}`,
+               backgroundColor: isDark ? 'rgba(47, 47, 47, 0.5)' : 'rgba(255, 255, 255, 0.5)',
+               backdropFilter: 'blur(10px)'
+             }}>
           <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-3">
-              <div className="w-6 h-6 bg-gradient-to-br from-purple-500 via-blue-500 to-cyan-500 rounded-lg flex items-center justify-center shadow-lg">
-                <IconMessage size={14} className="text-white" />
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-lg flex items-center justify-center"
+                   style={{ backgroundColor: isDark ? '#10a37f' : '#000000' }}>
+                <IconMessage size={12} className="text-white" />
               </div>
-              <h2 className={`text-sm font-bold transition-colors ${
-                isDark 
-                  ? 'bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent' 
-                  : 'bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent'
-              }`}>
+              <h2 className="text-xs sm:text-sm font-bold"
+                  style={{ color: isDark ? '#ffffff' : '#000000' }}>
                 Chat Sessions
               </h2>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-2">
               {chatContextAvailable && (
-                <div className={`text-xs px-2 py-1 rounded-full font-medium transition-all ${
-                  isConnected 
-                    ? isDark 
-                      ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-500/30' 
-                      : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                    : isDark 
-                      ? 'bg-red-900/30 text-red-400 border border-red-500/30' 
-                      : 'bg-red-100 text-red-700 border border-red-200'
-                }`}>
+                <div className="text-xs px-2 py-1 rounded-full font-medium transition-all hidden sm:block"
+                     style={{
+                       backgroundColor: isConnected 
+                         ? isDark ? 'rgba(34, 197, 94, 0.2)' : 'rgba(34, 197, 94, 0.1)'
+                         : isDark ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.1)',
+                       color: isConnected ? '#22c55e' : '#ef4444',
+                       border: `1px solid ${isConnected ? '#22c55e' : '#ef4444'}`
+                     }}>
                   {isConnected ? '⚡ Live' : '🔄 Sync'}
                 </div>
               )}
@@ -513,11 +508,12 @@ const ChatSessionList = ({ onSelect }) => {
               <button
                 onClick={createNewSession}
                 disabled={loading}
-                className={`p-2 rounded-xl transition-all duration-200 disabled:opacity-50 group ${
-                  isDark 
-                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white shadow-lg hover:shadow-xl' 
-                    : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white shadow-md hover:shadow-lg'
-                } transform hover:scale-105`}
+                className="p-2 rounded-xl transition-all duration-200 disabled:opacity-50 group transform hover:scale-105"
+                style={{
+                  backgroundColor: isDark ? '#10a37f' : '#000000',
+                  color: '#ffffff',
+                  boxShadow: isDark ? '0 4px 12px rgba(16, 163, 127, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.2)'
+                }}
                 title="Create new chat"
               >
                 <IconPlus size={14} className="group-hover:rotate-90 transition-transform duration-200" />
@@ -525,9 +521,8 @@ const ChatSessionList = ({ onSelect }) => {
             </div>
           </div>
           
-          <div className={`text-xs flex items-center gap-2 ${
-            isDark ? 'text-gray-400' : 'text-gray-600'
-          }`}>
+          <div className="text-xs flex items-center gap-2"
+               style={{ color: isDark ? '#d1d5db' : '#6b7280' }}>
             <IconRobot size={12} />
             <span>{sessions.length} conversations</span>
           </div>
@@ -538,23 +533,26 @@ const ChatSessionList = ({ onSelect }) => {
           {loading ? (
             <div className="flex flex-col items-center justify-center py-8 px-4">
               <div className="relative mb-4">
-                <div className={`w-8 h-8 rounded-full animate-spin ${
-                  isDark 
-                    ? 'border-2 border-gray-700 border-t-blue-400' 
-                    : 'border-2 border-gray-300 border-t-blue-500'
-                }`}></div>
-                <div className="absolute inset-0 w-8 h-8 bg-gradient-to-r from-blue-500 via-purple-500 to-cyan-500 rounded-full animate-ping opacity-20"></div>
+                <div className="w-8 h-8 rounded-full animate-spin"
+                     style={{ 
+                       border: `2px solid ${isDark ? '#4a4a4a' : '#e5e5e5'}`,
+                       borderTopColor: isDark ? '#10a37f' : '#000000'
+                     }}></div>
+                <div className="absolute inset-0 w-8 h-8 rounded-full animate-ping opacity-20"
+                     style={{ backgroundColor: isDark ? '#10a37f' : '#000000' }}></div>
               </div>
-              <span className={`text-sm font-medium ${
-                isDark ? 'text-gray-300' : 'text-gray-700'
-              }`}>Loading conversations...</span>
+              <span className="text-sm font-medium"
+                    style={{ color: isDark ? '#ffffff' : '#000000' }}>
+                Loading conversations...
+              </span>
             </div>
           ) : error ? (
-            <div className={`m-4 p-4 rounded-xl border transition-all ${
-              isDark 
-                ? 'bg-red-900/20 border-red-500/30 text-red-400' 
-                : 'bg-red-50 border-red-200 text-red-600'
-            }`}>
+            <div className="m-3 sm:m-4 p-4 rounded-xl transition-all"
+                 style={{ 
+                   backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                   border: `1px solid #ef4444`,
+                   color: isDark ? '#ffffff' : '#000000'
+                 }}>
               <div className="font-medium flex items-center gap-2 mb-2">
                 <span className="text-lg">⚠️</span>
                 <span>Connection Error</span>
@@ -562,11 +560,11 @@ const ChatSessionList = ({ onSelect }) => {
               <div className="text-xs opacity-90 mb-3">{error}</div>
               <button
                 onClick={fetchSessions}
-                className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
-                  isDark 
-                    ? 'bg-red-500/20 hover:bg-red-500/30 text-red-300' 
-                    : 'bg-red-100 hover:bg-red-200 text-red-700'
-                }`}
+                className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors hover:scale-105"
+                style={{ 
+                  backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                  color: '#ef4444'
+                }}
               >
                 Retry Connection
               </button>
@@ -574,38 +572,37 @@ const ChatSessionList = ({ onSelect }) => {
           ) : sessions.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 px-6 text-center">
               <div className="relative mb-4">
-                <div className="w-16 h-16 bg-gradient-to-br from-purple-500 via-blue-500 to-cyan-500 rounded-2xl flex items-center justify-center shadow-xl">
-                  <IconRobot size={28} className="text-white" />
+                <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center shadow-xl"
+                     style={{ backgroundColor: isDark ? '#10a37f' : '#000000' }}>
+                  <IconRobot size={24} className="text-white" />
                 </div>
-                <div className="absolute -top-2 -right-2 w-6 h-6 bg-gradient-to-r from-green-400 to-emerald-500 rounded-full flex items-center justify-center">
-                  <IconBolt size={12} className="text-white" />
+                <div className="absolute -top-2 -right-2 w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center"
+                     style={{ backgroundColor: '#22c55e' }}>
+                  <IconBolt size={10} className="text-white" />
                 </div>
               </div>
-              <h3 className={`text-base font-bold mb-2 ${
-                isDark 
-                  ? 'bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent' 
-                  : 'bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent'
-              }`}>
+              <h3 className="text-sm sm:text-base font-bold mb-2"
+                  style={{ color: isDark ? '#ffffff' : '#000000' }}>
                 Ready to Chat!
               </h3>
-              <p className={`text-sm mb-4 leading-relaxed ${
-                isDark ? 'text-gray-400' : 'text-gray-600'
-              }`}>
+              <p className="text-xs sm:text-sm mb-4 leading-relaxed max-w-xs"
+                 style={{ color: isDark ? '#d1d5db' : '#6b7280' }}>
                 No conversations yet. Start your first AI chat session and explore the possibilities.
               </p>
               <button
                 onClick={createNewSession}
-                className={`px-4 py-2 rounded-xl font-medium transition-all duration-200 ${
-                  isDark 
-                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white' 
-                    : 'bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white'
-                } shadow-lg hover:shadow-xl transform hover:scale-105`}
+                className="px-4 py-2 rounded-xl font-medium transition-all duration-200 transform hover:scale-105"
+                style={{
+                  backgroundColor: isDark ? '#10a37f' : '#000000',
+                  color: '#ffffff',
+                  boxShadow: isDark ? '0 4px 12px rgba(16, 163, 127, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.2)'
+                }}
               >
                 Start New Chat
               </button>
             </div>
           ) : (
-            <div className="overflow-y-auto px-3 py-2 space-y-1">
+            <div className="overflow-y-auto px-2 sm:px-3 py-2 space-y-1">
               {sessions.map((session) => {
                 const isCurrentSession = session._id === currentSessionId;
                 const isStreaming = chatContextAvailable ? isSessionStreaming?.(session._id) : false;
@@ -615,17 +612,34 @@ const ChatSessionList = ({ onSelect }) => {
                 return (
                   <div
                     key={session._id}
-                    className={`group relative rounded-xl transition-all duration-200 border ${
-                      isCurrentSession
-                        ? isDark 
-                          ? 'bg-gradient-to-r from-blue-900/40 to-purple-900/40 border-blue-500/50 shadow-lg shadow-blue-500/20' 
-                          : 'bg-gradient-to-r from-blue-100 to-purple-100 border-blue-300 shadow-md'
-                        : isDark 
-                          ? 'hover:bg-gray-700/30 border-gray-700/50 hover:border-gray-600/50' 
-                          : 'hover:bg-white/70 border-gray-200 hover:border-gray-300'
-                    } ${isStreaming ? 'animate-pulse ring-2 ring-purple-500/30' : ''}`}
+                    className={`group relative rounded-xl transition-all duration-200 ${
+                      isCurrentSession ? 'ring-2' : ''
+                    } ${isStreaming ? 'animate-pulse' : ''}`}
+                    style={{
+                      backgroundColor: isCurrentSession
+                        ? isDark ? 'rgba(16, 163, 127, 0.1)' : 'rgba(0, 0, 0, 0.05)'
+                        : isDark ? 'transparent' : 'transparent',
+                      border: `1px solid ${
+                        isCurrentSession 
+                          ? isDark ? '#10a37f' : '#000000'
+                          : isDark ? '#4a4a4a' : '#e5e5e5'
+                      }`,
+                      ringColor: isCurrentSession 
+                        ? isDark ? '#10a37f' : '#000000' 
+                        : 'transparent'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isCurrentSession) {
+                        e.target.style.backgroundColor = isDark ? 'rgba(47, 47, 47, 0.5)' : 'rgba(245, 245, 245, 0.5)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isCurrentSession) {
+                        e.target.style.backgroundColor = 'transparent';
+                      }
+                    }}
                   >
-                    <div className="p-3">
+                    <div className="p-2.5 sm:p-3">
                       <div className="flex items-center justify-between">
                         <div 
                           className="flex-1 min-w-0 cursor-pointer"
@@ -637,11 +651,14 @@ const ChatSessionList = ({ onSelect }) => {
                                 type="text"
                                 value={editingTitle}
                                 onChange={(e) => setEditingTitle(e.target.value)}
-                                className={`flex-1 text-sm p-2 border rounded-lg focus:outline-none transition-colors ${
-                                  isDark 
-                                    ? 'bg-gray-800 border-gray-600 text-gray-200 focus:border-blue-400' 
-                                    : 'bg-white border-gray-300 text-gray-800 focus:border-blue-500'
-                                }`}
+                                className="flex-1 text-xs sm:text-sm p-2 rounded-lg focus:outline-none focus:ring-2 transition-colors"
+                                style={{ 
+                                  backgroundColor: isDark ? '#4a4a4a' : '#f9f9f9',
+                                  border: `1px solid ${isDark ? '#4a4a4a' : '#e5e5e5'}`,
+                                  color: isDark ? '#ffffff' : '#000000'
+                                }}
+                                onFocus={(e) => e.target.style.boxShadow = `0 0 0 2px ${isDark ? '#10a37f' : '#000000'}33`}
+                                onBlur={(e) => e.target.style.boxShadow = 'none'}
                                 placeholder="Session title..."
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') saveEdit();
@@ -651,50 +668,55 @@ const ChatSessionList = ({ onSelect }) => {
                               />
                               <button
                                 onClick={saveEdit}
-                                className={`p-1.5 rounded-lg transition-colors ${
-                                  isDark 
-                                    ? 'text-emerald-400 hover:bg-emerald-500/20' 
-                                    : 'text-emerald-600 hover:bg-emerald-100'
-                                }`}
+                                className="p-1.5 rounded-lg transition-colors hover:scale-110"
+                                style={{ 
+                                  color: '#22c55e',
+                                  backgroundColor: 'rgba(34, 197, 94, 0.1)'
+                                }}
                               >
-                                <IconCheck size={14} />
+                                <IconCheck size={12} />
                               </button>
                               <button
                                 onClick={cancelEditing}
-                                className={`p-1.5 rounded-lg transition-colors ${
-                                  isDark 
-                                    ? 'text-red-400 hover:bg-red-500/20' 
-                                    : 'text-red-600 hover:bg-red-100'
-                                }`}
+                                className="p-1.5 rounded-lg transition-colors hover:scale-110"
+                                style={{ 
+                                  color: '#ef4444',
+                                  backgroundColor: 'rgba(239, 68, 68, 0.1)'
+                                }}
                               >
-                                <IconX size={14} />
+                                <IconX size={12} />
                               </button>
                             </div>
                           ) : (
                             <div className="flex items-center gap-2">
-                              <div className={`w-2 h-2 rounded-full ${
-                                isCurrentSession 
-                                  ? 'bg-gradient-to-r from-blue-400 to-purple-400 shadow-lg' 
-                                  : isDark 
-                                    ? 'bg-gray-600' 
-                                    : 'bg-gray-400'
-                              }`}></div>
-                              <span className={`font-medium text-sm truncate transition-colors ${
-                                isCurrentSession 
-                                  ? isDark 
-                                    ? 'text-blue-300' 
-                                    : 'text-blue-700'
-                                  : isDark 
-                                    ? 'text-gray-200' 
-                                    : 'text-gray-800'
-                              }`}>
+                              <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full"
+                                   style={{ 
+                                     backgroundColor: isCurrentSession 
+                                       ? isDark ? '#10a37f' : '#000000'
+                                       : isDark ? '#4a4a4a' : '#d1d5db'
+                                   }}></div>
+                              <span className="font-medium text-xs sm:text-sm truncate transition-colors"
+                                    style={{ 
+                                      color: isCurrentSession 
+                                        ? isDark ? '#10a37f' : '#000000'
+                                        : isDark ? '#ffffff' : '#000000'
+                                    }}>
                                 {formatSessionTitle(session)}
                               </span>
                               {isStreaming && (
                                 <div className="flex items-center gap-1 ml-auto">
-                                  <div className="w-1 h-1 bg-purple-400 rounded-full animate-pulse"></div>
-                                  <div className="w-1 h-1 bg-blue-400 rounded-full animate-pulse" style={{animationDelay: '0.2s'}}></div>
-                                  <div className="w-1 h-1 bg-cyan-400 rounded-full animate-pulse" style={{animationDelay: '0.4s'}}></div>
+                                  <div className="w-1 h-1 rounded-full animate-pulse"
+                                       style={{ backgroundColor: isDark ? '#10a37f' : '#000000' }}></div>
+                                  <div className="w-1 h-1 rounded-full animate-pulse"
+                                       style={{ 
+                                         backgroundColor: isDark ? '#10a37f' : '#000000',
+                                         animationDelay: '0.2s'
+                                       }}></div>
+                                  <div className="w-1 h-1 rounded-full animate-pulse"
+                                       style={{ 
+                                         backgroundColor: isDark ? '#10a37f' : '#000000',
+                                         animationDelay: '0.4s'
+                                       }}></div>
                                 </div>
                               )}
                             </div>
@@ -709,35 +731,32 @@ const ChatSessionList = ({ onSelect }) => {
                                 e.stopPropagation();
                                 startEditing(session._id, session.title);
                               }}
-                              className={`p-1.5 rounded-lg transition-colors ${
-                                isDark 
-                                  ? 'text-gray-400 hover:text-blue-400 hover:bg-blue-500/20' 
-                                  : 'text-gray-500 hover:text-blue-600 hover:bg-blue-100'
-                              }`}
+                              className="p-1.5 rounded-lg transition-all hover:scale-110"
+                              style={{ 
+                                color: isDark ? '#d1d5db' : '#6b7280',
+                                backgroundColor: isDark ? 'rgba(209, 213, 219, 0.1)' : 'rgba(107, 114, 128, 0.1)'
+                              }}
                               title="Edit title"
                             >
-                              <IconEdit size={12} />
+                              <IconEdit size={10} />
                             </button>
-                            {/* ✅ DELETE BUTTON - NO MORE window.confirm() */}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 openDeleteDialog(session._id, formatSessionTitle(session));
                               }}
                               disabled={isDeleting}
-                              className={`p-1.5 rounded-lg transition-colors disabled:opacity-50 ${
-                                isDark 
-                                  ? 'text-gray-400 hover:text-red-400 hover:bg-red-500/20' 
-                                  : 'text-gray-500 hover:text-red-600 hover:bg-red-100'
-                              }`}
+                              className="p-1.5 rounded-lg transition-all hover:scale-110 disabled:opacity-50"
+                              style={{ 
+                                color: '#ef4444',
+                                backgroundColor: 'rgba(239, 68, 68, 0.1)'
+                              }}
                               title="Delete session"
                             >
                               {isDeleting ? (
-                                <div className={`animate-spin rounded-full h-3 w-3 border ${
-                                  isDark ? 'border-red-400 border-t-transparent' : 'border-red-600 border-t-transparent'
-                                }`}></div>
+                                <div className="animate-spin rounded-full h-2.5 w-2.5 border border-red-500 border-t-transparent"></div>
                               ) : (
-                                <IconTrash size={12} />
+                                <IconTrash size={10} />
                               )}
                             </button>
                           </div>
@@ -753,11 +772,12 @@ const ChatSessionList = ({ onSelect }) => {
 
         {/* Debug Footer */}
         {debug && process.env.NODE_ENV === 'development' && (
-          <div className={`p-3 border-t text-xs transition-all ${
-            isDark 
-              ? 'border-gray-700/50 bg-gray-800/30 text-gray-500' 
-              : 'border-gray-300/50 bg-gray-100/50 text-gray-600'
-          }`}>
+          <div className="p-3 text-xs transition-all"
+               style={{ 
+                 borderTop: `1px solid ${isDark ? '#4a4a4a' : '#e5e5e5'}`,
+                 backgroundColor: isDark ? 'rgba(47, 47, 47, 0.3)' : 'rgba(245, 245, 245, 0.5)',
+                 color: isDark ? '#d1d5db' : '#6b7280'
+               }}>
             <div className="flex items-center gap-2 mb-1">
               <IconBolt size={12} />
               <span className="font-medium">Debug Mode</span>
