@@ -14,6 +14,17 @@ import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
+// Custom scrollbar hiding styles
+const scrollbarStyles = `
+  .hide-scrollbar {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari and Opera */
+  }
+`;
+
 const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete, onMobileMenuToggle }) => {
   // ✅ CLERK AUTH INTEGRATION
   const { getToken, userId: clerkUserId, isSignedIn } = useAuth();
@@ -53,9 +64,12 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete, onMo
   const [showPasteIndicator, setShowPasteIndicator] = useState(false);
   const [fileValidationError, setFileValidationError] = useState(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [isNearBottom, setIsNearBottom] = useState(true);
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const messagesContainerRef = useRef(null);
 
   // CHAT CONTEXT INTEGRATION
   let chatContext = null;
@@ -702,12 +716,57 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete, onMo
     }
   };
 
+  // SCROLL HANDLING
+  const handleScroll = useCallback(() => {
+    if (!messagesContainerRef.current) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+    const scrollPosition = scrollTop + clientHeight;
+    const threshold = 100; // Show button when 100px from bottom
+    
+    const nearBottom = scrollHeight - scrollPosition < threshold;
+    setIsNearBottom(nearBottom);
+    setShowScrollButton(!nearBottom && scrollHeight > clientHeight);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTo({
+        top: messagesContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+  }, []);
+
+  // INITIAL STYLE INJECTION FOR SCROLLBAR
+  useEffect(() => {
+    const styleElement = document.createElement('style');
+    styleElement.innerHTML = scrollbarStyles;
+    document.head.appendChild(styleElement);
+    
+    return () => {
+      document.head.removeChild(styleElement);
+    };
+  }, []);
+
+  // SCROLL LISTENER EFFECT
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    
+    container.addEventListener('scroll', handleScroll);
+    // Initial check
+    handleScroll();
+    
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [handleScroll]);
+
   // AUTO-SCROLL
   useEffect(() => {
-    if (messagesEndRef.current) {
+    if (isNearBottom && messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [actualMessages, isAIStreaming]);
+  }, [actualMessages, isAIStreaming, isNearBottom]);
 
   // VOICE INPUT TRANSCRIPT HANDLING
   useEffect(() => {
@@ -819,7 +878,11 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete, onMo
       <div className="lg:hidden h-16"></div>
 
       {/* ✅ MESSAGES AREA */}
-      <div className="flex-1 overflow-y-auto">
+      <div 
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto hide-scrollbar relative"
+        style={{ scrollBehavior: 'smooth' }}
+      >
         {(isFetchingFallback || isLoadingMessages) ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center space-y-3">
@@ -865,6 +928,24 @@ const ChatDashBoard = ({ selectedSession, onSessionUpdate, onSessionDelete, onMo
             })}
             <div ref={messagesEndRef} />
           </div>
+        )}
+
+        {/* ✅ SCROLL TO BOTTOM BUTTON */}
+        {showScrollButton && (
+          <button
+            onClick={scrollToBottom}
+            className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-20 p-3 rounded-full shadow-lg transition-all duration-200 hover:scale-105"
+            style={{
+              backgroundColor: isDark ? '#333333' : '#ffffff',
+              border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)'}`,
+              color: isDark ? '#ffffff' : '#000000'
+            }}
+            title="Scroll to bottom"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+            </svg>
+          </button>
         )}
       </div>
 
