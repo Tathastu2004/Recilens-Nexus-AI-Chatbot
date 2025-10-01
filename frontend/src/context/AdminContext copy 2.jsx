@@ -135,28 +135,16 @@ export const AdminProvider = ({ children }) => {
       console.log('📊 Fetching real-time analytics...');
       const apiClient = await createApiClient();
       const res = await apiClient.get("/analytics/realtime");
-      
-      // ✅ Enhanced logging for intent data
       console.log('✅ Real-time analytics received:', res.data);
-      console.log('🎯 Intent analytics data:', res.data?.data?.intentAnalytics);
-      console.log('📊 Intent count:', res.data?.data?.intentAnalytics?.length || 0);
       
-      // ✅ Detailed intent logging
-      if (res.data?.data?.intentAnalytics?.length > 0) {
-        res.data.data.intentAnalytics.forEach((intent, index) => {
-          console.log(`🎯 Intent ${index + 1}: "${intent.intent}" - ${intent.totalQueries} queries`);
-        });
-      } else {
-        console.log('⚠️ No intent analytics data received from backend');
-      }
-      
-      return res.data.data;
+      // Return the data structure that Analytics.jsx expects
+      return res.data.data; // Return just the data part, not the wrapper
     } catch (err) {
       const errorMsg = err.response?.data?.message || err.message;
       console.error('❌ Real-time analytics error:', errorMsg);
       setError(errorMsg);
       
-      // ✅ Remove fallback - let frontend handle empty state
+      // Return fallback mock data with correct structure
       return {
         summary: {
           totalUsers: 0,
@@ -166,16 +154,30 @@ export const AdminProvider = ({ children }) => {
           newUsers24h: 0,
           messages24h: 0,
           avgResponseTime: 0,
-          growthRates: { users: 0, messages: 0, sessions: 0 }
+          growthRates: {
+            users: 0,
+            messages: 0,
+            sessions: 0
+          }
         },
-        intentAnalytics: [], // ✅ Empty array - no fallback
+        intentAnalytics: [],
         hourlyDistribution: [],
         userDistribution: [],
-        responseTimeStats: { minResponseTime: 0, maxResponseTime: 0, avgResponseTime: 0, totalRequests: 0 },
+        responseTimeStats: {
+          minResponseTime: 0,
+          maxResponseTime: 0,
+          avgResponseTime: 0,
+          totalRequests: 0
+        },
         dailyRegistrations: [],
         userActivityByRole: [],
         messageTypes: [],
-        sessionStats: { avgDuration: 0, totalSessions: 0, activeSessions: 0, bounceRate: 0 }
+        sessionStats: {
+          avgDuration: 0,
+          totalSessions: 0,
+          activeSessions: 0,
+          bounceRate: 0
+        }
       };
     } finally {
       setAnalyticsLoading(false);

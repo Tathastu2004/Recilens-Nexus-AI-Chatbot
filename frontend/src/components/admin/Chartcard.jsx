@@ -27,7 +27,8 @@ export default function ChartCard({ title, children, className = "", actions, ic
       </div>
       
       {/* Content */}
-      <div className="p-6">
+      <div className="p-6"
+           style={{ color: isDark ? '#ffffff' : '#000000' }}>
         <div className={`${height} flex items-center justify-center`}>
           {children}
         </div>

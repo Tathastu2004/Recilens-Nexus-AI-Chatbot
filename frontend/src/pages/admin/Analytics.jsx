@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useAdmin } from "../../context/AdminContext";
 import { useAuth } from "@clerk/clerk-react";
 import {
@@ -10,13 +10,13 @@ import {
   IconRefresh, IconTrendingUp, IconUsers, IconMessageCircle, 
   IconClock, IconActivity, IconAlertCircle, IconArrowLeft,
   IconCalendar, IconUserPlus, IconTrendingDown, IconEye,
-  IconTarget, IconCpu, IconDatabase, IconMenu2  // ✅ Add IconMenu2
+  IconTarget, IconCpu, IconDatabase, IconMenu2
 } from "@tabler/icons-react";
 import { useTheme } from "../../context/ThemeContext";
 import { useNavigate } from "react-router-dom";
-// import Sidebar from "../../components/admin/Sidebar";  // ✅ Add Sidebar import
 
 export default function Analytics() {
+  // ✅ ALL HOOKS MUST BE DECLARED FIRST - NO CONDITIONAL EXECUTION
   const { getToken } = useAuth();
   const { getRealTimeAnalytics, startAnalyticsStream } = useAdmin();
   const { isDark } = useTheme();
@@ -29,13 +29,125 @@ export default function Analytics() {
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [streamData, setStreamData] = useState(null);
-  // // const [sidebarOpen, setSidebarOpen] = useState(false);
-  // const [isSidebarOpen, setIsSidebarOpen] = useState(false); // ✅ Add sidebar state
 
   const refreshIntervalRef = useRef(null);
   const streamCleanupRef = useRef(null);
 
-  // ✅ Fetch real-time analytics data
+  // ✅ SAFE DATA DESTRUCTURING - Always runs, never conditional
+  const { 
+    summary, 
+    intentAnalytics, 
+    hourlyDistribution, 
+    userDistribution, 
+    responseTimeStats,
+    dailyRegistrations,
+    userActivityByRole,
+    messageTypes,
+    sessionStats
+  } = analyticsData || {};
+
+  // ✅ ALL useMemo and useCallback hooks - Always executed
+  const CHART_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#F97316', '#06B6D4', '#84CC16'];
+  
+  const registrationChartData = useMemo(() => {
+    if (!dailyRegistrations || dailyRegistrations.length === 0) return [];
+    return dailyRegistrations.map(item => ({
+      date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      fullDate: new Date(item.date).toLocaleDateString(),
+      dayOfWeek: new Date(item.date).toLocaleDateString('en-US', { weekday: 'short' }),
+      registrations: item.count || 0
+    }));
+  }, [dailyRegistrations]);
+
+  const hourlyChartData = useMemo(() => {
+    if (!hourlyDistribution || hourlyDistribution.length === 0) return [];
+    return hourlyDistribution.map(item => ({
+      hour: item.hour.toString().padStart(2, '0'),
+      userActivity: item.userCount || 0,
+      messageActivity: item.messageCount || 0
+    }));
+  }, [hourlyDistribution]);
+
+  const userActivityChartData = useMemo(() => {
+    if (!userActivityByRole || userActivityByRole.length === 0) return [];
+    return userActivityByRole.map(item => ({
+      date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      adminActivity: item.adminActivity || 0,
+      userActivity: item.userActivity || 0
+    }));
+  }, [userActivityByRole]);
+
+  const intentChartData = useMemo(() => {
+    console.log('🔄 Processing intent chart data...');
+    console.log('📊 Raw intentAnalytics:', intentAnalytics);
+    
+    if (!intentAnalytics || intentAnalytics.length === 0) {
+      console.log('⚠️ No intent analytics data to process');
+      return [];
+    }
+    
+    const processed = intentAnalytics.slice(0, 8).map((item, index) => {
+      let cleanIntentName = item.intent || 'Unknown';
+      
+      console.log(`🎯 Processing intent ${index + 1}: "${cleanIntentName}"`);
+      
+      // Clean the intent field - extract from "the intent is: general" format
+      if (typeof cleanIntentName === 'string') {
+        const original = cleanIntentName;
+        cleanIntentName = cleanIntentName
+          .replace(/^the intent is:\s*/i, '')
+          .trim();
+        
+        if (original !== cleanIntentName) {
+          console.log(`🧹 Cleaned intent: "${original}" → "${cleanIntentName}"`);
+        }
+      }
+      
+      // Better intent name mapping
+      const intentMap = {
+        'general': 'General Chat',
+        'document_analysis': 'Document Analysis', 
+        'technical_support': 'Tech Support',
+        'code_help': 'Code Help',
+        'chat_general': 'General Chat',
+        'support_request': 'Support',
+        'data_analysis': 'Data Analysis',
+        'file_upload': 'File Upload',
+        'user_management': 'User Mgmt',
+        'system_info': 'System Info',
+        'greeting': 'Greetings',
+        'farewell': 'Farewell',
+        'help_request': 'Help Request',
+        'question_answering': 'Q&A'
+      };
+      
+      const displayName = intentMap[cleanIntentName.toLowerCase()] || 
+                         cleanIntentName
+                           .replace(/_/g, ' ')
+                           .replace(/\b\w/g, l => l.toUpperCase())
+                           .replace(/Chat$/i, '')
+                           .replace(/Support$/i, 'Help')
+                           .trim();
+
+      const result = {
+        name: displayName.length > 12 ? displayName.substring(0, 12) + '...' : displayName,
+        fullName: displayName,
+        queries: item.totalQueries || 0,
+        accuracy: item.accuracy || 0,
+        avgTime: item.avgResponseTime || 0,
+        recent24h: item.recent24h || 0,
+        recent7d: item.recent7d || 0
+      };
+      
+      console.log(`✅ Processed intent: ${result.fullName} (${result.queries} queries)`);
+      return result;
+    });
+    
+    console.log(`🎯 Final processed intent data: ${processed.length} items`);
+    return processed;
+  }, [intentAnalytics]);
+
+  // Fetch real-time analytics data
   const fetchAnalytics = useCallback(async () => {
     try {
       setLoading(true);
@@ -55,7 +167,7 @@ export default function Analytics() {
     }
   }, [getRealTimeAnalytics]);
 
-  // ✅ Setup auto-refresh and real-time stream
+  // Setup auto-refresh and real-time stream
   useEffect(() => {
     let isMounted = true;
     let cleanupFn = null;
@@ -92,7 +204,28 @@ export default function Analytics() {
     };
   }, [fetchAnalytics, startAnalyticsStream]);
 
-  // ✅ Enhanced stat card component - FIXED TEXT VISIBILITY
+  // Debug logging
+  useEffect(() => {
+    console.log('📊 Analytics Data State Updated:', {
+      analyticsData: analyticsData,
+      intentAnalytics: intentAnalytics,
+      intentAnalyticsLength: intentAnalytics?.length || 0,
+      messageTypes: messageTypes,
+      userDistribution: userDistribution,
+      hourlyDistribution: hourlyDistribution
+    });
+    
+    if (intentAnalytics?.length > 0) {
+      console.log('🎯 Intent Analytics Details:');
+      intentAnalytics.forEach((intent, index) => {
+        console.log(`  ${index + 1}. Intent: "${intent.intent}", Queries: ${intent.totalQueries}, Accuracy: ${intent.accuracy}%`);
+      });
+    } else {
+      console.log('⚠️ No intent analytics available in state');
+    }
+  }, [analyticsData, intentAnalytics, messageTypes, userDistribution, hourlyDistribution]);
+
+  // ✅ COMPONENT DEFINITIONS - Not hooks, safe to define anywhere
   const StatCard = ({ title, value, change, icon: Icon, subtitle, trend }) => (
     <div className="p-4 sm:p-6 rounded-2xl transition-all hover:scale-[1.02] duration-200"
          style={{ 
@@ -140,7 +273,6 @@ export default function Analytics() {
     </div>
   );
 
-  // ✅ Enhanced chart container - FIXED COLORS
   const ChartCard = ({ title, children, actions, icon: Icon }) => (
     <div className="rounded-2xl overflow-hidden transition-all hover:scale-[1.01] duration-200"
          style={{ 
@@ -167,7 +299,204 @@ export default function Analytics() {
     </div>
   );
 
-  // ✅ Loading state
+  const renderIntentDistributionChart = () => {
+    console.log('🎨 Rendering Intent Distribution Chart');
+    console.log('📊 Intent Chart Data:', intentChartData);
+    console.log('📊 Data Length:', intentChartData?.length || 0);
+    
+    if (intentChartData && intentChartData.length > 0) {
+      return (
+        <ResponsiveContainer width="100%" height={320}>
+          <BarChart data={intentChartData} margin={{ top: 20, right: 30, left: 20, bottom: 80 }}>
+            <defs>
+              <linearGradient id="intentGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.8}/>
+                <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.3}/>
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'} />
+            <XAxis 
+              dataKey="name" 
+              tick={{ 
+                fontSize: 10, 
+                fill: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)',
+                fontWeight: 500
+              }}
+              interval={0}
+              angle={-45}
+              textAnchor="end"
+              height={80}
+              axisLine={{ stroke: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)' }}
+            />
+            <YAxis 
+              tick={{ 
+                fontSize: 12, 
+                fill: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)',
+                fontWeight: 500
+              }} 
+              axisLine={{ stroke: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)' }} 
+            />
+            <Tooltip 
+              formatter={(value, name, props) => [value.toLocaleString(), 'Queries']}
+              labelFormatter={(label, payload) => {
+                if (payload && payload[0]) {
+                  return payload[0].payload.fullName;
+                }
+                return label;
+              }}
+              contentStyle={{ 
+                backgroundColor: isDark ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.9)',
+                border: 'none',
+                borderRadius: '12px',
+                color: isDark ? '#ffffff' : '#000000',
+                backdropFilter: 'blur(10px)',
+                boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.3)'
+              }}
+            />
+            <Bar dataKey="queries" fill="url(#intentGradient)" radius={[6, 6, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      );
+    } else {
+      console.log('🎨 Rendering Empty State for Intent Chart');
+      return (
+        <div className="h-80 flex items-center justify-center">
+          <div className="text-center">
+            <IconTarget size={48} className="mx-auto mb-4 opacity-30" 
+                       style={{ color: isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.3)' }} />
+            <p className="text-lg font-medium mb-2"
+               style={{ color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}>
+              No Intent Data Available
+            </p>
+            <p className="text-sm"
+               style={{ color: isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)' }}>
+              Start chatting to see intent analytics
+            </p>
+          </div>
+        </div>
+      );
+    }
+  };
+
+  const renderIntentAnalysisTable = () => {
+    console.log('📋 Rendering Intent Analysis Table');
+    console.log('📊 Intent Chart Data for Table:', intentChartData);
+    
+    if (intentChartData && intentChartData.length > 0) {
+      return (
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-opacity-20"
+                  style={{ borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
+                <th className="text-left py-3 px-4 font-semibold text-sm"
+                    style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
+                  Intent Type
+                </th>
+                <th className="text-right py-3 px-4 font-semibold text-sm"
+                    style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
+                  Total Queries
+                </th>
+                <th className="text-right py-3 px-4 font-semibold text-sm"
+                    style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
+                  Accuracy
+                </th>
+                <th className="text-right py-3 px-4 font-semibold text-sm"
+                    style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
+                  Avg Response
+                </th>
+                <th className="text-right py-3 px-4 font-semibold text-sm"
+                    style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
+                  24h Activity
+                </th>
+                <th className="text-right py-3 px-4 font-semibold text-sm"
+                    style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
+                  7d Activity
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {intentChartData.map((intent, index) => (
+                <tr key={index} 
+                    className="border-b border-opacity-10 hover:bg-opacity-50 transition-all duration-200"
+                    style={{ 
+                      borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.02)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}>
+                  <td className="py-3 px-4">
+                    <div className="flex items-center gap-3">
+                      <div 
+                        className="w-3 h-3 rounded-full"
+                        style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }}
+                      />
+                      <span className="font-medium"
+                            style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}
+                            title={intent.fullName}>
+                        {intent.fullName}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="text-right py-3 px-4 font-medium"
+                      style={{ color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)' }}>
+                    {intent.queries?.toLocaleString()}
+                  </td>
+                  <td className="text-right py-3 px-4">
+                    <span className={`px-2 py-1 rounded-lg text-sm font-medium ${
+                      intent.accuracy >= 80 
+                        ? 'bg-emerald-500/10 text-emerald-500'
+                        : intent.accuracy >= 60 
+                        ? 'bg-amber-500/10 text-amber-500'
+                        : 'bg-red-500/10 text-red-500'
+                    }`}>
+                      {intent.accuracy?.toFixed(1)}%
+                    </span>
+                  </td>
+                  <td className="text-right py-3 px-4 font-medium"
+                      style={{ color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)' }}>
+                    {intent.avgTime?.toFixed(0)}ms
+                  </td>
+                  <td className="text-right py-3 px-4">
+                    <span className="font-semibold text-emerald-500">
+                      {intent.recent24h || 0}
+                    </span>
+                  </td>
+                  <td className="text-right py-3 px-4">
+                    <span className="font-semibold text-blue-500">
+                      {intent.recent7d || 0}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    } else {
+      console.log('📋 Rendering Empty State for Intent Table');
+      return (
+        <div className="py-12 text-center">
+          <IconTarget size={48} className="mx-auto mb-4 opacity-30" 
+                     style={{ color: isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.3)' }} />
+          <p className="text-lg font-medium mb-2"
+             style={{ color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}>
+            No Intent Analysis Data
+          </p>
+          <p className="text-sm"
+             style={{ color: isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)' }}>
+            Detailed intent analytics will appear here once users start chatting
+          </p>
+        </div>
+      );
+    }
+  };
+
+  // ✅ EARLY RETURNS ONLY AFTER ALL HOOKS ARE DECLARED
+  // Loading state
   if (loading && !analyticsData) {
     return (
       <div className="min-h-screen flex items-center justify-center"
@@ -190,7 +519,7 @@ export default function Analytics() {
     );
   }
 
-  // ✅ Error state
+  // Error state
   if (error && !analyticsData) {
     return (
       <div className="min-h-screen flex items-center justify-center"
@@ -221,107 +550,13 @@ export default function Analytics() {
     );
   }
 
-  const { 
-    summary, 
-    intentAnalytics, 
-    hourlyDistribution, 
-    userDistribution, 
-    responseTimeStats,
-    dailyRegistrations,
-    userActivityByRole,
-    messageTypes,
-    sessionStats
-  } = analyticsData || {};
-
-  // ✅ Enhanced data preparation with proper cleaning and limits
-  const intentChartData = intentAnalytics?.slice(0, 8).map(item => {
-    let cleanIntentName = item.intent || 'Unknown';
-    
-    // Better intent name cleaning
-    const intentMap = {
-      'chat_general': 'General Chat',
-      'support_request': 'Support',
-      'data_analysis': 'Data Analysis',
-      'file_upload': 'File Upload',
-      'user_management': 'User Mgmt',
-      'system_info': 'System Info',
-      'greeting': 'Greetings',
-      'farewell': 'Farewell',
-      'help_request': 'Help Request',
-      'question_answering': 'Q&A'
-    };
-    
-    cleanIntentName = intentMap[cleanIntentName.toLowerCase()] || 
-                     cleanIntentName
-                       .replace(/_/g, ' ')
-                       .replace(/\b\w/g, l => l.toUpperCase())
-                       .replace(/Chat$/i, '')
-                       .replace(/Support$/i, 'Help')
-                       .trim();
-
-    return {
-      name: cleanIntentName.length > 12 ? cleanIntentName.substring(0, 12) + '...' : cleanIntentName,
-      fullName: cleanIntentName,
-      queries: item.totalQueries || 0,
-      accuracy: item.accuracy || 0,
-      avgTime: item.avgResponseTime || 0,
-      recent24h: item.recent24h || 0,
-      recent7d: item.recent7d || 0
-    };
-  }) || [
-    // ✅ MOCK DATA if no real data available
-    { name: 'General Chat', fullName: 'General Chat', queries: 245, accuracy: 89.2, avgTime: 120, recent24h: 15, recent7d: 67 },
-    { name: 'Support', fullName: 'Support Request', queries: 189, accuracy: 92.5, avgTime: 95, recent24h: 12, recent7d: 45 },
-    { name: 'Data Analysis', fullName: 'Data Analysis', queries: 156, accuracy: 87.1, avgTime: 180, recent24h: 8, recent7d: 34 },
-    { name: 'Help Request', fullName: 'Help Request', queries: 134, accuracy: 91.8, avgTime: 110, recent24h: 9, recent7d: 28 },
-    { name: 'Q&A', fullName: 'Question Answering', queries: 112, accuracy: 85.3, avgTime: 150, recent24h: 6, recent7d: 22 },
-    { name: 'File Upload', fullName: 'File Upload', queries: 89, accuracy: 94.2, avgTime: 85, recent24h: 4, recent7d: 18 },
-    { name: 'System Info', fullName: 'System Information', queries: 67, accuracy: 88.9, avgTime: 75, recent24h: 3, recent7d: 14 },
-    { name: 'Greetings', fullName: 'Greetings', queries: 45, accuracy: 96.1, avgTime: 45, recent24h: 2, recent7d: 9 }
-  ];
-
-  const hourlyChartData = Array.from({ length: 24 }, (_, hour) => {
-    const found = hourlyDistribution?.find(h => h.hour === hour);
-    return {
-      hour: `${hour.toString().padStart(2, '0')}:00`,
-      messages: found?.messageCount || 0,
-      users: found?.uniqueUsers || 0,
-      avgTime: found?.avgResponseTime || 0
-    };
-  });
-
-  const userRoleData = userDistribution?.map(role => ({
-    name: role._id?.charAt(0).toUpperCase() + role._id?.slice(1) || 'Unknown',
-    value: role.count,
-    recent24h: role.recent24h || 0,
-    recent7d: role.recent7d || 0
-  })) || [];
-
-  const registrationChartData = dailyRegistrations?.slice(-14).map(day => ({
-    date: new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    registrations: day.registrations,
-    dayOfWeek: day.dayOfWeek,
-    fullDate: day.date
-  })) || [];
-
-  const messageTypeData = messageTypes?.map(type => ({
-    name: type._id?.charAt(0).toUpperCase() + type._id?.slice(1) || 'Text',
-    value: type.count,
-    recent24h: type.recent24h || 0
-  })) || [];
-
-  const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16'];
-
   return (
     <div className="lg:flex min-h-screen"
          style={{ backgroundColor: isDark ? '#0a0a0a' : '#fafafa' }}>
       
-      {/* ✅ Mobile Sidebar
-      <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} /> */}
-      
-      {/* ✅ Main Content */}
+      {/* Main Content */}
       <div className="flex-1 lg:ml-0">
-        {/* ✅ SEAMLESS HEADER */}
+        {/* Header */}
         <div className="z-10 backdrop-blur-xl border-b"
              style={{ 
                backgroundColor: isDark ? 'rgba(10, 10, 10, 0.8)' : 'rgba(250, 250, 250, 0.8)',
@@ -332,18 +567,6 @@ export default function Analytics() {
               
               {/* Left Section */}
               <div className="flex items-center gap-4">
-                {/* ✅ Mobile Menu Button
-                <button
-                  onClick={() => setIsSidebarOpen(true)}
-                  className="lg:hidden p-2 rounded-lg transition-colors"
-                  style={{ 
-                    color: isDark ? '#ffffff' : '#000000',
-                    backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
-                  }}
-                >
-                  <IconMenu2 size={20} />
-                </button> */}
-
                 <button
                   onClick={() => navigate('/admin')}
                   className="flex items-center gap-2 text-sm font-medium transition-all hover:scale-105 px-3 py-2 rounded-lg"
@@ -424,7 +647,7 @@ export default function Analytics() {
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 sm:space-y-8">
 
-          {/* ✅ KEY METRICS - SEAMLESS GRID */}
+          {/* Key Metrics */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
             <StatCard
               title="Total Users"
@@ -455,10 +678,10 @@ export default function Analytics() {
             />
           </div>
 
-          {/* ✅ CHARTS ROW 1 - FIXED TEXT VISIBILITY */}
+          {/* Charts Row 1 */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 sm:gap-8">
             
-            {/* Enhanced User Registrations */}
+            {/* User Registrations */}
             <ChartCard title="User Registrations (Last 14 Days)" icon={IconUserPlus}>
               <ResponsiveContainer width="100%" height={320}>
                 <ComposedChart data={registrationChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
@@ -517,65 +740,16 @@ export default function Analytics() {
               </ResponsiveContainer>
             </ChartCard>
 
-            {/* ✅ FIXED Intent Distribution Chart */}
+            {/* Intent Distribution Chart */}
             <ChartCard title="Intent Distribution (Top 8)" icon={IconTarget}>
-              <ResponsiveContainer width="100%" height={320}>
-                <BarChart data={intentChartData} margin={{ top: 20, right: 30, left: 20, bottom: 80 }}>
-                  <defs>
-                    <linearGradient id="intentGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.3}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'} />
-                  <XAxis 
-                    dataKey="name" 
-                    tick={{ 
-                      fontSize: 10, 
-                      fill: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)',
-                      fontWeight: 500
-                    }}
-                    interval={0}
-                    angle={-45}
-                    textAnchor="end"
-                    height={80}
-                    axisLine={{ stroke: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)' }}
-                  />
-                  <YAxis 
-                    tick={{ 
-                      fontSize: 12, 
-                      fill: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)',
-                      fontWeight: 500
-                    }} 
-                    axisLine={{ stroke: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)' }} 
-                  />
-                  <Tooltip 
-                    formatter={(value, name, props) => [value.toLocaleString(), 'Queries']}
-                    labelFormatter={(label, payload) => {
-                      if (payload && payload[0]) {
-                        return payload[0].payload.fullName;
-                      }
-                      return label;
-                    }}
-                    contentStyle={{ 
-                      backgroundColor: isDark ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.9)',
-                      border: 'none',
-                      borderRadius: '12px',
-                      color: isDark ? '#ffffff' : '#000000',
-                      backdropFilter: 'blur(10px)',
-                      boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.3)'
-                    }}
-                  />
-                  <Bar dataKey="queries" fill="url(#intentGradient)" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              {renderIntentDistributionChart()}
             </ChartCard>
           </div>
 
-          {/* ✅ CHARTS ROW 2 - FIXED TEXT VISIBILITY */}
+          {/* Charts Row 2 */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 sm:gap-8">
             
-            {/* Enhanced 24h Activity */}
+            {/* 24h Activity */}
             <ChartCard title="24-Hour Activity Pattern" icon={IconActivity}>
               <ResponsiveContainer width="100%" height={320}>
                 <AreaChart data={hourlyChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
@@ -609,10 +783,13 @@ export default function Analytics() {
                     axisLine={{ stroke: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)' }} 
                   />
                   <Tooltip 
-                    formatter={(value, name) => [
-                      value.toLocaleString(), 
-                      name === 'messages' ? 'Messages' : 'Active Users'
-                    ]}
+                    formatter={(value) => [value, 'Activity']}
+                    labelFormatter={(label, payload) => {
+                      if (payload && payload[0]) {
+                        return `${payload[0].payload.hour}:00`;
+                      }
+                      return label;
+                    }}
                     contentStyle={{ 
                       backgroundColor: isDark ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.9)',
                       border: 'none',
@@ -624,56 +801,58 @@ export default function Analytics() {
                   />
                   <Area 
                     type="monotone" 
-                    dataKey="messages" 
+                    dataKey="userActivity" 
                     stroke="#8B5CF6" 
                     fill="url(#messagesGradient)"
-                    strokeWidth={2}
-                    name="messages"
+                    strokeWidth={3}
                   />
                   <Area 
                     type="monotone" 
-                    dataKey="users" 
+                    dataKey="messageActivity" 
                     stroke="#F59E0B" 
                     fill="url(#usersGradient)"
-                    strokeWidth={2}
-                    name="users"
+                    strokeWidth={3}
                   />
                 </AreaChart>
               </ResponsiveContainer>
             </ChartCard>
 
-            {/* Enhanced Message Types */}
-            <ChartCard title="Message Types Distribution" icon={IconMessageCircle}>
+            {/* User Activity by Role */}
+            <ChartCard title="User Activity by Role (Last 7 Days)" icon={IconUsers}>
               <ResponsiveContainer width="100%" height={320}>
-                <PieChart>
-                  <Pie
-                    data={messageTypeData.length > 0 ? messageTypeData : [
-                      { name: 'Text Messages', value: 450 },
-                      { name: 'Image Uploads', value: 120 },
-                      { name: 'Document Queries', value: 89 },
-                      { name: 'Voice Messages', value: 34 }
-                    ]}
-                    dataKey="value"
-                    nameKey="name"
-                    outerRadius={100}
-                    label={({ name, percent, value }) => `${name}: ${value} (${(percent * 100).toFixed(0)}%)`}
-                    labelStyle={{ 
-                      fontSize: '11px', 
-                      fontWeight: '600',
-                      fill: isDark ? '#ffffff' : '#000000'
-                    }}
-                  >
-                    {(messageTypeData.length > 0 ? messageTypeData : [
-                      { name: 'Text Messages', value: 450 },
-                      { name: 'Image Uploads', value: 120 },
-                      { name: 'Document Queries', value: 89 },
-                      { name: 'Voice Messages', value: 34 }
-                    ]).map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                    ))}
-                  </Pie>
+                <ComposedChart data={userActivityChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <defs>
+                    <linearGradient id="adminGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.3}/>
+                    </linearGradient>
+                    <linearGradient id="userGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10B981" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="#10B981" stopOpacity={0.3}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'} />
+                  <XAxis 
+                    dataKey="date" 
+                    tick={{ fontSize: 11, fill: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)' }}
+                    axisLine={{ stroke: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)' }}
+                    interval={0}
+                    angle={-45}
+                    textAnchor="end"
+                    height={80}
+                  />
+                  <YAxis 
+                    tick={{ fontSize: 12, fill: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)' }} 
+                    axisLine={{ stroke: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)' }} 
+                  />
                   <Tooltip 
-                    formatter={(value) => [value.toLocaleString(), 'Messages']}
+                    formatter={(value) => [value, 'Activity']}
+                    labelFormatter={(label, payload) => {
+                      if (payload && payload[0]) {
+                        return `${payload[0].payload.date}`;
+                      }
+                      return label;
+                    }}
                     contentStyle={{ 
                       backgroundColor: isDark ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.9)',
                       border: 'none',
@@ -683,295 +862,18 @@ export default function Analytics() {
                       boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.3)'
                     }}
                   />
-                </PieChart>
+                  <Bar dataKey="adminActivity" fill="url(#adminGradient)" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="userActivity" fill="url(#userGradient)" radius={[6, 6, 0, 0]} />
+                </ComposedChart>
               </ResponsiveContainer>
             </ChartCard>
           </div>
 
-          {/* ✅ USER ROLES & PERFORMANCE METRICS - SEAMLESS */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
-            
-            {/* User Roles */}
-            <ChartCard title="User Roles Distribution" icon={IconUsers}>
-              <ResponsiveContainer width="100%" height={280}>
-                <PieChart>
-                  <Pie
-                    data={userRoleData}
-                    dataKey="value"
-                    nameKey="name"
-                    outerRadius={90}
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    labelStyle={{ 
-                      fontSize: '11px', 
-                      fontWeight: 'medium',
-                      fill: isDark ? '#ffffff' : '#000000'
-                    }}
-                  >
-                    {userRoleData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    formatter={(value) => [value.toLocaleString(), 'Users']}
-                    contentStyle={{ 
-                      backgroundColor: isDark ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.9)',
-                      border: 'none',
-                      borderRadius: '12px',
-                      color: isDark ? '#ffffff' : '#000000',
-                      backdropFilter: 'blur(10px)',
-                      boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.3)'
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </ChartCard>
-
-            {/* Performance Metrics */}
-            <div className="lg:col-span-2">
-              <ChartCard title="Performance Overview" icon={IconCpu}>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="text-center p-4 rounded-xl transition-all hover:scale-105"
-                       style={{ 
-                         backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                         border: `1px solid rgba(16, 185, 129, 0.2)`
-                       }}>
-                    <div className="flex items-center justify-center gap-2 mb-2">
-                      <IconClock size={16} style={{ color: '#10b981' }} />
-                      <span className="text-xs font-medium text-emerald-500">
-                        Avg Session
-                      </span>
-                    </div>
-                    <p className="text-xl font-bold"
-                       style={{ color: isDark ? '#ffffff' : '#000000' }}>
-                      {Math.round(sessionStats?.avgDuration || 0)}min
-                    </p>
-                  </div>
-                  
-                  <div className="text-center p-4 rounded-xl transition-all hover:scale-105"
-                       style={{ 
-                         backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                         border: `1px solid rgba(59, 130, 246, 0.2)`
-                       }}>
-                    <div className="flex items-center justify-center gap-2 mb-2">
-                      <IconActivity size={16} style={{ color: '#3b82f6' }} />
-                      <span className="text-xs font-medium text-blue-500">
-                        Min Response
-                      </span>
-                    </div>
-                    <p className="text-xl font-bold"
-                       style={{ color: isDark ? '#ffffff' : '#000000' }}>
-                      {Math.round(responseTimeStats?.minResponseTime || 0)}ms
-                    </p>
-                  </div>
-                  
-                  <div className="text-center p-4 rounded-xl transition-all hover:scale-105"
-                       style={{ 
-                         backgroundColor: 'rgba(139, 92, 246, 0.1)',
-                         border: `1px solid rgba(139, 92, 246, 0.2)`
-                       }}>
-                    <div className="flex items-center justify-center gap-2 mb-2">
-                      <IconCpu size={16} style={{ color: '#8b5cf6' }} />
-                      <span className="text-xs font-medium text-purple-500">
-                        Max Response
-                      </span>
-                    </div>
-                    <p className="text-xl font-bold"
-                       style={{ color: isDark ? '#ffffff' : '#000000' }}>
-                      {Math.round(responseTimeStats?.maxResponseTime || 0)}ms
-                    </p>
-                  </div>
-                  
-                  <div className="text-center p-4 rounded-xl transition-all hover:scale-105"
-                       style={{ 
-                         backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                         border: `1px solid rgba(245, 158, 11, 0.2)`
-                       }}>
-                    <div className="flex items-center justify-center gap-2 mb-2">
-                      <IconDatabase size={16} style={{ color: '#f59e0b' }} />
-                      <span className="text-xs font-medium text-amber-500">
-                        Total Requests
-                      </span>
-                    </div>
-                    <p className="text-xl font-bold"
-                       style={{ color: isDark ? '#ffffff' : '#000000' }}>
-                      {(responseTimeStats?.totalRequests || 0).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-              </ChartCard>
-            </div>
-          </div>
-
-          {/* ✅ DETAILED TABLES - FIXED TEXT VISIBILITY */}
-          <div className="space-y-6 sm:space-y-8">
-            
-            {/* Enhanced Intent Analysis Table */}
+          {/* Detailed Intent Analysis */}
+          <div className="grid grid-cols-1 gap-6 sm:gap-8">
             <ChartCard title="Detailed Intent Analysis" icon={IconTarget}>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-opacity-20"
-                        style={{ borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
-                      <th className="text-left py-3 px-4 font-semibold text-sm"
-                          style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
-                        Intent Type
-                      </th>
-                      <th className="text-right py-3 px-4 font-semibold text-sm"
-                          style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
-                        Total Queries
-                      </th>
-                      <th className="text-right py-3 px-4 font-semibold text-sm"
-                          style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
-                        Accuracy
-                      </th>
-                      <th className="text-right py-3 px-4 font-semibold text-sm"
-                          style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
-                        Avg Response
-                      </th>
-                      <th className="text-right py-3 px-4 font-semibold text-sm"
-                          style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
-                        24h Activity
-                      </th>
-                      <th className="text-right py-3 px-4 font-semibold text-sm"
-                          style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
-                        7d Activity
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {intentChartData.map((intent, index) => (
-                      <tr key={index} 
-                          className="border-b border-opacity-10 hover:bg-opacity-50 transition-all duration-200"
-                          style={{ 
-                            borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.02)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                          }}>
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-3">
-                            <div 
-                              className="w-3 h-3 rounded-full"
-                              style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }}
-                            />
-                            <span className="font-medium"
-                                  style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}
-                                  title={intent.fullName}>
-                              {intent.fullName}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="text-right py-3 px-4 font-medium"
-                            style={{ color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)' }}>
-                          {intent.queries?.toLocaleString()}
-                        </td>
-                        <td className="text-right py-3 px-4">
-                          <span className={`px-2 py-1 rounded-lg text-sm font-medium ${
-                            intent.accuracy >= 80 
-                              ? 'bg-emerald-500/10 text-emerald-500'
-                              : intent.accuracy >= 60 
-                              ? 'bg-amber-500/10 text-amber-500'
-                              : 'bg-red-500/10 text-red-500'
-                          }`}>
-                            {intent.accuracy?.toFixed(1)}%
-                          </span>
-                        </td>
-                        <td className="text-right py-3 px-4 font-medium"
-                            style={{ color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)' }}>
-                          {intent.avgTime?.toFixed(0)}ms
-                        </td>
-                        <td className="text-right py-3 px-4">
-                          <span className="font-semibold text-emerald-500">
-                            {intent.recent24h || 0}
-                          </span>
-                        </td>
-                        <td className="text-right py-3 px-4">
-                          <span className="font-semibold text-blue-500">
-                            {intent.recent7d || 0}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {renderIntentAnalysisTable()}
             </ChartCard>
-
-            {/* User Activity by Role Table */}
-            {userActivityByRole && userActivityByRole.length > 0 && (
-              <ChartCard title="User Activity by Role" icon={IconUsers}>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-opacity-20"
-                          style={{ borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
-                        <th className="text-left py-3 px-4 font-semibold text-sm"
-                            style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
-                          Role
-                        </th>
-                        <th className="text-right py-3 px-4 font-semibold text-sm"
-                            style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
-                          Total Users
-                        </th>
-                        <th className="text-right py-3 px-4 font-semibold text-sm"
-                            style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
-                          Avg Sessions
-                        </th>
-                        <th className="text-right py-3 px-4 font-semibold text-sm"
-                            style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
-                          Avg Messages
-                        </th>
-                        <th className="text-right py-3 px-4 font-semibold text-sm"
-                            style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
-                          System Days
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {userActivityByRole.map((roleData, index) => (
-                        <tr key={index} 
-                            className="border-b border-opacity-10 hover:bg-opacity-50 transition-all duration-200"
-                            style={{ 
-                              borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.02)';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.backgroundColor = 'transparent';
-                            }}>
-                          <td className="py-3 px-4">
-                            <span className="font-medium capitalize"
-                                  style={{ color: isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)' }}>
-                              {roleData._id || 'Unknown'}
-                            </span>
-                          </td>
-                          <td className="text-right py-3 px-4 font-medium"
-                              style={{ color: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)' }}>
-                            {roleData.totalUsers}
-                          </td>
-                          <td className="text-right py-3 px-4"
-                              style={{ color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}>
-                            {roleData.avgSessions?.toFixed(1) || '0'}
-                          </td>
-                          <td className="text-right py-3 px-4"
-                              style={{ color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}>
-                            {roleData.avgMessages?.toFixed(1) || '0'}
-                          </td>
-                          <td className="text-right py-3 px-4"
-                              style={{ color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}>
-                            {roleData.avgTimeOnSystem?.toFixed(0) || '0'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </ChartCard>
-            )}
           </div>
         </div>
       </div>
